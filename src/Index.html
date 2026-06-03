@@ -1,0 +1,4695 @@
+<!DOCTYPE html>
+<html class="app-booting">
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <?!= include_('Wallpaper'); ?>
+
+  <style>
+    /* ─── Design tokens ─────────────────────────────────────────── */
+    :root {
+      color-scheme: dark;
+
+      --bg:            #0b1120;
+      --panel:         #19253d;
+      --panel-strong:  #212f4b;
+      --border:        #3d4f72;
+      --border-strong: #5c739e;
+      --text:          #f8fafc;
+      --text-secondary:#d7e1f3;
+      --text-muted:    #9fb1cf;
+      --placeholder:   #8ea0be;
+      --accent:        #a855f7;
+      --danger:        #ef4444;
+      --success:       #4ade80;
+      --shadow:        0 18px 40px rgba(2,6,23,.28);
+      --safe-top:      env(safe-area-inset-top,  0px);
+      --safe-bottom:   env(safe-area-inset-bottom, 0px);
+
+      --font-body:  16px;
+      --font-label: 14px;
+      --font-title: 20px;
+      --font-meta:  15px;
+
+      --radius-card:    18px;
+      --radius-control: 16px;
+      --radius-pill:    999px;
+
+      --input-height:      52px;
+      --textarea-height:  120px;
+      --button-height:     52px;
+      --nav-button-height: 56px;
+      --nav-height:        84px;
+      --keyboard-offset:   0px;
+    }
+
+    /* ─── Reset ─────────────────────────────────────────────────── */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: rgba(168,85,247,.18);
+    }
+
+    html {
+      width: 100%; max-width: 100%; min-height: 100%;
+      overflow-x: hidden;
+      -webkit-text-size-adjust: 100%;
+      background: #070b16;
+    }
+
+    html::before,
+    html::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      transition: opacity 700ms ease, filter 700ms ease;
+    }
+
+    html::before {
+      z-index: -2;
+      background-image: var(--app-wallpaper);
+      background-position: center 24%;
+      background-size: cover;
+      background-repeat: no-repeat;
+      filter: brightness(1.3);
+      opacity: 1;
+    }
+
+    html::after {
+      z-index: -1;
+      background-image:
+        linear-gradient(180deg, rgba(6,9,18,.16) 0%, rgba(7,10,18,.28) 48%, rgba(4,6,12,.44) 100%),
+        radial-gradient(circle at top, rgba(168,85,247,.14), transparent 34%);
+      opacity: 1;
+    }
+
+    html.inventory-ready::before {
+      filter: brightness(1.15);
+    }
+
+    html.inventory-ready::after {
+      opacity: 1;
+      background-image:
+        linear-gradient(180deg, rgba(6,9,18,.34) 0%, rgba(7,10,18,.48) 48%, rgba(4,6,12,.66) 100%),
+        radial-gradient(circle at top, rgba(168,85,247,.15), transparent 34%);
+    }
+
+    body {
+      width: 100%; max-width: 100%; min-width: 0; min-height: 100vh;
+      margin: 0; overflow-x: hidden;
+      background: transparent;
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: var(--font-body);
+      line-height: 1.45;
+      -webkit-text-size-adjust: 100%;
+      position: relative;
+    }
+
+    body.app-modal-open { overflow: hidden; }
+
+    .app-header,
+    main,
+    .bottom-nav {
+      transition: opacity 520ms ease, transform 520ms ease;
+    }
+
+    html.app-booting .app-header,
+    html.app-booting main,
+    html.app-booting .bottom-nav {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+
+    html.inventory-ready .app-header,
+    html.inventory-ready main,
+    html.inventory-ready .bottom-nav {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    button, input, select, textarea {
+      font: inherit; max-width: 100%;
+      touch-action: manipulation;
+    }
+
+    button, .bottom-nav, .dashboard-stat, .inventory-card, .result-card, .group-toggle {
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    button:focus-visible, input:focus-visible,
+    select:focus-visible, textarea:focus-visible,
+    .inventory-card:focus-visible, .result-card:focus-visible {
+      outline: 3px solid rgba(203,155,255,.5);
+      outline-offset: 2px;
+    }
+
+    .app, .app-shell, .main, .container,
+    .panel, .card, .bottom-nav, .inventory-card, .result-card {
+      width: 100%; max-width: 100%; min-width: 0;
+    }
+
+    /* ─── Header ─────────────────────────────────────────────────── */
+    header {
+      padding: calc(14px + var(--safe-top)) 14px 10px;
+      background: rgba(10,16,31,.94);
+      border-bottom: 1px solid rgba(92,115,158,.35);
+    }
+
+    .header-shell { display: flex; flex-direction: column; gap: 4px; }
+
+    h1, .app-title {
+      margin: 0;
+      font-size: 28px; font-weight: 900;
+      line-height: 1.1; letter-spacing: -.01em;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--text-muted);
+      font-size: 12px; line-height: 1.2;
+    }
+
+    .app-header {
+      position: sticky;
+      top: 0;
+      z-index: 22;
+      padding: 10px 14px 8px;
+      background: rgba(10,16,31,.96);
+      border-bottom: 1px solid rgba(92,115,158,.26);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+
+    .app-header-title {
+      display: none;
+      margin: 0 0 8px;
+      font-size: 24px;
+      font-weight: 900;
+      line-height: 1.05;
+      color: var(--text);
+    }
+
+    .app-header.inventory-mode .app-header-title {
+      display: block;
+    }
+
+    .search-bar-row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .mode-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .mode-pill {
+      flex: 1;
+      min-height: 36px;
+      padding: 6px 10px;
+      border: 1px solid rgba(94,118,164,.5);
+      border-radius: var(--radius-pill);
+      background: #25324c;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 800;
+      line-height: 1;
+      cursor: pointer;
+      transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+    }
+
+    .mode-pill.active {
+      background: linear-gradient(135deg, #9333ea, #a855f7 58%, #c084fc);
+      color: #fff;
+      border-color: transparent;
+      box-shadow: 0 4px 14px rgba(168,85,247,.22);
+    }
+
+    .header-reload {
+      width: 44px;
+      min-width: 44px;
+      height: 44px;
+      min-height: 44px;
+      padding: 0;
+      border-radius: var(--radius-control);
+      background: rgba(37,50,76,.8);
+      border: 1px solid rgba(94,118,164,.4);
+      color: var(--text-muted);
+      font-size: 18px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+
+    #mainStatus {
+      margin: 0 0 6px;
+      padding: 2px 0;
+      font-size: 13px;
+      color: var(--text-muted);
+      min-height: 18px;
+    }
+
+    .mode-btn {
+      min-height: 42px;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .mode-btn.active {
+      background: linear-gradient(135deg, #9333ea, #a855f7 58%, #c084fc);
+      color: #fff;
+      box-shadow: 0 6px 18px rgba(168,85,247,.22);
+    }
+
+    /* ─── Layout ─────────────────────────────────────────────────── */
+    main {
+      width: 100%; max-width: none;
+      padding: 12px 14px calc(var(--nav-height) + var(--safe-bottom) + 28px);
+    }
+
+    .section { display: none; }
+    .section.active { display: block; }
+
+    .section-stack { display: grid; gap: 12px; }
+
+    /* ─── Cards ──────────────────────────────────────────────────── */
+    .card {
+      background: linear-gradient(180deg, rgba(28,40,66,.98), rgba(20,29,49,.99));
+      border: 1px solid rgba(92,115,158,.5);
+      border-radius: var(--radius-card);
+      padding: 14px;
+      box-shadow: var(--shadow);
+    }
+
+    .card.featured {
+      background:
+        linear-gradient(180deg, rgba(35,49,79,.99), rgba(23,31,52,.99)),
+        linear-gradient(135deg, rgba(168,85,247,.14), transparent 45%);
+    }
+
+    .section-heading {
+      margin: 0;
+      font-size: 22px; font-weight: 800; line-height: 1.2;
+    }
+
+    /* ─── Forms ──────────────────────────────────────────────────── */
+    label {
+      display: block; margin: 0 0 6px;
+      color: var(--text-secondary);
+      font-size: 15px; font-weight: 700; letter-spacing: .01em;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .sr-only-field {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .field { display: grid; gap: 6px; min-width: 0; }
+
+    .field + .field,
+    .row  + .field,
+    .field + .row { margin-top: 14px; }
+
+    .row, .details-grid, .item-grid, .form-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px; margin-top: 14px;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      min-height: var(--input-height);
+      padding: 14px 15px;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-control);
+      background: rgba(9,14,28,.94);
+      color: var(--text);
+      font-size: 18px; line-height: 1.35;
+    }
+
+    input::placeholder, textarea::placeholder {
+      color: var(--placeholder); opacity: 1; font-size: 17px;
+    }
+
+    textarea { min-height: var(--textarea-height); resize: vertical; }
+
+    button {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 100%; min-height: var(--button-height);
+      padding: 12px 14px;
+      border: 1px solid transparent; border-radius: 16px;
+      background: var(--panel-strong);
+      color: var(--text);
+      font-size: 18px; font-weight: 800; line-height: 1.1;
+      cursor: pointer;
+    }
+
+    button.primary {
+      background: linear-gradient(135deg, #9333ea, #a855f7 58%, #c084fc);
+      color: #fff;
+    }
+
+    button.secondary {
+      background: #25324c;
+      border-color: rgba(94,118,164,.5);
+    }
+
+    button.danger {
+      background: #6f1d1b;
+      border-color: rgba(248,113,113,.26);
+    }
+
+    button:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* ─── Status ─────────────────────────────────────────────────── */
+    .status {
+      margin-top: 10px;
+      color: var(--text-secondary);
+      font-size: 15px; line-height: 1.45;
+    }
+
+    .status.centered {
+      text-align: center; padding: 14px;
+      border-radius: 16px;
+      background: rgba(17,25,44,.62);
+      border: 1px dashed rgba(94,118,164,.38);
+    }
+
+    .error   { color: #fda4af; }
+    .success { color: #86efac; }
+
+    /* ─── Inventory rows / swipe ─────────────────────────────────── */
+    .inventory-row {
+      position: relative;
+      margin-bottom: 7px;
+      border-radius: 18px;
+      overflow: hidden;
+    }
+
+    /* The card slides left via JS inline transform (live drag) */
+    .inventory-card {
+      position: relative; z-index: 2; margin: 0;
+      cursor: pointer;
+      will-change: transform;
+      transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+      /* transform controlled by JS; don't add a transition here so drag feels immediate */
+      min-height: 0; padding: 10px 12px;
+      background: linear-gradient(180deg, rgba(14,21,36,.99), rgba(17,25,44,.99));
+      border: 1px solid rgba(70,86,119,.8);
+      border-radius: 18px;
+    }
+
+    /* snap-back / snap-open are added by JS */
+    .inventory-card.snap {
+      transition: transform 220ms cubic-bezier(.22,1,.36,1),
+                  border-color 160ms ease, background 160ms ease;
+    }
+
+    .inventory-card.selected {
+      border-color: rgba(203,155,255,.88);
+      background:
+        linear-gradient(180deg, rgba(57,34,91,.98), rgba(39,28,65,.98)),
+        linear-gradient(135deg, rgba(192,132,252,.18), transparent 48%);
+      box-shadow: 0 0 0 3px rgba(192,132,252,.18);
+    }
+
+    /* delete action revealed behind card */
+    .inventory-delete-action {
+      position: absolute;
+      top: 0; right: 0; bottom: 0;
+      width: 30%; min-width: 168px; max-width: 240px; min-height: 0 !important; height: 100%;
+      padding: 0 8px;
+      border-radius: 0;
+      background: linear-gradient(180deg, #991b1b, #7f1d1d);
+      color: #fff; z-index: 1;
+      font-size: 16px; font-weight: 800;
+      display: flex; align-items: center; justify-content: center;
+      border: none;
+      transition: background 160ms ease;
+    }
+
+    .inventory-delete-action.deleting {
+      background: linear-gradient(180deg, #7f1d1d, #450a0a);
+      opacity: .9;
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .dashboard-stat {
+      padding: 14px;
+      border: 1px solid rgba(94,118,164,.48);
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(35,49,79,.92), rgba(17,25,44,.98));
+      cursor: pointer;
+      text-align: left;
+      width: 100%;
+    }
+
+    .dashboard-value {
+      font-size: 28px;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .dashboard-label {
+      margin-top: 6px;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .resource-breakout {
+      grid-column: 1 / -1;
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid rgba(94,118,164,.44);
+      border-radius: 18px;
+      background: rgba(9,14,28,.82);
+    }
+
+    .resource-lines {
+      display: grid;
+      gap: 8px;
+    }
+
+    .resource-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--text-secondary);
+      font-weight: 750;
+    }
+
+    .resource-pay {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: end;
+    }
+
+    .resource-pay button {
+      width: auto;
+      min-width: 104px;
+    }
+
+    .resource-undo {
+      display: grid;
+      gap: 8px;
+      padding-top: 4px;
+    }
+
+    .resource-ledger {
+      display: grid;
+      gap: 6px;
+      padding-top: 2px;
+    }
+
+    .resource-ledger-title {
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 850;
+    }
+
+    .resource-ledger-row {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 8px;
+      align-items: center;
+      min-height: 34px;
+      padding: 7px 9px;
+      border: 1px solid rgba(70,86,119,.44);
+      border-radius: 12px;
+      background: rgba(9,14,28,.72);
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
+    .resource-ledger-delta {
+      font-weight: 900;
+      color: var(--success);
+    }
+
+    .resource-ledger-delta.negative {
+      color: #fca5a5;
+    }
+
+    .resource-ledger-date {
+      color: var(--text-muted);
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .inventory-group {
+      margin-bottom: 10px;
+      border: 1px solid rgba(70,86,119,.8);
+      border-radius: 18px;
+      overflow: hidden;
+      background: rgba(14,21,36,.72);
+    }
+
+    .group-toggle {
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 62px;
+      border-radius: 0;
+      background: rgba(33,47,75,.94);
+      border: 0;
+    }
+
+    .group-count {
+      color: var(--text-secondary);
+      font-size: 15px;
+    }
+
+    .group-list {
+      display: grid;
+      gap: 1px;
+      padding: 6px;
+    }
+
+    .ledger-item {
+      min-height: 58px;
+      padding: 12px 14px;
+      border: 1px solid rgba(70,86,119,.54);
+      border-radius: 14px;
+      background: rgba(9,14,28,.9);
+      text-align: left;
+      justify-content: flex-start;
+    }
+
+    .group-list .inventory-row {
+      margin-bottom: 6px;
+    }
+
+    .ledger-item-name {
+      font-size: 17px;
+      font-weight: 850;
+    }
+
+    .description-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    /* ─── Result cards ───────────────────────────────────────────── */
+    .result-card {
+      position: relative; z-index: 2; margin: 0; cursor: pointer;
+      transition: transform 160ms ease, border-color 160ms ease,
+                  background 160ms ease, box-shadow 160ms ease;
+      min-height: 72px; padding: 14px;
+      background: linear-gradient(180deg, rgba(19,29,50,.99), rgba(22,33,55,.99));
+      border: 1px solid rgba(70,86,119,.8);
+      border-radius: 18px;
+    }
+
+    .result-card.selected {
+      border-color: rgba(203,155,255,.88);
+      background:
+        linear-gradient(180deg, rgba(57,34,91,.98), rgba(39,28,65,.98)),
+        linear-gradient(135deg, rgba(192,132,252,.18), transparent 48%);
+      box-shadow: 0 0 0 3px rgba(192,132,252,.18);
+    }
+
+    /* ─── Item typography ────────────────────────────────────────── */
+    .item-title {
+      margin: 0; font-size: 19px; font-weight: 900;
+      line-height: 1.16; color: var(--text);
+    }
+
+    .item-meta {
+      margin-top: 3px; color: var(--text-secondary);
+      font-size: 15px; line-height: 1.25;
+    }
+
+    /* ─── Pills ──────────────────────────────────────────────────── */
+    .pill {
+      display: inline-flex; align-items: center;
+      min-height: 30px; padding: 6px 10px;
+      border: 1px solid rgba(94,118,164,.55);
+      border-radius: var(--radius-pill);
+      background: rgba(8,13,26,.92);
+      color: var(--text-secondary);
+      font-size: 14px; line-height: 1; white-space: nowrap;
+    }
+
+    /* ─── Search results list ────────────────────────────────────── */
+    .results-list {
+      display: grid; gap: 8px;
+      max-height: 40vh; overflow-y: auto;
+      margin-top: 10px; padding-right: 2px;
+    }
+
+    /* ─── Add flow: selected-item card ──────────────────────────── */
+    .selected-item-card { display: none; margin-top: 12px; }
+    .selected-item-card.active { display: block; }
+
+    .selected-item-actions { display: grid; gap: 10px; margin-top: 12px; }
+
+    /* ─── Quick edit ─────────────────────────────────────────────── */
+    .quick-editor { display: none; }
+    .quick-editor.active { display: block; }
+
+    .quick-summary {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid rgba(94,118,164,.45);
+      border-radius: 16px;
+      background: rgba(8,13,26,.7);
+    }
+
+    .quick-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .quick-actions .primary,
+    .quick-actions .wide {
+      grid-column: 1 / -1;
+    }
+
+    .quick-size-field { display: none; }
+    .quick-size-field.active { display: grid; }
+
+    .quick-add-hidden { display: block; }
+    .add-details-card.quick-add-mode .quick-add-hidden { display: none; }
+    .add-details-card.quick-add-mode .item-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .custom-actions {
+      margin-top: 10px;
+    }
+
+    .add-details-card.custom-mode .custom-name-field {
+      position: static;
+      width: 100%;
+      height: auto;
+      padding: 0;
+      margin: 0;
+      overflow: visible;
+      clip: auto;
+      white-space: normal;
+      border: 0;
+    }
+
+    .description-text {
+      white-space: pre-wrap;
+      color: var(--text-secondary);
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    .notes-status-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 8px 12px;
+      margin-bottom: 10px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    .notes-editor {
+      width: 100%;
+      min-height: 72px;
+      max-height: 140px;
+      resize: none;
+      line-height: 1.5;
+      padding: 10px 52px 10px 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .notes-sheet-body {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 0;
+    }
+
+    .notes-editor:focus,
+    .notes-editor:focus-visible {
+      outline: none;
+      box-shadow: none;
+    }
+
+    .notes-list {
+      flex: 1;
+      display: grid;
+      align-content: end;
+      gap: 10px;
+      padding-bottom: 8px;
+      overflow-y: auto;
+      min-height: 0;
+    }
+
+    .notes-note {
+      position: relative;
+      overflow: hidden;
+      border-radius: 16px;
+      background: rgb(24, 36, 58);
+      border: 1px solid rgba(92,115,158,.32);
+      padding: 12px 14px;
+      max-width: min(100%, 720px);
+    }
+
+    .notes-note-row {
+      position: relative;
+      overflow: hidden;
+      border-radius: 16px;
+    }
+
+    .notes-note-card {
+      position: relative;
+      z-index: 2;
+      will-change: transform;
+      transition: border-color 160ms ease, background 160ms ease;
+    }
+
+    .notes-note-card.snap {
+      transition: transform 220ms cubic-bezier(.22,1,.36,1),
+                  border-color 160ms ease, background 160ms ease;
+    }
+
+    .notes-edit-action,
+    .notes-delete-action {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 220px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 14px;
+      border: 0;
+      color: #fff;
+      font-weight: 800;
+      font-size: 16px;
+      white-space: nowrap;
+      z-index: 1;
+      border-radius: 0;
+      opacity: 0;
+      will-change: transform, opacity;
+      transition: transform 200ms cubic-bezier(.22,1,.36,1), opacity 180ms ease;
+    }
+
+    .notes-edit-action {
+      left: 0;
+      background: linear-gradient(180deg, #2563eb, #1d4ed8);
+      transform: translateX(-18px) scale(.96);
+    }
+
+    .notes-delete-action {
+      right: 0;
+      background: linear-gradient(180deg, #991b1b, #7f1d1d);
+      transform: translateX(18px) scale(.96);
+    }
+
+    .notes-note.pending {
+      opacity: .72;
+    }
+
+    .notes-note.editing {
+      border-color: rgba(96, 165, 250, .9);
+      box-shadow: 0 0 0 2px rgba(96, 165, 250, .24);
+    }
+
+    .notes-note-meta {
+      margin-bottom: 8px;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .notes-note-body {
+      white-space: pre-wrap;
+      color: var(--text-secondary);
+      line-height: 1.45;
+    }
+
+    .notes-composer {
+      position: relative;
+      border-top: 1px solid rgba(92,115,158,.22);
+      padding-top: 6px;
+    }
+
+
+    .notes-sheet-actions {
+      padding-bottom: calc(12px + var(--safe-bottom) + var(--keyboard-offset));
+    }
+
+    .notes-clear {
+      position: absolute;
+      top: 10px;
+      right: 0;
+      width: 38px;
+      min-width: 38px;
+      height: 38px;
+      min-height: 38px;
+      padding: 0;
+      border-radius: 999px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(37,50,76,.92);
+      border: 1px solid rgba(94,118,164,.55);
+      color: var(--text-secondary);
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .notes-clear.visible {
+      display: inline-flex;
+    }
+
+    .notes-action-row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+
+    /* ─── Mobile sheet (full-screen edit panel) ──────────────────── */
+    .mobile-sheet {
+      position: fixed; inset: 0; z-index: 70;
+      display: none;
+      background: rgba(6,10,20,.76);
+      backdrop-filter: blur(10px);
+    }
+
+    .mobile-sheet.active { display: block; }
+
+    .mobile-sheet-panel {
+      position: absolute; inset: 0;
+      background: linear-gradient(180deg, rgba(12,18,32,.99), rgba(11,16,28,1));
+      display: flex; flex-direction: column;
+    }
+
+    .mobile-sheet-header {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: calc(10px + var(--safe-top)) 14px 10px;
+      border-bottom: 1px solid rgba(92,115,158,.32);
+      background: rgba(10,16,31,.96);
+    }
+
+    .mobile-sheet-title {
+      min-width: 0; font-size: 20px; font-weight: 800; line-height: 1.2;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    .mobile-sheet-close {
+      width: auto; min-width: 80px; min-height: 44px;
+      padding: 10px 14px; font-size: 16px; border-radius: 14px;
+    }
+
+    .mobile-sheet-body {
+      flex: 1; overflow-y: auto;
+      padding: 14px 14px calc(110px + var(--safe-bottom));
+    }
+
+    .mobile-sheet-actions {
+      position: sticky; bottom: 0;
+      display: grid; gap: 10px;
+      padding: 10px 14px calc(12px + var(--safe-bottom));
+      background: rgba(10,16,31,.98);
+      border-top: 1px solid rgba(92,115,158,.32);
+    }
+
+    /* ─── Desktop editor (hidden on mobile) ─────────────────────── */
+    .desktop-editor { display: none; }
+
+    /* ─── Search input ───────────────────────────────────────────── */
+    .search-control {
+      position: relative;
+      width: 100%;
+    }
+
+    .search-input {
+      min-height: 54px;
+      font-size: 18px;
+      padding-inline: 15px 58px;
+    }
+
+    .search-clear {
+      position: absolute;
+      top: 50%;
+      right: 8px;
+      width: 42px;
+      min-width: 42px;
+      min-height: 42px;
+      height: 42px;
+      padding: 0;
+      transform: translateY(-50%);
+      border-radius: 999px;
+      background: rgba(37,50,76,.92);
+      border: 1px solid rgba(94,118,164,.55);
+      color: var(--text-secondary);
+      font-size: 22px;
+      line-height: 1;
+      display: none;
+      z-index: 3;
+    }
+
+    .search-clear.visible {
+      display: inline-flex;
+    }
+
+    .legacy-search-card {
+      display: none;
+    }
+
+    #addSearchCard .section-heading,
+    #addSearchCard > .field:first-of-type {
+      display: none;
+    }
+
+    /* ─── Bottom nav ─────────────────────────────────────────────── */
+    .bottom-nav {
+      position: fixed; left: 12px; right: 12px; bottom: 0;
+      width: auto; z-index: 30;
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 8px; padding: 8px 8px calc(10px + var(--safe-bottom));
+      background: rgba(8,12,24,.97); backdrop-filter: blur(16px);
+      border: 1px solid rgba(76,97,136,.55);
+      border-bottom: 0; border-radius: 18px 18px 0 0;
+    }
+
+    .bottom-nav button {
+      min-height: var(--nav-button-height);
+      font-size: 17px; border-radius: 14px;
+      background: #25324c; border-color: rgba(94,118,164,.45);
+      color: var(--text-secondary);
+    }
+
+    .bottom-nav button.active {
+      background: linear-gradient(135deg, #9333ea, #a855f7 58%, #c084fc);
+      color: #fff;
+      box-shadow: 0 8px 24px rgba(168,85,247,.2);
+    }
+
+    .notes-shortcut .group-toggle {
+      background: rgba(24, 36, 58, .92);
+    }
+
+    /* ─── Desktop (≥700px) ───────────────────────────────────────── */
+    @media (min-width: 700px) {
+      :root {
+        --nav-height: 86px; --nav-button-height: 56px;
+        --input-height: 52px; --button-height: 52px;
+      }
+
+      header {
+        position: sticky; top: 0; z-index: 20;
+        padding: calc(16px + var(--safe-top)) 20px 14px;
+      }
+
+      .subtitle { display: block; font-size: 14px; }
+
+      h1, .app-title { font-size: clamp(2rem, 4vw, 2.45rem); white-space: normal; }
+
+      main { max-width: 980px; margin: 0 auto; padding: 20px 20px calc(var(--nav-height) + var(--safe-bottom) + 28px); }
+
+      .section-stack { gap: 16px; }
+      .card { padding: 16px; }
+
+      label { font-size: 14px; }
+
+      input, select, textarea, button { font-size: 16px; }
+      input::placeholder, textarea::placeholder { font-size: 16px; }
+
+      .row, .details-grid, .item-grid, .form-grid { grid-template-columns: 1fr 1fr; }
+
+      .desktop-editor { display: block; }
+      .mobile-sheet { display: none !important; }
+      #descriptionSheet.active { display: block !important; }
+      #notesSheet.active { display: block !important; }
+
+      .bottom-nav {
+        left: 20px; right: 20px; max-width: 980px; margin: 0 auto;
+        gap: 10px; padding: 10px 10px calc(10px + var(--safe-bottom));
+        border-radius: 22px 22px 0 0;
+      }
+
+      .bottom-nav button { font-size: 16px; }
+
+      .add-details-card { display: block !important; }
+    }
+
+    /* ─── Phone override — driven by DPR-scaled JS custom props ─── */
+    /* All sizing lives here; media queries are dead in the AS webview */
+    html.is-phone {
+      -webkit-text-size-adjust: 100%;
+    }
+
+    html.is-phone,
+    html.is-phone body {
+      width: 100%; max-width: 100%; overflow-x: hidden;
+      font-size: var(--phone-font-body, 28px);
+      line-height: 1.32;
+    }
+
+    html.is-phone body {
+      padding-bottom: calc(var(--phone-nav-height, 110px) + var(--safe-bottom) + 20px);
+    }
+
+    html.is-phone header:not(.app-header) {
+      display: none;
+      padding: 0;
+    }
+
+    html.is-phone .app-title,
+    html.is-phone h1 {
+      font-size: var(--phone-font-title, 32px);
+      line-height: 1.05;
+    }
+
+    html.is-phone .subtitle { display: none; }
+
+    html.is-phone main,
+    html.is-phone .main,
+    html.is-phone .app-shell,
+    html.is-phone .container {
+      padding-top: 8px;
+      padding-left: 10px; padding-right: 10px;
+      padding-bottom: calc(var(--phone-nav-height, 110px) + var(--safe-bottom) + 28px);
+    }
+
+    html.is-phone .section-stack { gap: 10px; }
+
+    html.is-phone .card { padding: 14px; border-radius: 18px; }
+
+    html.is-phone .section-heading {
+      font-size: var(--phone-font-heading, 30px);
+      line-height: 1.1; margin-bottom: 8px;
+    }
+
+    html.is-phone label {
+      font-size: var(--phone-font-label, 20px);
+      line-height: 1.2; margin-bottom: 8px;
+    }
+
+    html.is-phone input,
+    html.is-phone select,
+    html.is-phone textarea,
+    html.is-phone button {
+      font-size: var(--phone-font-body, 28px) !important;
+      line-height: 1.2;
+    }
+
+    html.is-phone input,
+    html.is-phone select {
+      min-height: var(--phone-input-height, 68px);
+      padding: 14px 16px;
+    }
+
+    html.is-phone textarea {
+      min-height: calc(var(--phone-input-height, 68px) * 1.8);
+      padding: 14px 16px;
+    }
+
+    html.is-phone input::placeholder,
+    html.is-phone textarea::placeholder {
+      font-size: var(--phone-font-meta, 22px);
+    }
+
+    html.is-phone button {
+      min-height: var(--phone-button-height, 68px) !important;
+      padding: 14px 18px; border-radius: 18px;
+    }
+
+    html.is-phone .row,
+    html.is-phone .details-grid,
+    html.is-phone .item-grid,
+    html.is-phone .form-grid {
+      grid-template-columns: 1fr; gap: 14px;
+    }
+
+    html.is-phone .inventory-card,
+    html.is-phone .result-card {
+      min-height: 0;
+      padding: 12px 14px; border-radius: 18px;
+    }
+
+    html.is-phone .item-title,
+    html.is-phone .result-card .item-title {
+      font-size: var(--phone-font-item-title, 26px);
+      line-height: 1.1;
+    }
+
+    html.is-phone .item-meta,
+    html.is-phone .result-card .item-meta,
+    html.is-phone .status {
+      font-size: var(--phone-font-meta, 22px);
+      line-height: 1.18;
+    }
+
+    html.is-phone .pill {
+      font-size: var(--phone-font-meta, 22px);
+      min-height: 36px;
+    }
+
+    html.is-phone .results-list {
+      gap: 10px; max-height: 44vh;
+    }
+
+    html.is-phone .bottom-nav {
+      left: 8px; right: 8px; bottom: 0;
+      width: auto; max-width: none;
+      padding: 8px 8px calc(10px + var(--safe-bottom));
+    }
+
+    html.is-phone .bottom-nav button {
+      min-height: var(--phone-button-height, 68px) !important;
+      font-size: var(--phone-font-meta, 22px) !important;
+    }
+
+    html.is-phone .app-header {
+      padding: 8px 10px 8px;
+    }
+
+    html.is-phone .app-header-title {
+      font-size: var(--phone-font-title, 32px);
+      margin-bottom: 8px;
+    }
+
+    html.is-phone .mode-pill {
+      min-height: calc(var(--phone-button-height, 68px) * 0.62);
+      font-size: var(--phone-font-meta, 22px);
+    }
+
+    html.is-phone .search-input {
+      min-height: var(--phone-input-height, 68px);
+      padding-right: calc(var(--phone-button-height, 68px) + 16px);
+    }
+
+    html.is-phone .search-clear {
+      width: calc(var(--phone-button-height, 68px) - 14px);
+      min-width: calc(var(--phone-button-height, 68px) - 14px);
+      height: calc(var(--phone-button-height, 68px) - 14px);
+      min-height: calc(var(--phone-button-height, 68px) - 14px) !important;
+      font-size: var(--phone-font-meta, 22px) !important;
+      right: 8px;
+    }
+
+    html.is-phone .header-reload {
+      width: var(--phone-input-height, 68px);
+      min-width: var(--phone-input-height, 68px);
+      height: var(--phone-input-height, 68px);
+      min-height: var(--phone-input-height, 68px) !important;
+      font-size: var(--phone-font-meta, 22px);
+    }
+
+    html.is-phone #mainStatus {
+      font-size: var(--phone-font-meta, 22px);
+    }
+
+    html.is-phone .mobile-sheet-title {
+      font-size: var(--phone-font-heading, 30px);
+    }
+
+    html.is-phone .mobile-sheet-close {
+      min-height: var(--phone-button-height, 68px);
+      font-size: var(--phone-font-meta, 22px);
+    }
+
+    html.is-phone .mobile-sheet-body {
+      padding: 12px 12px calc(var(--phone-nav-height, 110px) + var(--safe-bottom) + 40px);
+    }
+
+    html.is-phone .mobile-sheet-actions {
+      padding: 10px 12px calc(14px + var(--safe-bottom));
+    }
+
+    html.is-phone .quick-summary {
+      padding: 14px;
+      border-radius: 18px;
+    }
+
+    html.is-phone .quick-actions {
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+
+    html.is-phone .inventory-delete-action {
+      font-size: var(--phone-font-meta, 22px);
+      min-height: 0 !important;
+      padding: 0 8px;
+    }
+
+    html.is-phone .dashboard-grid {
+      gap: 8px;
+    }
+
+    html.is-phone .dashboard-value {
+      font-size: var(--phone-font-heading, 30px);
+    }
+
+    html.is-phone .dashboard-label,
+    html.is-phone .resource-line,
+    html.is-phone .group-count,
+    html.is-phone .ledger-item-name {
+      font-size: var(--phone-font-meta, 22px);
+    }
+
+    html.is-phone .resource-pay {
+      grid-template-columns: 1fr;
+    }
+
+    html.is-phone .group-toggle,
+    html.is-phone .ledger-item {
+      min-height: var(--phone-card-min-height, 88px);
+    }
+
+    html.is-phone .inventory-row {
+      margin-bottom: 5px;
+    }
+
+    html.is-phone .resource-ledger-title,
+    html.is-phone .resource-ledger-row {
+      font-size: var(--phone-font-meta, 22px);
+    }
+
+    html.is-phone .resource-ledger-row {
+      min-height: 0;
+      padding: 8px 10px;
+    }
+
+    html.is-phone .description-text {
+      font-size: var(--phone-font-meta, 22px);
+      line-height: 1.38;
+    }
+
+    html.is-phone .notes-status-row {
+      font-size: var(--phone-font-meta, 22px);
+    }
+
+    html.is-phone .notes-clear {
+      width: 44px;
+      min-width: 44px;
+      height: 44px;
+      min-height: 44px;
+      font-size: var(--phone-font-meta, 22px);
+    }
+
+    html.is-phone .description-meta {
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    html.is-phone .inventory-row.swiped .inventory-card {
+      /* override is handled via JS transform; this is the snap-open value */
+    }
+  </style>
+</head>
+
+<body class="app">
+  <header id="appHeader" class="app-header inventory-mode">
+    <div id="appHeaderTitle" class="app-header-title">Weiners of Drakkenheim</div>
+    <div class="search-bar-row">
+      <div class="search-control">
+        <input id="commandSearch" class="search-input" placeholder="Filter inventory…" oninput="handleCommandSearchInput()" onfocus="handleCommandSearchFocus()">
+        <button id="commandSearchClear" class="search-clear" type="button" aria-label="Clear search" onclick="clearCommandSearch()">×</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="main app-shell">
+    <div id="mainStatus" class="status"></div>
+
+    <!-- ── Inventory tab ────────────────────────────────────────── -->
+    <section id="inventorySection" class="section active">
+      <div class="section-stack">
+
+        <div class="card featured search-panel legacy-search-card">
+          <h2 class="section-heading">Inventory</h2>
+          <div class="field">
+            <label class="sr-only" for="inventoryFilter">Filter inventory</label>
+            <div class="search-control">
+              <input id="inventoryFilter" class="search-input"
+                     placeholder="Filter cloak, potion, shield…"
+                     oninput="handleSearchInput('inventoryFilter'); renderInventory()">
+              <button id="inventoryFilterClear" class="search-clear" type="button"
+                      aria-label="Clear inventory filter"
+                      onclick="clearSearchField('inventoryFilter', renderInventory)">×</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="inventoryStatus" class="status centered">Loading…</div>
+        <div id="inventoryList"></div>
+
+        <!-- Desktop quick editor for currency / potions / delerium -->
+        <div id="desktopQuickEditor" class="card quick-editor">
+          <h2 class="section-heading" id="quickDesktopHeading">Quick Edit</h2>
+          <div class="quick-summary">
+            <div class="item-title" id="quickDesktopTitle"></div>
+            <div class="item-meta" id="quickDesktopMeta"></div>
+          </div>
+
+          <div class="row details-grid">
+            <div class="field">
+              <label for="quickDesktopMode">Action</label>
+              <select id="quickDesktopMode">
+                <option value="add">Add</option>
+                <option value="remove">Remove</option>
+                <option value="set">Set total</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="quickDesktopAmount">Amount</label>
+              <input id="quickDesktopAmount" type="number" min="0" step="1" inputmode="decimal">
+            </div>
+          </div>
+
+          <div id="quickDesktopSizeField" class="field quick-size-field">
+            <label for="quickDesktopSize">Delerium size</label>
+            <select id="quickDesktopSize"></select>
+          </div>
+
+          <div class="field">
+            <label for="quickDesktopNote">Note</label>
+            <input id="quickDesktopNote" placeholder="Loot split, sale, used in session…">
+          </div>
+
+          <div class="quick-actions">
+            <button class="primary" onclick="confirmQuickEdit()">Confirm</button>
+            <button class="secondary" onclick="clearQuickEditFields()">Clear</button>
+            <button class="secondary" onclick="openSelectedInventoryDescription()">Open Description</button>
+            <button class="secondary" onclick="openFullEditorFromQuick()">Change Item</button>
+            <button class="secondary" onclick="closeQuickEditPanel()">Cancel</button>
+          </div>
+
+          <div id="quickDesktopStatus" class="status"></div>
+        </div>
+
+        <!-- Desktop editor (hidden on phone) -->
+        <div id="desktopInventoryEditor" class="card desktop-editor">
+          <input type="hidden" id="editInventoryId">
+          <input type="hidden" id="editLibraryItemId">
+
+          <h2 class="section-heading" id="editTitle">Item Details</h2>
+
+          <div class="field sr-only-field">
+            <label class="sr-only" for="editItem">Item</label>
+            <input id="editItem">
+          </div>
+
+          <div class="field">
+            <label for="editNotes">Notes</label>
+            <textarea id="editNotes"></textarea>
+          </div>
+
+          <div class="row details-grid">
+            <div class="field">
+              <label for="editQty">Qty</label>
+              <input id="editQty" type="number" min="1" step="1">
+            </div>
+            <div class="field">
+              <label for="editHolder">Holder</label>
+            <select id="editHolder">
+              <option value="">Party / shared</option>
+            </select>
+            </div>
+          </div>
+
+          <div class="row details-grid">
+            <div class="field">
+              <label for="editCategory">Category</label>
+              <input id="editCategory">
+            </div>
+            <div class="field">
+              <label for="editRarity">Rarity</label>
+              <input id="editRarity">
+            </div>
+          </div>
+
+          <div class="row details-grid">
+            <div class="field">
+              <label for="editValueGp">Value (gp)</label>
+              <input id="editValueGp" type="number" min="0" step="0.01">
+            </div>
+            <div class="field">
+              <label for="editFactionRelevance">Faction</label>
+              <input id="editFactionRelevance">
+            </div>
+          </div>
+
+          <div class="field">
+            <button id="saveInventoryButton" class="primary" onclick="saveInventoryEdits()">Save Changes</button>
+            <button class="secondary" onclick="openSelectedInventoryDescription()">Open Description</button>
+            <button class="secondary" onclick="closeInventoryPanels()">Close</button>
+            <button id="deleteInventoryButton" class="danger" onclick="deleteSelectedInventory()">Delete</button>
+          </div>
+
+          <div id="editStatusMessage" class="status"></div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ── Add Item tab ─────────────────────────────────────────── -->
+    <section id="addSection" class="section">
+      <div class="section-stack">
+
+        <!-- Step 1: Search (shown first on mobile; hidden after selection) -->
+        <div id="addSearchCard" class="card featured search-panel">
+          <h2 class="section-heading">Find Item</h2>
+          <div class="field">
+            <label class="sr-only" for="equipmentSearch">Search equipment library</label>
+            <div class="search-control">
+              <input id="equipmentSearch" class="search-input"
+                     placeholder="Search cloak, potion, shield…"
+                     oninput="handleSearchInput('equipmentSearch'); debouncedSearchEquipment()">
+              <button id="equipmentSearchClear" class="search-clear" type="button"
+                      aria-label="Clear equipment search"
+                      onclick="clearSearchField('equipmentSearch', searchEquipment)">×</button>
+            </div>
+          </div>
+          <div class="custom-actions">
+            <button class="secondary" type="button" onclick="startCustomItem()">Custom / Homebrew Item</button>
+          </div>
+          <div id="searchStatus" class="status centered"></div>
+          <div id="searchResults" class="results-list"></div>
+        </div>
+
+        <div id="selectedItemCard" class="card selected-item-card">
+          <h2 class="section-heading">Selected</h2>
+          <div class="item-title" id="selectedCardName"></div>
+          <div class="item-meta" id="selectedCardMeta"></div>
+          <div class="selected-item-actions">
+            <button class="secondary" type="button" onclick="changeSelectedItem()">Change Item</button>
+          </div>
+        </div>
+
+        <!-- Step 2: Details form -->
+        <div id="addDetailsCard" class="card add-details-card" style="display:none;">
+          <input type="hidden" id="libraryItemId">
+          <input type="hidden" id="quickAddKey">
+
+          <div class="item-title" id="selectedName">Item Details</div>
+          <div class="item-meta quick-add-hidden" id="selectedMeta"></div>
+
+          <div class="field sr-only-field custom-name-field">
+            <label class="sr-only" for="item">Item Details</label>
+            <input id="item" placeholder="Custom item name">
+          </div>
+
+          <div class="field quick-add-hidden">
+            <label for="notes">Notes</label>
+            <textarea id="notes" placeholder="What does it do? Who wants it?"></textarea>
+          </div>
+
+          <div class="row item-grid">
+            <div class="field">
+              <label for="qty">Qty</label>
+              <input id="qty" type="number" min="1" value="1">
+            </div>
+            <div class="field sr-only-field">
+              <label for="holder">Holder</label>
+              <select id="holder">
+                <option value="">Party / shared</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="row item-grid quick-add-hidden">
+            <div class="field">
+              <label for="category">Category</label>
+              <input id="category" placeholder="Magic Item, Gear…">
+            </div>
+            <div class="field">
+              <label for="rarity">Rarity</label>
+              <input id="rarity" placeholder="Common, Rare…">
+            </div>
+          </div>
+
+          <div class="row item-grid quick-add-hidden">
+            <div class="field sr-only-field">
+              <label for="valueGp">Value (gp)</label>
+              <input id="valueGp" type="number" min="0" step="0.01">
+            </div>
+            <div class="field">
+              <label for="factionRelevance">Faction</label>
+              <input id="factionRelevance" placeholder="Academy, Lanterns…">
+            </div>
+          </div>
+
+          <div id="quickAddSizeField" class="field quick-size-field">
+            <label for="quickAddSize">Delerium size</label>
+            <select id="quickAddSize">
+              <option value="chip">chip</option>
+              <option value="fragment">fragment</option>
+              <option value="shard">shard</option>
+              <option value="crystal">crystal</option>
+              <option value="geode">geode</option>
+              <option value="massive cluster">massive cluster</option>
+              <option value="unknown">unknown</option>
+            </select>
+          </div>
+
+          <div id="addStatus" class="status"></div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── Mobile sheet: edit existing inventory item ────────────── -->
+  <div id="inventorySheet" class="mobile-sheet">
+    <div class="mobile-sheet-panel">
+
+      <div class="mobile-sheet-header">
+        <div class="mobile-sheet-title" id="sheetEditTitle">Edit Item</div>
+        <button class="secondary mobile-sheet-close" onclick="closeInventoryPanels()">Done</button>
+      </div>
+
+      <div class="mobile-sheet-body">
+
+        <div class="field sr-only-field">
+          <label class="sr-only" for="sheetEditItem">Item</label>
+          <input id="sheetEditItem">
+        </div>
+
+        <div class="field">
+          <label for="sheetEditNotes">Notes</label>
+          <textarea id="sheetEditNotes"></textarea>
+        </div>
+
+        <div class="row details-grid">
+          <div class="field">
+            <label for="sheetEditQty">Qty</label>
+            <input id="sheetEditQty" type="number" min="1" step="1">
+          </div>
+          <div class="field">
+            <label for="sheetEditHolder">Holder</label>
+            <select id="sheetEditHolder">
+              <option value="">Party / shared</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row details-grid">
+          <div class="field">
+            <label for="sheetEditCategory">Category</label>
+            <input id="sheetEditCategory">
+          </div>
+          <div class="field">
+            <label for="sheetEditRarity">Rarity</label>
+            <input id="sheetEditRarity">
+          </div>
+        </div>
+
+        <div class="row details-grid">
+          <div class="field">
+            <label for="sheetEditValueGp">Value (gp)</label>
+            <input id="sheetEditValueGp" type="number" min="0" step="0.01">
+          </div>
+          <div class="field">
+            <label for="sheetEditFactionRelevance">Faction</label>
+            <input id="sheetEditFactionRelevance">
+          </div>
+        </div>
+
+        <div id="sheetEditStatusMessage" class="status"></div>
+
+      </div>
+
+      <div class="mobile-sheet-actions">
+        <button class="primary"  onclick="saveInventoryEdits()">Save Changes</button>
+        <button class="secondary" onclick="openSelectedInventoryDescription()">Open Description</button>
+        <button class="danger"   onclick="deleteSelectedInventory()">Delete Item</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Mobile sheet: inventory description ───────────────────── -->
+  <div id="descriptionSheet" class="mobile-sheet">
+    <div class="mobile-sheet-panel">
+      <div class="mobile-sheet-header">
+        <div class="mobile-sheet-title" id="descriptionTitle">Description</div>
+        <button class="danger mobile-sheet-close" onclick="deleteSelectedInventoryFromDescription()">Delete</button>
+      </div>
+      <div class="mobile-sheet-body">
+        <div class="description-meta">
+          <div id="descriptionCategory" class="pill">Uncategorized</div>
+          <div id="descriptionRarity" class="pill">Unrated</div>
+        </div>
+        <div id="descriptionStatus" class="status"></div>
+        <div id="descriptionText" class="description-text"></div>
+      </div>
+      <div class="mobile-sheet-actions">
+        <button class="secondary" onclick="closeDescriptionSheet()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Mobile sheet: quick edit currency / potions / delerium ── -->
+  <div id="quickEditSheet" class="mobile-sheet">
+    <div class="mobile-sheet-panel">
+
+      <div class="mobile-sheet-header">
+        <div class="mobile-sheet-title" id="quickSheetHeading">Quick Edit</div>
+        <button class="secondary mobile-sheet-close" onclick="closeQuickEditPanel()">Cancel</button>
+      </div>
+
+      <div class="mobile-sheet-body">
+        <div class="quick-summary">
+          <div class="item-title" id="quickSheetTitle"></div>
+          <div class="item-meta" id="quickSheetMeta"></div>
+        </div>
+
+        <div class="field">
+          <label for="quickSheetMode">Action</label>
+          <select id="quickSheetMode">
+            <option value="add">Add</option>
+            <option value="remove">Remove</option>
+            <option value="set">Set total</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="quickSheetAmount">Amount</label>
+          <input id="quickSheetAmount" type="number" min="0" step="1" inputmode="decimal">
+        </div>
+
+        <div id="quickSheetSizeField" class="field quick-size-field">
+          <label for="quickSheetSize">Delerium size</label>
+          <select id="quickSheetSize"></select>
+        </div>
+
+        <div class="field">
+          <label for="quickSheetNote">Note</label>
+          <input id="quickSheetNote" placeholder="Loot split, sale, used in session…">
+        </div>
+
+        <div id="quickSheetStatus" class="status"></div>
+      </div>
+
+      <div class="mobile-sheet-actions">
+        <button class="primary" onclick="confirmQuickEdit()">Confirm</button>
+        <button class="secondary" onclick="clearQuickEditFields()">Clear</button>
+        <button class="secondary" onclick="openSelectedInventoryDescription()">Open Description</button>
+        <button class="secondary" onclick="openFullEditorFromQuick()">Change Item</button>
+        <button class="secondary" onclick="closeQuickEditPanel()">Cancel</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Full-screen campaign notes ────────────────────────────── -->
+  <div id="notesSheet" class="mobile-sheet">
+    <div class="mobile-sheet-panel">
+      <div class="mobile-sheet-header">
+        <div class="mobile-sheet-title">Campaign Notes</div>
+      </div>
+      <div class="mobile-sheet-body notes-sheet-body">
+        <div class="notes-status-row">
+          <div id="campaignNotesStatus">Loading…</div>
+          <div id="campaignNotesMeta"></div>
+        </div>
+        <div id="campaignNotesList" class="notes-list"></div>
+      </div>
+      <div id="notesComposerBar" class="mobile-sheet-actions notes-sheet-actions">
+        <div class="notes-composer">
+          <label class="sr-only" for="campaignNotesBody">Campaign note</label>
+          <textarea id="campaignNotesBody" class="notes-editor" placeholder="Write a note..." oninput="handleCampaignNotesInput()"></textarea>
+          <button id="campaignNotesClear" class="notes-clear" type="button" aria-label="Clear note" onclick="clearCampaignNoteComposer()">×</button>
+        </div>
+        <div class="notes-action-row">
+          <button id="campaignNotesSaveButton" class="primary" onclick="submitCampaignNote()">Add Note</button>
+          <button class="secondary" onclick="closeCampaignNotes()">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="combineSheet" class="mobile-sheet">
+    <div class="mobile-sheet-panel">
+      <div class="mobile-sheet-header">
+        <div class="mobile-sheet-title">Duplicate Item</div>
+        <button class="secondary mobile-sheet-close" onclick="keepDuplicateInventoryItem()">Later</button>
+      </div>
+      <div class="mobile-sheet-body">
+        <div id="combineStatus" class="status">This item already exists in inventory.</div>
+        <div class="card">
+          <div class="item-title" id="combineItemTitle">Item</div>
+          <div class="item-meta" id="combineItemMeta"></div>
+        </div>
+      </div>
+      <div class="mobile-sheet-actions">
+        <button class="primary" onclick="confirmCombineInventoryItem()">Combine</button>
+        <button class="secondary" onclick="keepDuplicateInventoryItem()">Keep Separate</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Bottom nav ─────────────────────────────────────────────── -->
+  <div class="bottom-nav">
+    <button id="inventoryTab" class="active" type="button" onclick="setCommandMode('inventory')">Inventory</button>
+    <button id="addTab" type="button" onclick="handleAddTabClick()">Add Item</button>
+  </div>
+
+  <script>
+    /* ── State ───────────────────────────────────────────────────── */
+    let inventoryRows       = [];
+    let inventoryResourceLedger = [];
+    let equipmentIndex      = [];
+    let equipmentResults    = [];
+    let equipmentIndexLoaded  = false;
+    let equipmentIndexLoading = false;
+    let selectedEquipment   = null;
+    let selectedInventory   = null;
+    let selectedQuickEdit   = null;
+    let swipedInventoryId   = '';
+    let inventoryExpandedGroups = {};
+    let expandedResource = '';
+    let resourcePayInFlight = {};
+    let lastResourceUndo = {};
+    let suppressInventoryClickUntil = 0;
+    let searchTimer         = null;
+    let commandMode         = 'inventory';
+    let addFormInteractionPrimed = false;
+    let lastInventoryLoadAt = 0;
+    const CACHE_KEY = 'drakken_inventory_v1';
+    const EQUIPMENT_CACHE_KEY = 'drakken_equipment_index_v1';
+    const NOTES_DRAFT_KEY = 'drakken_campaign_notes_draft_v1';
+    const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
+    const EQUIPMENT_CACHE_MAX_AGE = 30 * 60 * 1000; // 30 minutes
+    const INVENTORY_REVALIDATE_MS = 60 * 1000;
+    let campaignNotes = [];
+    let campaignNotesLoaded = false;
+    let campaignNotesLoading = false;
+    let campaignNotesSaving = false;
+    let campaignNotesViewportBound = false;
+    let campaignNotesAccess = null;
+    const NOTE_ACTION_WIDTH = 220;
+    const NOTE_ACTION_ACTIVATE = 380;
+    const NOTE_ACTION_MAX_DRAG = 420;
+    let campaignNoteDraft = '';
+    let campaignNoteEditingId = '';
+    let pendingCombineChoice = null;
+    let characterOptions = [];
+    let inventoryReadyTransitioned = false;
+    const QUICK_ADD_ITEMS = [
+      { quickAdd: true, quickKey: 'gold', name: 'Gold', category: 'Currency', valueGp: 1, terms: ['gold', 'gp', 'coin', 'money'] },
+      { quickAdd: true, quickKey: 'health_potion', name: 'Health Potion', category: 'Potion', rarity: 'Common', valueGp: 50, terms: ['health', 'healing', 'potion'] },
+      { quickAdd: true, quickKey: 'greater_health_potion', name: 'Greater Health Potion', category: 'Potion', rarity: 'Uncommon', valueGp: 150, terms: ['greater health', 'greater healing'] },
+      { quickAdd: true, quickKey: 'delerium_chip', name: 'Delerium Chip', category: 'Delerium', terms: ['delerium', 'delirium', 'chip'] },
+      { quickAdd: true, quickKey: 'delerium_fragment', name: 'Delerium Fragment', category: 'Delerium', terms: ['delerium', 'delirium', 'fragment'] },
+      { quickAdd: true, quickKey: 'delerium_shard', name: 'Delerium Shard', category: 'Delerium', terms: ['delerium', 'delirium', 'shard'] },
+      { quickAdd: true, quickKey: 'delerium_crystal', name: 'Delerium Crystal', category: 'Delerium', terms: ['delerium', 'delirium', 'crystal'] },
+      { quickAdd: true, quickKey: 'delerium_geode', name: 'Delerium Geode', category: 'Delerium', terms: ['delerium', 'delirium', 'geode', 'large crystal'] },
+      { quickAdd: true, quickKey: 'delerium_massive_cluster', name: 'Delerium Massive Cluster', category: 'Delerium', terms: ['delerium', 'delirium', 'massive cluster', 'cluster'] },
+      { quickAdd: true, quickKey: 'gemstone', name: 'Gemstone', category: 'Other', terms: ['gem', 'gemstone', 'jewel'] },
+      { quickAdd: true, quickKey: 'art_object', name: 'Art Object', category: 'Other', terms: ['art', 'object', 'painting', 'statue'] },
+      { quickAdd: true, quickKey: 'trade_goods', name: 'Trade Goods', category: 'Other', terms: ['trade', 'goods', 'commodity', 'commodities'] },
+      { quickAdd: true, quickKey: 'rations', name: 'Rations', category: 'Tool / Gear', valueGp: 0.5, terms: ['ration', 'rations', 'food'] }
+    ];
+
+    function bustInventoryCache() {
+      try {
+        localStorage.removeItem(CACHE_KEY);
+      } catch (_) {}
+    }
+
+    function getCachedInventoryRows() {
+      try {
+        const raw = localStorage.getItem(CACHE_KEY);
+        if (!raw) return [];
+
+        const cached = JSON.parse(raw);
+        const rows = cached && cached.rows;
+        const ts = Number(cached && cached.ts);
+
+        if (Array.isArray(rows) && ts && Date.now() - ts < CACHE_MAX_AGE) {
+          return rows;
+        }
+      } catch (_) {}
+
+      return [];
+    }
+
+    function getCachedInventoryPayload() {
+      try {
+        const raw = localStorage.getItem(CACHE_KEY);
+        if (!raw) return null;
+
+        const cached = JSON.parse(raw);
+        const rows = cached && cached.rows;
+        const ts = Number(cached && cached.ts);
+
+        if (Array.isArray(rows) && ts && Date.now() - ts < CACHE_MAX_AGE) {
+          return {
+            rows,
+            resourceLedger: Array.isArray(cached.resourceLedger) ? cached.resourceLedger : []
+          };
+        }
+      } catch (_) {}
+
+      return null;
+    }
+
+    function populateCharacterSelectors() {
+      const selects = ['holder', 'editHolder', 'sheetEditHolder'];
+      const options = ['<option value="">Party / shared</option>', ...characterOptions.map(row => `<option value="${escapeHtml(row.character)}">${escapeHtml(row.character)}${row.player ? ` — ${escapeHtml(row.player)}` : ''}</option>` )];
+      selects.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const current = el.value || '';
+        el.innerHTML = options.join('') + (current && !characterOptions.some(r => r.character === current) ? `<option value="${escapeHtml(current)}">${escapeHtml(current)} (existing)</option>` : '');
+        el.value = current;
+      });
+    }
+
+    function loadCharacters() {
+      google.script.run.withSuccessHandler(res => {
+        if (!res || !res.ok) return;
+        characterOptions = Array.isArray(res.rows) ? res.rows : [];
+        populateCharacterSelectors();
+      }).apiGetCharacters();
+    }
+
+    function cacheInventoryRows(rows, resourceLedger) {
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({
+          rows,
+          resourceLedger: Array.isArray(resourceLedger) ? resourceLedger : inventoryResourceLedger,
+          ts: Date.now()
+        }));
+      } catch (_) {}
+    }
+
+    function primeInventoryCacheAfterAdd(item) {
+      if (!item || !item['Inventory ID']) return false;
+
+      const baseRows = inventoryRows.length ? inventoryRows.slice() : getCachedInventoryRows();
+
+      const exists = baseRows.some(row => row['Inventory ID'] === item['Inventory ID']);
+      const rows = exists
+        ? baseRows.map(row => row['Inventory ID'] === item['Inventory ID'] ? { ...row, ...item } : row)
+        : [item, ...baseRows];
+
+      inventoryRows = rows;
+      cacheInventoryRows(rows);
+      return true;
+    }
+
+    function toNumber(value) {
+      const num = Number(value);
+      return Number.isFinite(num) ? num : 0;
+    }
+
+    function normalizeEquipmentIndexRows(rows) {
+      return (rows || []).map(row => ({
+        ...row,
+        searchText: String(row.name || '').toLowerCase()
+      }));
+    }
+
+    function readEquipmentIndexCache() {
+      try {
+        const raw = localStorage.getItem(EQUIPMENT_CACHE_KEY);
+        if (!raw) return [];
+
+        const cached = JSON.parse(raw);
+        const rows = cached && cached.rows;
+        const ts = Number(cached && cached.ts);
+
+        if (Array.isArray(rows) && rows.length && ts && Date.now() - ts < EQUIPMENT_CACHE_MAX_AGE) {
+          return normalizeEquipmentIndexRows(rows);
+        }
+      } catch (_) {}
+
+      return [];
+    }
+
+    function cacheEquipmentIndexRows(rows) {
+      try {
+        localStorage.setItem(EQUIPMENT_CACHE_KEY, JSON.stringify({
+          rows,
+          ts: Date.now()
+        }));
+      } catch (_) {}
+    }
+
+    function titleCase(value) {
+      return String(value || '').replace(/\b\w/g, char => char.toUpperCase());
+    }
+
+    /* ── Phone detection & DPR-based scaling ─────────────────────── */
+    function updatePhoneClass() {
+      const isPhone = window.matchMedia('(max-width: 699px), (pointer: coarse)').matches;
+      document.documentElement.classList.toggle('is-phone', isPhone);
+
+      if (!isPhone) {
+        // Reset phone vars so they don't bleed into desktop
+        const root = document.documentElement;
+        ['--phone-scale','--phone-font-body','--phone-font-label','--phone-font-title',
+         '--phone-font-heading','--phone-font-item-title','--phone-font-meta',
+         '--phone-input-height','--phone-button-height','--phone-card-min-height',
+         '--phone-nav-height'].forEach(v => root.style.removeProperty(v));
+        return false;
+      }
+
+      // iOS in Apps Script reports innerWidth ≈ 980 regardless of real screen size.
+      // devicePixelRatio reliably tells us what we're actually rendering on.
+      const dpr = window.devicePixelRatio || 1;
+      // Typical iPhones: 2× (SE, older) or 3× (Pro). Clamp to [1.6 – 2.8].
+      const scale = Math.max(1.6, Math.min(dpr, 2.8));
+
+      const root = document.documentElement;
+      root.style.setProperty('--phone-scale',          String(scale));
+      root.style.setProperty('--phone-font-body',      `${Math.round(18 * scale)}px`);
+      root.style.setProperty('--phone-font-label',     `${Math.round(14 * scale)}px`);
+      root.style.setProperty('--phone-font-title',     `${Math.round(22 * scale)}px`);
+      root.style.setProperty('--phone-font-heading',   `${Math.round(20 * scale)}px`);
+      root.style.setProperty('--phone-font-item-title',`${Math.round(19 * scale)}px`);
+      root.style.setProperty('--phone-font-meta',      `${Math.round(14 * scale)}px`);
+      root.style.setProperty('--phone-input-height',   `${Math.round(52 * scale)}px`);
+      root.style.setProperty('--phone-button-height',  `${Math.round(52 * scale)}px`);
+      root.style.setProperty('--phone-card-min-height',`${Math.round(76 * scale)}px`);
+      root.style.setProperty('--phone-nav-height',     `${Math.round(84 * scale)}px`);
+
+      return true;
+    }
+
+    function isMobileLayout() {
+      return document.documentElement.classList.contains('is-phone') || window.innerWidth < 700;
+    }
+
+    /* ── Swipe-to-delete ─────────────────────────────────────────── */
+    const SWIPE_THRESHOLD = 46;   // minimum drag to commit open
+    const SWIPE_VELOCITY  = 0.35; // px/ms threshold to commit on fast flick
+
+    function getSwipeOpenPx() {
+      return Math.max(168, Math.min(240, Math.round(window.innerWidth * 0.3)));
+    }
+
+    function bindInventoryRowGestures() {
+      document.querySelectorAll('.inventory-row').forEach(row => {
+        const card = row.querySelector('.inventory-card');
+        if (!card) return;
+
+        let startX   = 0;
+        let startY   = 0;
+        let startT   = 0;
+        let currentX = 0;
+        let dragging = false;
+        let axisLocked = null; // 'h' | 'v' | null
+        let pointerStartX = 0;
+        let pointerStartY = 0;
+        let pointerStartT = 0;
+        let tapHandled = false;
+
+        const inventoryId = () => row.dataset.inventoryId || '';
+        const representativeId = () => row.dataset.representativeId || row.dataset.inventoryId || '';
+
+        // Current resting offset for this card (0 = closed, negative = open)
+        const restingOffset = () =>
+          swipedInventoryId === inventoryId() ? -getSwipeOpenPx() : 0;
+
+        function setTransform(x, animate) {
+          card.classList.toggle('snap', animate);
+          card.style.transform = x === 0 ? '' : `translateX(${x}px)`;
+        }
+
+        card.addEventListener('pointerdown', e => {
+          if (e.button !== undefined && e.button !== 0) return;
+          pointerStartX = e.clientX;
+          pointerStartY = e.clientY;
+          pointerStartT = Date.now();
+          tapHandled = false;
+        });
+
+        card.addEventListener('pointerup', e => {
+          if (e.button !== undefined && e.button !== 0) return;
+          const dx = e.clientX - pointerStartX;
+          const dy = e.clientY - pointerStartY;
+          const elapsed = Date.now() - pointerStartT;
+          const isOpen = swipedInventoryId === inventoryId();
+
+          if (tapHandled) return;
+
+          if (Math.abs(dx) < 24 && Math.abs(dy) < 24 && elapsed < 700 && !isOpen) {
+            e.preventDefault();
+            e.stopPropagation();
+            tapHandled = true;
+            openInventoryPrimaryActionById(representativeId());
+          }
+        });
+
+        card.addEventListener('touchstart', e => {
+          const t = e.changedTouches[0];
+          startX   = t.clientX;
+          startY   = t.clientY;
+          startT   = Date.now();
+          currentX = restingOffset();
+          dragging = true;
+          axisLocked = null;
+          card.classList.remove('snap');
+        }, { passive: true });
+
+        card.addEventListener('touchmove', e => {
+          if (!dragging) return;
+          const t  = e.changedTouches[0];
+          const dx = t.clientX - startX;
+          const dy = t.clientY - startY;
+
+          if (!axisLocked) {
+            if (Math.abs(dx) > Math.abs(dy) + 4) axisLocked = 'h';
+            else if (Math.abs(dy) > Math.abs(dx) + 4) axisLocked = 'v';
+            else return;
+          }
+
+          if (axisLocked === 'v') return;
+
+          // Clamp: can only drag left (to open) or back right (to close)
+          const base    = restingOffset();
+          const raw     = base + dx;
+          const openPx  = getSwipeOpenPx();
+          const clamped = Math.max(-openPx - 12, Math.min(8, raw));
+          setTransform(clamped, false);
+        }, { passive: true });
+
+        card.addEventListener('touchend', e => {
+          if (!dragging) return;
+          dragging = false;
+
+          const t       = e.changedTouches[0];
+          const dx      = t.clientX - startX;
+          const dy      = t.clientY - startY;
+          const elapsed = Math.max(1, Date.now() - startT);
+          const vel     = Math.abs(dx) / elapsed; // px/ms
+          const base    = restingOffset();
+          const id      = inventoryId();
+          const openPx  = getSwipeOpenPx();
+
+          const isOpen = swipedInventoryId === id;
+
+          if (Math.abs(dx) < 22 && Math.abs(dy) < 22 && !isOpen) {
+            tapHandled = true;
+            openInventoryPrimaryActionById(representativeId());
+            return;
+          }
+
+          let target;
+
+          if (!isOpen) {
+            // currently closed — commit open if dragged far enough or fast enough leftward
+            if (dx < -SWIPE_THRESHOLD || (dx < -16 && vel > SWIPE_VELOCITY)) {
+              swipedInventoryId        = id;
+              target = -openPx;
+            } else {
+              target = 0;
+            }
+          } else {
+            // currently open — commit close if dragged right far enough
+            if (dx > SWIPE_THRESHOLD || (dx > 16 && vel > SWIPE_VELOCITY)) {
+              swipedInventoryId        = '';
+              target = 0;
+            } else {
+              target = -openPx;
+            }
+          }
+
+          setTransform(target, true);
+
+          // If state changed to open, re-render to show delete button underneath.
+          // If we're just snapping back, no re-render needed — avoid flicker.
+          if (target !== restingOffset()) {
+            // small delay so snap animation is visible before re-render resets DOM
+            setTimeout(() => renderInventory(), 230);
+          }
+        });
+      });
+    }
+
+    /* ── Navigation ──────────────────────────────────────────────── */
+    function setCommandMode(mode) {
+      commandMode = mode === 'add' ? 'add' : 'inventory';
+      const inventoryActive = commandMode === 'inventory';
+      const addActive = !inventoryActive;
+      const commandSearch = document.getElementById('commandSearch');
+      const appHeader = document.getElementById('appHeader');
+
+      document.getElementById('inventorySection').classList.toggle('active', inventoryActive);
+      document.getElementById('addSection').classList.toggle('active', addActive);
+      document.getElementById('inventoryTab').classList.toggle('active', inventoryActive);
+      document.getElementById('addTab').classList.toggle('active', addActive);
+      if (appHeader) {
+        appHeader.classList.toggle('inventory-mode', inventoryActive);
+      }
+
+      commandSearch.placeholder = inventoryActive
+        ? 'Filter inventory…'
+        : 'Search equipment library…';
+
+      commandSearch.value = inventoryActive
+        ? document.getElementById('inventoryFilter').value
+        : document.getElementById('equipmentSearch').value;
+
+      handleSearchInput('commandSearch');
+
+      if (inventoryActive) {
+        addFormInteractionPrimed = false;
+        loadInventory();
+      } else {
+        loadEquipmentIndex();
+        updateAddFlow();
+      }
+    }
+
+    function setMainStatus(html) {
+      const el = document.getElementById('mainStatus');
+      if (!el) return;
+      el.innerHTML = html || '';
+    }
+
+    function handleCommandSearchInput() {
+      const value = document.getElementById('commandSearch').value;
+
+      if (commandMode === 'inventory') {
+        document.getElementById('inventoryFilter').value = value;
+        handleSearchInput('commandSearch');
+        renderInventory();
+        return;
+      }
+
+      if (selectedEquipment) {
+        clearAddForm({
+          preserveCommandSearch: true,
+          skipSearchReload: true,
+          skipScrollReset: true
+        });
+      }
+
+      document.getElementById('equipmentSearch').value = value;
+      handleSearchInput('commandSearch');
+      debouncedSearchEquipment();
+    }
+
+    function clearCommandSearch() {
+      document.getElementById('commandSearch').value = '';
+
+      if (commandMode === 'inventory') {
+        document.getElementById('inventoryFilter').value = '';
+        handleSearchInput('commandSearch');
+        renderInventory();
+      } else {
+        if (selectedEquipment) {
+          clearAddForm({
+            preserveCommandSearch: false,
+            skipSearchReload: true,
+            skipScrollReset: true
+          });
+        }
+        document.getElementById('equipmentSearch').value = '';
+        handleSearchInput('commandSearch');
+        searchEquipment();
+      }
+
+      document.getElementById('commandSearch').focus();
+    }
+
+    function handleCommandSearchFocus() {
+      if (commandMode !== 'add') return;
+      if (!selectedEquipment) return;
+
+      clearAddForm({
+        preserveCommandSearch: true,
+        skipSearchReload: true,
+        skipScrollReset: true
+      });
+      document.getElementById('equipmentSearch').value = '';
+      handleSearchInput('equipmentSearch');
+      searchEquipment();
+    }
+
+    function getCampaignNotesDraft() {
+      try {
+        const raw = localStorage.getItem(NOTES_DRAFT_KEY);
+        if (!raw) return null;
+        const draft = JSON.parse(raw);
+        if (draft && typeof draft.body === 'string') return draft;
+      } catch (_) {}
+      return null;
+    }
+
+    function cacheCampaignNotesDraft(body, editingId) {
+      try {
+        localStorage.setItem(NOTES_DRAFT_KEY, JSON.stringify({
+          body: String(body || ''),
+          editingId: editingId || '',
+          ts: Date.now()
+        }));
+      } catch (_) {}
+    }
+
+    function clearCampaignNotesDraft() {
+      try {
+        localStorage.removeItem(NOTES_DRAFT_KEY);
+      } catch (_) {}
+    }
+
+    function updateCampaignNotesMeta() {
+      const meta = document.getElementById('campaignNotesMeta');
+      if (!meta) return;
+      const parts = [];
+      if (campaignNotes.length) {
+        parts.push(`${campaignNotes.length} note${campaignNotes.length === 1 ? '' : 's'}`);
+        if (campaignNotes[0].updatedAt) parts.push(`Latest ${formatShortDateTime(campaignNotes[0].updatedAt)}`);
+      }
+      meta.textContent = parts.join(' · ');
+    }
+
+    function setCampaignNotesStatus(html) {
+      const el = document.getElementById('campaignNotesStatus');
+      if (el) el.innerHTML = html || '';
+    }
+
+    function checkCampaignNotesAccess(force = false, callback) {
+      if (!force && campaignNotesAccess && typeof callback === 'function') {
+        callback(campaignNotesAccess);
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(res => {
+          const access = {
+            allowed: Boolean(res && res.ok && res.allowed),
+            message: (res && res.message) || 'Notes are under construction.'
+          };
+          campaignNotesAccess = access;
+          if (typeof callback === 'function') callback(access);
+        })
+        .withFailureHandler(() => {
+          const access = {
+            allowed: false,
+            message: 'Notes are under construction.'
+          };
+          campaignNotesAccess = access;
+          if (typeof callback === 'function') callback(access);
+        })
+        .apiGetCampaignNotesAccess();
+    }
+
+    function syncModalOpenState() {
+      document.body.classList.toggle('app-modal-open', Boolean(document.querySelector('.mobile-sheet.active')));
+    }
+
+    function markInventoryReady() {
+      if (inventoryReadyTransitioned) return;
+      inventoryReadyTransitioned = true;
+      window.requestAnimationFrame(() => {
+        document.documentElement.classList.remove('app-booting');
+        document.documentElement.classList.add('inventory-ready');
+      });
+    }
+
+    function findDuplicateInventoryCandidate(newItem) {
+      if (!newItem || !newItem['Inventory ID']) return null;
+      const rollupKey = getInventoryRollupKey(newItem);
+      return inventoryRows.find(row =>
+        row['Inventory ID'] !== newItem['Inventory ID'] &&
+        getInventoryRollupKey(row) === rollupKey
+      ) || null;
+    }
+
+    function showCombineChoice(newItem, existingItem) {
+      pendingCombineChoice = {
+        sourceId: newItem['Inventory ID'],
+        targetId: existingItem['Inventory ID'],
+        itemName: newItem['Item'] || existingItem['Item'] || 'Item',
+        sourceQty: toNumber(newItem['Qty'] || 0),
+        targetQty: toNumber(existingItem['Qty'] || 0)
+      };
+
+      document.getElementById('combineItemTitle').textContent = pendingCombineChoice.itemName;
+      document.getElementById('combineItemMeta').textContent =
+        `Existing: ${formatCount(pendingCombineChoice.targetQty)} · New: ${formatCount(pendingCombineChoice.sourceQty)}`;
+      document.getElementById('combineStatus').textContent = 'This item already exists in inventory.';
+      document.getElementById('combineSheet').classList.add('active');
+      syncModalOpenState();
+    }
+
+    function keepDuplicateInventoryItem() {
+      pendingCombineChoice = null;
+      document.getElementById('combineSheet').classList.remove('active');
+      syncModalOpenState();
+    }
+
+    function confirmCombineInventoryItem() {
+      if (!pendingCombineChoice) return;
+      const choice = { ...pendingCombineChoice };
+      document.getElementById('combineStatus').textContent = 'Combining…';
+      google.script.run
+        .withSuccessHandler(res => {
+          if (!res || !res.ok || !res.item) {
+            document.getElementById('combineStatus').innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Combine failed.')}</span>`;
+            return;
+          }
+          inventoryRows = inventoryRows
+            .filter(row => row['Inventory ID'] !== choice.sourceId)
+            .map(row => row['Inventory ID'] === choice.targetId ? { ...row, ...res.item } : row);
+          cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+          renderInventory();
+          setMainStatus(`<span class="success">${escapeHtml(res.message || 'Items combined.')}</span>`);
+          keepDuplicateInventoryItem();
+        })
+        .withFailureHandler(err => {
+          document.getElementById('combineStatus').innerHTML = `<span class="error">Combine failed: ${escapeHtml(err.message || err)}</span>`;
+        })
+        .apiCombineInventoryItems({
+          sourceId: choice.sourceId,
+          targetId: choice.targetId
+        });
+    }
+
+    function openCampaignNotes() {
+      checkCampaignNotesAccess(false, access => {
+        if (!access.allowed) {
+          setMainStatus(`<span class="error">${escapeHtml(access.message || 'Notes are under construction.')}</span>`);
+          return;
+        }
+
+        const sheet = document.getElementById('notesSheet');
+        const body = document.getElementById('campaignNotesBody');
+        const draft = getCampaignNotesDraft();
+
+        sheet.classList.add('active');
+        syncModalOpenState();
+        bindCampaignNotesViewport();
+        syncCampaignNotesViewport();
+
+        if (draft && typeof draft.body === 'string') {
+          body.value = draft.body;
+          campaignNoteDraft = draft.body;
+          campaignNoteEditingId = draft.editingId || '';
+          setCampaignNotesStatus('<span class="success">Draft restored locally.</span>');
+        } else if (campaignNoteDraft) {
+          body.value = campaignNoteDraft;
+          setCampaignNotesStatus('Draft ready.');
+        } else {
+          body.value = '';
+          setCampaignNotesStatus('Loading…');
+        }
+
+        syncCampaignNoteComposerUi();
+        renderCampaignNotes();
+        updateCampaignNotesMeta();
+        loadCampaignNotes();
+        setTimeout(() => {
+          body.focus();
+          scrollCampaignNotesToBottom();
+          syncCampaignNotesViewport();
+        }, 60);
+      });
+    }
+
+    function closeCampaignNotes() {
+      const body = document.getElementById('campaignNotesBody').value;
+      campaignNoteDraft = body;
+      cacheCampaignNotesDraft(body, campaignNoteEditingId);
+      campaignNoteEditingId = '';
+      document.getElementById('notesSheet').classList.remove('active');
+      document.documentElement.style.setProperty('--keyboard-offset', '0px');
+      syncModalOpenState();
+    }
+
+    function bindCampaignNotesViewport() {
+      if (campaignNotesViewportBound || !window.visualViewport) return;
+      campaignNotesViewportBound = true;
+      window.visualViewport.addEventListener('resize', syncCampaignNotesViewport);
+      window.visualViewport.addEventListener('scroll', syncCampaignNotesViewport);
+    }
+
+    function syncCampaignNotesViewport() {
+      if (!document.getElementById('notesSheet').classList.contains('active')) {
+        document.documentElement.style.setProperty('--keyboard-offset', '0px');
+        return;
+      }
+      const vv = window.visualViewport;
+      if (!vv) return;
+      const offset = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      document.documentElement.style.setProperty('--keyboard-offset', `${offset}px`);
+    }
+
+    function loadCampaignNotes(preloadOnly = false) {
+      if (campaignNotesAccess && !campaignNotesAccess.allowed) return;
+      if (campaignNotesLoading) return;
+      campaignNotesLoading = true;
+      google.script.run
+        .withSuccessHandler(res => {
+          campaignNotesLoading = false;
+          if (!res || !res.ok || !Array.isArray(res.notes)) {
+            if (!preloadOnly) {
+              setCampaignNotesStatus(`<span class="error">${escapeHtml((res && res.error) || 'Could not load notes.')}</span>`);
+            }
+            return;
+          }
+
+          campaignNotes = res.notes;
+          campaignNotesLoaded = true;
+          updateCampaignNotesMeta();
+          if (!preloadOnly || document.getElementById('notesSheet').classList.contains('active')) {
+            renderCampaignNotes();
+            setCampaignNotesStatus('Ready.');
+            scrollCampaignNotesToBottom();
+          }
+        })
+        .withFailureHandler(err => {
+          campaignNotesLoading = false;
+          if (!preloadOnly) {
+            setCampaignNotesStatus(`<span class="error">Notes failed: ${escapeHtml(err.message || err)}</span>`);
+          }
+        })
+        .apiGetCampaignNotes();
+    }
+
+    function handleCampaignNotesInput() {
+      const body = document.getElementById('campaignNotesBody').value;
+      campaignNoteDraft = body;
+      cacheCampaignNotesDraft(body, campaignNoteEditingId);
+      setCampaignNotesStatus(body.trim() ? 'Draft ready.' : 'Ready.');
+      syncCampaignNoteComposerUi();
+    }
+
+    function syncCampaignNoteComposerUi() {
+      const button = document.getElementById('campaignNotesSaveButton');
+      const clear = document.getElementById('campaignNotesClear');
+      const body = document.getElementById('campaignNotesBody');
+      if (!button) return;
+      button.textContent = campaignNoteEditingId ? 'Update Note' : 'Add Note';
+      button.disabled = campaignNotesSaving;
+      if (clear && body) {
+        clear.classList.toggle('visible', Boolean(body.value));
+      }
+    }
+
+    function focusCampaignNoteComposer(selectAll = false) {
+      const body = document.getElementById('campaignNotesBody');
+      const composerBar = document.getElementById('notesComposerBar');
+      if (!body || !composerBar) return;
+
+      composerBar.scrollIntoView({ behavior: 'smooth', block: 'end' });
+
+      setTimeout(() => {
+        body.focus({ preventScroll: true });
+        if (typeof body.setSelectionRange === 'function') {
+          if (selectAll) {
+            body.setSelectionRange(0, body.value.length);
+          } else {
+            const end = body.value.length;
+            body.setSelectionRange(end, end);
+          }
+        }
+        composerBar.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        syncCampaignNotesViewport();
+      }, 80);
+    }
+
+    function renderCampaignNotes() {
+      const list = document.getElementById('campaignNotesList');
+      if (!list) return;
+
+      if (!campaignNotes.length) {
+        list.innerHTML = '<div class="status centered">No notes yet.</div>';
+        return;
+      }
+
+      const orderedNotes = campaignNotes.slice().sort((a, b) => {
+        const aTime = new Date(a.createdAt || a.updatedAt || 0).getTime();
+        const bTime = new Date(b.createdAt || b.updatedAt || 0).getTime();
+        return aTime - bTime;
+      });
+
+      list.innerHTML = orderedNotes.map(note => `
+        <div class="notes-note-row" data-note-id="${escapeHtml(note.noteId)}">
+          <button class="notes-edit-action" type="button" onclick="event.stopPropagation(); startEditCampaignNote('${escapeJsString(note.noteId)}')" style="width:${NOTE_ACTION_WIDTH}px;">Edit</button>
+          <button class="notes-delete-action" type="button" onclick="event.stopPropagation(); deleteCampaignNote('${escapeJsString(note.noteId)}')" style="width:${NOTE_ACTION_WIDTH}px;">Delete</button>
+          <div class="notes-note notes-note-card ${note._pending ? 'pending' : ''} ${campaignNoteEditingId === note.noteId ? 'editing' : ''}" data-note-id="${escapeHtml(note.noteId)}" ondblclick="event.stopPropagation(); startEditCampaignNote('${escapeJsString(note.noteId)}')">
+            <div class="notes-note-meta">${escapeHtml(formatShortDateTime(note.updatedAt || note.createdAt))}${note.updatedBy ? ` · ${escapeHtml(note.updatedBy)}` : ''}</div>
+            <div class="notes-note-body">${escapeHtml(note.body)}</div>
+          </div>
+        </div>
+      `).join('');
+
+      bindCampaignNoteGestures();
+    }
+
+    function scrollCampaignNotesToBottom() {
+      const list = document.getElementById('campaignNotesList');
+      if (!list) return;
+      requestAnimationFrame(() => {
+        list.scrollTop = list.scrollHeight;
+      });
+    }
+
+    function bindCampaignNoteGestures() {
+      document.querySelectorAll('.notes-note-row').forEach(row => {
+        const card = row.querySelector('.notes-note-card');
+        if (!card) return;
+        let startX = 0;
+        let startY = 0;
+        let dragging = false;
+        let axisLocked = null;
+        let triggered = false;
+
+        function setNoteSwipeVisual(currentOffset, animate) {
+          const editButton = row.querySelector('.notes-edit-action');
+          const deleteButton = row.querySelector('.notes-delete-action');
+          const clamped = Math.max(-NOTE_ACTION_MAX_DRAG, Math.min(NOTE_ACTION_MAX_DRAG, currentOffset));
+          const revealOffset = Math.max(-NOTE_ACTION_WIDTH, Math.min(NOTE_ACTION_WIDTH, clamped));
+          const editProgress = revealOffset > 0 ? Math.min(1, revealOffset / NOTE_ACTION_WIDTH) : 0;
+          const deleteProgress = revealOffset < 0 ? Math.min(1, Math.abs(revealOffset) / NOTE_ACTION_WIDTH) : 0;
+
+          card.classList.toggle('snap', animate);
+          card.style.transform = clamped ? `translateX(${clamped}px)` : '';
+
+          if (editButton) {
+            editButton.style.opacity = String(editProgress);
+            editButton.style.transform = `translateX(${Math.round(-18 * (1 - editProgress))}px) scale(${(0.96 + (0.04 * editProgress)).toFixed(3)})`;
+          }
+          if (deleteButton) {
+            deleteButton.style.opacity = String(deleteProgress);
+            deleteButton.style.transform = `translateX(${Math.round(18 * (1 - deleteProgress))}px) scale(${(0.96 + (0.04 * deleteProgress)).toFixed(3)})`;
+          }
+        }
+
+        card.addEventListener('touchstart', e => {
+          const touch = e.changedTouches[0];
+          startX = touch.clientX;
+          startY = touch.clientY;
+          dragging = true;
+          triggered = false;
+          axisLocked = null;
+          setNoteSwipeVisual(0, false);
+        }, { passive: true });
+        card.addEventListener('touchend', e => {
+          if (!dragging) return;
+          dragging = false;
+          if (triggered) return;
+          const touch = e.changedTouches[0];
+          const dx = touch.clientX - startX;
+          const dy = touch.clientY - startY;
+          if (Math.abs(dy) > 40) return;
+          if (Math.abs(dx) < 24 && Math.abs(dy) < 24) {
+            setNoteSwipeVisual(0, true);
+            return;
+          }
+          setNoteSwipeVisual(0, true);
+        }, { passive: true });
+        card.addEventListener('touchmove', e => {
+          if (!dragging) return;
+          const touch = e.changedTouches[0];
+          const dx = touch.clientX - startX;
+          const dy = touch.clientY - startY;
+          if (!axisLocked) {
+            if (Math.abs(dx) > Math.abs(dy) + 4) axisLocked = 'h';
+            else if (Math.abs(dy) > Math.abs(dx) + 4) axisLocked = 'v';
+            else return;
+          }
+          if (axisLocked === 'v') return;
+          const liveOffset = Math.max(-NOTE_ACTION_MAX_DRAG, Math.min(NOTE_ACTION_MAX_DRAG, dx));
+          setNoteSwipeVisual(liveOffset, false);
+          if (liveOffset <= -NOTE_ACTION_ACTIVATE) {
+            dragging = false;
+            triggered = true;
+            setNoteSwipeVisual(0, true);
+            deleteCampaignNote(row.dataset.noteId);
+            return;
+          }
+          if (liveOffset >= NOTE_ACTION_ACTIVATE) {
+            dragging = false;
+            triggered = true;
+            setNoteSwipeVisual(0, true);
+            startEditCampaignNote(row.dataset.noteId);
+          }
+        }, { passive: true });
+      });
+    }
+
+    function startEditCampaignNote(noteId) {
+      const note = campaignNotes.find(entry => entry.noteId === noteId);
+      if (!note) return;
+      campaignNoteEditingId = noteId;
+      campaignNoteDraft = note.body;
+      document.getElementById('campaignNotesBody').value = note.body;
+      cacheCampaignNotesDraft(note.body, noteId);
+      setCampaignNotesStatus('Editing note.');
+      renderCampaignNotes();
+      syncCampaignNoteComposerUi();
+      focusCampaignNoteComposer(true);
+    }
+
+    function clearCampaignNoteComposer() {
+      campaignNoteEditingId = '';
+      campaignNoteDraft = '';
+      const body = document.getElementById('campaignNotesBody');
+      body.value = '';
+      clearCampaignNotesDraft();
+      setCampaignNotesStatus('Ready.');
+      renderCampaignNotes();
+      syncCampaignNoteComposerUi();
+      focusCampaignNoteComposer(false);
+    }
+
+    function submitCampaignNote() {
+      const bodyInput = document.getElementById('campaignNotesBody');
+      const body = bodyInput.value.trim();
+      if (!body) {
+        setCampaignNotesStatus('<span class="error">Write a note first.</span>');
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+      const isEditing = Boolean(campaignNoteEditingId);
+      const tempId = isEditing ? campaignNoteEditingId : `temp_${Date.now()}`;
+      const previousNotes = campaignNotes.slice();
+      const existing = campaignNotes.find(note => note.noteId === campaignNoteEditingId);
+      const optimistic = {
+        noteId: tempId,
+        createdAt: existing ? existing.createdAt : nowIso,
+        updatedAt: nowIso,
+        updatedBy: 'You',
+        body,
+        _pending: true
+      };
+
+      if (isEditing) {
+        campaignNotes = campaignNotes.map(note => note.noteId === campaignNoteEditingId ? optimistic : note);
+      } else {
+        campaignNotes = [...campaignNotes, optimistic];
+      }
+
+      campaignNotesLoaded = true;
+      campaignNoteDraft = '';
+      campaignNotesSaving = true;
+      renderCampaignNotes();
+      scrollCampaignNotesToBottom();
+      updateCampaignNotesMeta();
+      setCampaignNotesStatus(isEditing ? 'Updating…' : 'Adding…');
+      bodyInput.value = '';
+      campaignNoteEditingId = '';
+      clearCampaignNotesDraft();
+      syncCampaignNoteComposerUi();
+
+      const runner = google.script.run
+        .withSuccessHandler(res => {
+          campaignNotesSaving = false;
+          if (!res || !res.ok || !res.note) {
+            campaignNotes = previousNotes;
+            renderCampaignNotes();
+            updateCampaignNotesMeta();
+            setCampaignNotesStatus(`<span class="error">${escapeHtml((res && res.error) || 'Note save failed.')}</span>`);
+            campaignNoteEditingId = isEditing ? tempId : '';
+            bodyInput.value = body;
+            campaignNoteDraft = body;
+            cacheCampaignNotesDraft(body, campaignNoteEditingId);
+            syncCampaignNoteComposerUi();
+            return;
+          }
+
+          if (isEditing) {
+            campaignNotes = campaignNotes.map(note => note.noteId === tempId ? res.note : note);
+          } else {
+            campaignNotes = campaignNotes.map(note => note.noteId === tempId ? res.note : note);
+          }
+          renderCampaignNotes();
+          scrollCampaignNotesToBottom();
+          updateCampaignNotesMeta();
+          setCampaignNotesStatus(`<span class="success">${escapeHtml(res.message || 'Note saved.')}</span>`);
+          syncCampaignNoteComposerUi();
+        })
+        .withFailureHandler(err => {
+          campaignNotesSaving = false;
+          campaignNotes = previousNotes;
+          renderCampaignNotes();
+          updateCampaignNotesMeta();
+          setCampaignNotesStatus(`<span class="error">Note save failed: ${escapeHtml(err.message || err)}</span>`);
+          campaignNoteEditingId = isEditing ? tempId : '';
+          bodyInput.value = body;
+          campaignNoteDraft = body;
+          cacheCampaignNotesDraft(body, campaignNoteEditingId);
+          syncCampaignNoteComposerUi();
+        });
+
+      if (isEditing) {
+        runner.apiUpdateCampaignNote({ noteId: tempId, body });
+      } else {
+        runner.apiAddCampaignNote({ body });
+      }
+    }
+
+    function deleteCampaignNote(noteId) {
+      const note = campaignNotes.find(entry => entry.noteId === noteId);
+      if (!note) return;
+      const previousNotes = campaignNotes.slice();
+      campaignNotes = campaignNotes.filter(entry => entry.noteId !== noteId);
+      renderCampaignNotes();
+      updateCampaignNotesMeta();
+      setCampaignNotesStatus('Deleting…');
+
+      google.script.run
+        .withSuccessHandler(res => {
+          if (!res || !res.ok) {
+            campaignNotes = previousNotes;
+            renderCampaignNotes();
+            updateCampaignNotesMeta();
+            setCampaignNotesStatus(`<span class="error">${escapeHtml((res && res.error) || 'Delete failed.')}</span>`);
+            return;
+          }
+          setCampaignNotesStatus(`<span class="success">${escapeHtml(res.message || 'Note deleted.')}</span>`);
+        })
+        .withFailureHandler(err => {
+          campaignNotes = previousNotes;
+          renderCampaignNotes();
+          updateCampaignNotesMeta();
+          setCampaignNotesStatus(`<span class="error">Delete failed: ${escapeHtml(err.message || err)}</span>`);
+        })
+        .apiDeleteCampaignNote(noteId);
+    }
+
+    function showSection(section) {
+      setCommandMode(section === 'add' ? 'add' : 'inventory');
+    }
+
+    function handleAddTabClick() {
+      if (commandMode === 'add') {
+        if (shouldSubmitAddFromNav()) {
+          addInventoryItem();
+          return;
+        }
+        clearAddForm();
+        return;
+      }
+
+      setCommandMode('add');
+    }
+
+    function shouldSubmitAddFromNav() {
+      if (commandMode !== 'add') return false;
+
+      const active = document.activeElement;
+      const activeId = active && active.id ? active.id : '';
+      const addFieldIds = new Set([
+        'item',
+        'qty',
+        'holder',
+        'category',
+        'rarity',
+        'valueGp',
+        'factionRelevance',
+        'notes',
+        'quickAddSize'
+      ]);
+
+      if (activeId === 'commandSearch' || activeId === 'equipmentSearch') return false;
+
+      const detailsCard = document.getElementById('addDetailsCard');
+      const detailsVisible = detailsCard && detailsCard.style.display !== 'none';
+      const hasItemContext = Boolean((document.getElementById('item').value || '').trim() || selectedEquipment);
+      const isActivelyInAddField = Boolean(activeId && addFieldIds.has(activeId));
+
+      return Boolean(detailsVisible && hasItemContext && (isActivelyInAddField || addFormInteractionPrimed));
+    }
+
+    function updateAddFormInteractionState(target) {
+      const targetId = target && target.id ? target.id : '';
+      const addFieldIds = new Set([
+        'item',
+        'qty',
+        'holder',
+        'category',
+        'rarity',
+        'valueGp',
+        'factionRelevance',
+        'notes',
+        'quickAddSize'
+      ]);
+
+      if (addFieldIds.has(targetId)) {
+        addFormInteractionPrimed = true;
+        return;
+      }
+
+      if (targetId === 'commandSearch' || targetId === 'equipmentSearch') {
+        addFormInteractionPrimed = false;
+      }
+    }
+
+    function handleSearchInput(inputId) {
+      const input = document.getElementById(inputId);
+      const clear = document.getElementById(`${inputId}Clear`);
+      if (!input || !clear) return;
+
+      clear.classList.toggle('visible', Boolean(input.value));
+    }
+
+    function clearSearchField(inputId, afterClear) {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+
+      input.value = '';
+      handleSearchInput(inputId);
+
+      if (typeof afterClear === 'function') {
+        afterClear();
+      }
+
+      input.focus();
+    }
+
+    /* ── Inventory: load & render ────────────────────────────────── */
+    function loadInventory(force = false) {
+      const status = document.getElementById('inventoryStatus');
+      const list   = document.getElementById('inventoryList');
+      const now = Date.now();
+
+      closeInventoryPanels(false);
+
+      let paintedFromCache = false;
+
+      const cachedPayload = getCachedInventoryPayload();
+      if (cachedPayload && cachedPayload.rows.length) {
+        inventoryRows = cachedPayload.rows;
+        inventoryResourceLedger = cachedPayload.resourceLedger;
+        renderInventory();
+        markInventoryReady();
+        paintedFromCache = true;
+        status.classList.remove('centered');
+        status.textContent = 'Refreshing…';
+      }
+
+      if (!paintedFromCache) {
+        status.classList.add('centered');
+        status.textContent = 'Loading…';
+        list.innerHTML = '';
+      }
+
+      if (!force && paintedFromCache && (now - lastInventoryLoadAt) < INVENTORY_REVALIDATE_MS) {
+        return;
+      }
+
+      lastInventoryLoadAt = now;
+
+      google.script.run
+        .withSuccessHandler(res => {
+          if (!res || !res.ok) {
+            if (!inventoryRows.length) {
+              status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Failed to load.')}</span>`;
+            } else {
+              status.classList.remove('centered');
+              status.textContent = 'Refresh failed — showing last known data.';
+            }
+            markInventoryReady();
+            return;
+          }
+
+          inventoryRows = res.rows || [];
+          inventoryResourceLedger = Array.isArray(res.resourceLedger) ? res.resourceLedger : [];
+
+          cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+          lastInventoryLoadAt = Date.now();
+
+          renderInventory();
+          markInventoryReady();
+        })
+        .withFailureHandler(err => {
+          if (!inventoryRows.length) {
+            status.innerHTML = `<span class="error">Load failed: ${escapeHtml(err.message || err)}</span>`;
+          } else {
+            status.classList.remove('centered');
+            status.textContent = 'Refresh failed — showing last known data.';
+          }
+          markInventoryReady();
+        })
+        .apiGetInventory();
+    }
+
+    function renderInventory() {
+      const filter = document.getElementById('inventoryFilter').value.trim().toLowerCase();
+      const status = document.getElementById('inventoryStatus');
+      const list   = document.getElementById('inventoryList');
+
+      let rows = inventoryRows || [];
+      if (filter) {
+        rows = rows.filter(r =>
+          [r['Item'], r['Category'], r['Rarity'], r['Holder'], r['Faction Relevance'], r['Notes'], r['Date Added']]
+            .join(' ').toLowerCase().includes(filter)
+        );
+      }
+
+      if (!rows.length) {
+        status.classList.add('centered');
+        status.textContent = filter ? 'No matches.' : 'No inventory yet.';
+        list.innerHTML = '';
+        return;
+      }
+
+      status.classList.remove('centered');
+      status.textContent = `${rows.length} item${rows.length === 1 ? '' : 's'}`;
+
+      if (!filter) {
+        list.innerHTML = renderInventoryDashboard(rows);
+        bindInventoryRowGestures();
+        return;
+      }
+
+      const swipeOpenPx = getSwipeOpenPx();
+
+      list.innerHTML = rows.map(row => {
+        return renderInventoryRowCard(row, { showMeta: true });
+      }).join('');
+
+      bindInventoryRowGestures();
+    }
+
+    function renderInventoryRowCard(row, options) {
+      const opts = options || {};
+      const representativeId = row._representativeInventoryId || row['Inventory ID'] || '';
+      const rollupKey = row._rollupKey || '';
+      const index = inventoryRows.findIndex(r => r['Inventory ID'] === representativeId);
+      const inventoryId = escapeHtml(row['Inventory ID'] || '');
+      const representativeIdAttr = escapeHtml(representativeId);
+      const rollupKeyAttr = escapeHtml(rollupKey);
+      const qty = escapeHtml(row['Qty'] || '');
+      const item = escapeHtml(row['Item'] || '');
+      const holder = escapeHtml(row['Holder'] || '');
+      const category = escapeHtml(row['Category'] || '');
+      const rarity = escapeHtml(row['Rarity'] || '');
+      const valueGp = escapeHtml(row['Value GP'] || '');
+      const isSwiped = swipedInventoryId && swipedInventoryId === row['Inventory ID'];
+      const swipeOpenPx = getSwipeOpenPx();
+      const metaParts = opts.showMeta ? [
+        category,
+        rarity,
+        holder ? `${holder}` : ''
+      ].filter(Boolean) : [];
+
+      if (opts.showMeta && valueGp) metaParts.push(`${valueGp} gp`);
+      if (row._rollupCount > 1) metaParts.push(`${row._rollupCount} additions`);
+
+      const meta = metaParts.join(' · ');
+      const offsetStyle = isSwiped ? ` style="transform:translateX(-${swipeOpenPx}px)"` : '';
+
+      return `
+        <div class="inventory-row" data-index="${index}" data-inventory-id="${inventoryId}" data-representative-id="${representativeIdAttr}">
+          <button
+            class="inventory-delete-action"
+            type="button"
+            data-representative-id="${representativeIdAttr}"
+            data-rollup-key="${rollupKeyAttr}"
+            onclick="event.stopPropagation(); handleInventoryDeleteActionById(this.dataset.representativeId, this.dataset.rollupKey || '')"
+            style="width:${swipeOpenPx}px"
+          >Delete</button>
+          <div class="inventory-card" id="inventory_${index}"${offsetStyle}
+               data-representative-id="${representativeIdAttr}"
+               onclick="handleInventoryCardClickById(this.dataset.representativeId)"
+               ondblclick="event.stopPropagation(); openInventoryDescriptionById(this.dataset.representativeId)">
+            <div class="item-title">${qty ? qty + '× ' : ''}${item}</div>
+            ${meta ? `<div class="item-meta">${meta}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderInventoryDashboard(rows) {
+      const totals = rows.reduce((acc, row) => {
+        const name = String(row['Item'] || '').toLowerCase();
+        const category = String(row['Category'] || '').toLowerCase();
+        const qty = toNumber(row['Qty'] || 0);
+
+        if (category === 'currency' || /\b(gold|gp|platinum|pp|silver|sp|copper|cp)\b/.test(name)) {
+          acc.gold += getGoldEquivalent(row);
+        }
+
+        if (category === 'delerium' || /delerium|delirium/.test(name)) {
+          acc.delerium += qty;
+        }
+
+        return acc;
+      }, { gold: 0, delerium: 0 });
+
+      const groups = buildInventoryGroups(rows);
+
+      return `
+        <div class="dashboard-grid">
+          <button class="dashboard-stat" type="button" onclick="toggleResourceBreakout('gold')">
+            <div class="dashboard-value">${escapeHtml(formatCount(totals.gold))}</div>
+            <div class="dashboard-label">Gold</div>
+          </button>
+          <button class="dashboard-stat" type="button" onclick="toggleResourceBreakout('delerium')">
+            <div class="dashboard-value">${escapeHtml(formatCount(totals.delerium))}</div>
+            <div class="dashboard-label">Delerium</div>
+          </button>
+          ${expandedResource ? renderResourceBreakout(expandedResource, rows) : ''}
+        </div>
+        ${groups.map(group => renderInventoryGroup(group)).join('')}
+        ${renderNotesShortcut()}
+      `;
+    }
+
+    function renderNotesShortcut() {
+      return `
+        <div class="inventory-group notes-shortcut">
+          <button class="group-toggle" type="button" onclick="openCampaignNotes()">
+            <span>Notes</span>
+            <span class="group-count">Under Construction</span>
+          </button>
+        </div>
+      `;
+    }
+
+    function toggleResourceBreakout(resource) {
+      expandedResource = expandedResource === resource ? '' : resource;
+      renderInventory();
+    }
+
+    function renderResourceBreakout(resource, rows) {
+      const lines = resource === 'gold'
+        ? getGoldBreakout(rows)
+        : getDeleriumBreakout(rows);
+      const payId = `${resource}PayAmount`;
+      const isBusy = Boolean(resourcePayInFlight[resource]);
+      const undo = lastResourceUndo[resource];
+      const sizeSelect = resource === 'delerium'
+        ? `<select id="deleriumPaySize">
+             <option value="chip">chip</option>
+             <option value="fragment">fragment</option>
+             <option value="shard">shard</option>
+             <option value="crystal">crystal</option>
+             <option value="geode">geode</option>
+             <option value="massive cluster">massive cluster</option>
+             <option value="unknown">unknown</option>
+           </select>`
+        : '';
+
+      return `
+        <div class="resource-breakout">
+          <div class="resource-lines">
+            ${lines.map(line => `
+              <div class="resource-line">
+                <span>${escapeHtml(line.label)}</span>
+                <strong>${escapeHtml(formatCount(line.qty))}</strong>
+              </div>
+            `).join('')}
+          </div>
+          <div class="resource-pay">
+            ${sizeSelect}
+            <input id="${payId}" type="number" min="0" step="1" inputmode="decimal" placeholder="Pay">
+            <button id="${resource}PayButton" class="danger" type="button" onclick="payResource('${resource}')" ${isBusy ? 'disabled' : ''}>${isBusy ? 'Recording…' : 'Pay'}</button>
+          </div>
+          ${renderResourceLedger(resource)}
+          ${undo ? `
+            <div class="resource-undo">
+              <div class="status success">${escapeHtml(undo.message || 'Recorded payment.')}</div>
+              <button class="secondary" type="button" onclick="undoResourcePay('${resource}')">Undo</button>
+            </div>
+          ` : `<div id="${resource}PayStatus" class="status"></div>`}
+        </div>
+      `;
+    }
+
+    function renderResourceLedger(resource) {
+      const entries = (inventoryResourceLedger || [])
+        .filter(entry => String(entry['Resource'] || '').toLowerCase() === resource)
+        .slice(0, 8);
+
+      if (!entries.length) {
+        return `
+          <div class="resource-ledger">
+            <div class="resource-ledger-title">Ledger</div>
+            <div class="resource-ledger-row">
+              <span></span>
+              <span>No recent entries.</span>
+              <span></span>
+            </div>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="resource-ledger">
+          <div class="resource-ledger-title">Ledger</div>
+          ${entries.map(entry => {
+            const qty = toNumber(entry['Qty'] || 0);
+            const sign = qty >= 0 ? '+' : '-';
+            const label = resource === 'gold'
+              ? 'Gold'
+              : titleCase(entry['Subtype'] || 'delerium');
+            return `
+              <div class="resource-ledger-row">
+                <span class="resource-ledger-delta ${qty < 0 ? 'negative' : ''}">${sign}${escapeHtml(formatCount(Math.abs(qty)))}</span>
+                <span>${escapeHtml(label)}</span>
+                <span class="resource-ledger-date">${escapeHtml(formatShortDate(entry['Timestamp']))}</span>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    function getGoldBreakout(rows) {
+      const coins = { platinum: 0, gold: 0, silver: 0, copper: 0 };
+
+      rows.forEach(row => {
+        const name = String(row['Item'] || '').toLowerCase();
+        const category = String(row['Category'] || '').toLowerCase();
+        const qty = toNumber(row['Qty'] || 0);
+
+        if (category !== 'currency' && !/\b(gold|gp|platinum|pp|silver|sp|copper|cp)\b/.test(name)) return;
+
+        if (/\b(platinum|pp)\b/.test(name)) coins.platinum += qty;
+        else if (/\b(silver|sp)\b/.test(name)) coins.silver += qty;
+        else if (/\b(copper|cp)\b/.test(name)) coins.copper += qty;
+        else coins.gold += qty;
+      });
+
+      return [
+        { label: 'Platinum', qty: coins.platinum },
+        { label: 'Gold', qty: coins.gold },
+        { label: 'Silver', qty: coins.silver },
+        { label: 'Copper', qty: coins.copper }
+      ];
+    }
+
+    function getGoldEquivalent(row) {
+      const name = String(row['Item'] || '').toLowerCase();
+      const qty = toNumber(row['Qty'] || 0);
+
+      if (/\b(platinum|pp)\b/.test(name)) return qty * 10;
+      if (/\b(silver|sp)\b/.test(name)) return qty * 0.1;
+      if (/\b(copper|cp)\b/.test(name)) return qty * 0.01;
+      return qty;
+    }
+
+    function getDeleriumBreakout(rows) {
+      const sizes = {
+        chip: 0,
+        fragment: 0,
+        shard: 0,
+        crystal: 0,
+        geode: 0,
+        'massive cluster': 0,
+        unknown: 0
+      };
+
+      rows.forEach(row => {
+        const name = String(row['Item'] || '').toLowerCase();
+        const category = String(row['Category'] || '').toLowerCase();
+        const notes = String(row['Notes'] || '').toLowerCase();
+        const qty = toNumber(row['Qty'] || 0);
+
+        if (category !== 'delerium' && !/delerium|delirium/.test(name)) return;
+
+        if (name.includes('massive cluster') || notes.includes('massive cluster')) sizes['massive cluster'] += qty;
+        else if (name.includes('geode') || name.includes('large crystal') || notes.includes('geode') || notes.includes('large crystal')) sizes.geode += qty;
+        else if (name.includes('chip') || notes.includes('chip')) sizes.chip += qty;
+        else if (name.includes('fragment') || notes.includes('fragment')) sizes.fragment += qty;
+        else if (name.includes('shard') || notes.includes('shard')) sizes.shard += qty;
+        else if (name.includes('unknown') || notes.includes('unknown')) sizes.unknown += qty;
+        else sizes.crystal += qty;
+      });
+
+      return Object.keys(sizes).map(size => ({
+        label: titleCase(size),
+        qty: sizes[size]
+      }));
+    }
+
+    function buildInventoryGroups(rows) {
+      const groupMap = {
+        weapons: { key: 'weapons', label: 'Weapons', rows: [] },
+        armor: { key: 'armor', label: 'Armor', rows: [] },
+        accessories: { key: 'accessories', label: 'Accessories', rows: [] },
+        potions: { key: 'potions', label: 'Potions', rows: [] },
+        treasure: { key: 'treasure', label: 'Treasure', rows: [] },
+        misc: { key: 'misc', label: 'Misc', rows: [] }
+      };
+
+      rows.forEach(row => {
+        if (isDashboardResourceRow_(row)) return;
+        const key = getInventoryGroupKey(row);
+        groupMap[key].rows.push(row);
+      });
+
+      return Object.values(groupMap).filter(group => group.rows.length);
+    }
+
+    function isDashboardResourceRow_(row) {
+      const name = String(row['Item'] || '').toLowerCase();
+      const category = String(row['Category'] || '').toLowerCase();
+
+      return (
+        category === 'currency' ||
+        category === 'delerium' ||
+        /\b(gold|gp|platinum|pp|silver|sp|copper|cp)\b/.test(name) ||
+        /delerium|delirium/.test(name)
+      );
+    }
+
+    function getInventoryGroupKey(row) {
+      const category = String(row['Category'] || '').toLowerCase();
+      const name = String(row['Item'] || '').toLowerCase();
+
+      if (category.includes('weapon') || /\b(sword|bow|axe|dagger|mace|staff|rapier|scimitar|arrow)\b/.test(name)) {
+        return 'weapons';
+      }
+
+      if (category.includes('armor') || category.includes('shield') || /\b(armor|shield|breastplate|mail|plate)\b/.test(name)) {
+        return 'armor';
+      }
+
+      if (isTreasureItem_(row)) {
+        return 'treasure';
+      }
+
+      if (category.includes('potion') || name.includes('potion')) {
+        return 'potions';
+      }
+
+      if (isAccessoryItem_(row)) {
+        return 'accessories';
+      }
+
+      return 'misc';
+    }
+
+    function isAccessoryItem_(row) {
+      const name = String(row['Item'] || '').toLowerCase();
+      const category = String(row['Category'] || '').toLowerCase();
+      const accessoryWords = /\b(ring|amulet|cloak|boots|gloves|gauntlets|bracers|belt|brooch|circlet|crown|hat|helm|helmet|goggles|mask|mantle|necklace|pendant|robe|robes|slippers|earring)\b/;
+
+      return (
+        category.includes('wondrous') ||
+        category.includes('accessor')
+      ) && accessoryWords.test(name);
+    }
+
+    function isTreasureItem_(row) {
+      const name = String(row['Item'] || '').toLowerCase();
+      const category = String(row['Category'] || '').toLowerCase();
+
+      return (
+        category.includes('treasure') ||
+        /\b(gem|gemstone|jewel|art object|trade goods|treasure)\b/.test(name)
+      );
+    }
+
+    function renderInventoryGroup(group) {
+      const isOpen = Boolean(inventoryExpandedGroups[group.key]);
+      const displayRows = rollupInventoryRows(group.rows);
+      const totalQty = displayRows.reduce((sum, row) => sum + toNumber(row['Qty'] || 0), 0);
+
+      return `
+        <div class="inventory-group">
+          <button class="group-toggle" type="button" onclick="toggleInventoryGroup('${group.key}')">
+            <span>${escapeHtml(group.label)}</span>
+            <span class="group-count">${displayRows.length} item${displayRows.length === 1 ? '' : 's'} · ${escapeHtml(formatCount(totalQty))}</span>
+          </button>
+          ${isOpen ? `<div class="group-list">${displayRows.map(row => renderInventoryRowCard(row, { showMeta: false })).join('')}</div>` : ''}
+        </div>
+      `;
+    }
+
+    function getInventoryRollupKey(row) {
+      return [
+        String(row['Item'] || '').trim().toLowerCase(),
+        String(row['Category'] || '').trim().toLowerCase(),
+        String(row['Rarity'] || '').trim().toLowerCase()
+      ].join('|');
+    }
+
+    function rollupInventoryRows(rows) {
+      const map = new Map();
+
+      (rows || []).forEach(row => {
+        const key = getInventoryRollupKey(row);
+
+        if (!map.has(key)) {
+          map.set(key, {
+            ...row,
+            _representativeInventoryId: row['Inventory ID'] || '',
+            _rollupCount: 1,
+            _rollupKey: key
+          });
+          return;
+        }
+
+        const existing = map.get(key);
+        existing['Qty'] = toNumber(existing['Qty'] || 0) + toNumber(row['Qty'] || 0);
+        existing._rollupCount += 1;
+
+        if (existing['Holder'] && row['Holder'] && existing['Holder'] !== row['Holder']) {
+          existing['Holder'] = 'Multiple';
+        } else if (!existing['Holder']) {
+          existing['Holder'] = row['Holder'] || '';
+        }
+
+        if (!existing['Notes'] && row['Notes']) {
+          existing['Notes'] = row['Notes'];
+        }
+      });
+
+      return Array.from(map.values()).sort((a, b) =>
+        String(a['Item'] || '').localeCompare(String(b['Item'] || ''))
+      );
+    }
+
+    function toggleInventoryGroup(key) {
+      inventoryExpandedGroups[key] = !inventoryExpandedGroups[key];
+      renderInventory();
+    }
+
+    function payResource(resource) {
+      if (resourcePayInFlight[resource]) return;
+
+      const amountInput = document.getElementById(`${resource}PayAmount`);
+      const status = document.getElementById(`${resource}PayStatus`);
+      const button = document.getElementById(`${resource}PayButton`);
+      const amount = Number(amountInput && amountInput.value);
+      const sizeSelect = document.getElementById('deleriumPaySize');
+
+      if (!Number.isFinite(amount) || amount <= 0) {
+        if (status) status.innerHTML = '<span class="error">Enter an amount to pay.</span>';
+        return;
+      }
+
+      resourcePayInFlight[resource] = true;
+      lastResourceUndo[resource] = null;
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Recording…';
+      }
+      if (amountInput) {
+        amountInput.dataset.lastPaidAmount = String(amount);
+        amountInput.value = '';
+      }
+      if (status) status.textContent = 'Recording…';
+
+      google.script.run
+        .withSuccessHandler(res => {
+          resourcePayInFlight[resource] = false;
+          if (!res || !res.ok) {
+            if (button) {
+              button.disabled = false;
+              button.textContent = 'Pay';
+            }
+            if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Pay failed.')}</span>`;
+            return;
+          }
+
+          primeInventoryCacheAfterAdd(res.item);
+          if (res.ledgerEntry) {
+            inventoryResourceLedger = [res.ledgerEntry, ...(inventoryResourceLedger || [])].slice(0, 60);
+            cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+          }
+          lastResourceUndo[resource] = {
+            item: res.item,
+            ledgerEntry: res.ledgerEntry,
+            message: res.message || 'Recorded payment.'
+          };
+          renderInventory();
+        })
+        .withFailureHandler(err => {
+          resourcePayInFlight[resource] = false;
+          if (button) {
+            button.disabled = false;
+            button.textContent = 'Pay';
+          }
+          if (status) status.innerHTML = `<span class="error">Pay failed: ${escapeHtml(err.message || err)}</span>`;
+        })
+        .apiDepleteResource({
+          resource,
+          amount,
+          size: resource === 'delerium' && sizeSelect ? sizeSelect.value : '',
+          note: 'Dashboard pay'
+        });
+    }
+
+    function undoResourcePay(resource) {
+      const undo = lastResourceUndo[resource];
+      const itemId = undo && undo.item && undo.item['Inventory ID'];
+      if (!itemId || resourcePayInFlight[resource]) return;
+
+      resourcePayInFlight[resource] = true;
+
+      const previousRows = inventoryRows.slice();
+      const previousLedger = inventoryResourceLedger.slice();
+      inventoryRows = inventoryRows.filter(row => row['Inventory ID'] !== itemId);
+      inventoryResourceLedger = inventoryResourceLedger.filter(entry => entry['Inventory ID'] !== itemId);
+      cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+      lastResourceUndo[resource] = null;
+      renderInventory();
+
+      google.script.run
+        .withSuccessHandler(res => {
+          resourcePayInFlight[resource] = false;
+          if (!res || !res.ok) {
+            inventoryRows = previousRows;
+            inventoryResourceLedger = previousLedger;
+            cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+            lastResourceUndo[resource] = undo;
+            renderInventory();
+          }
+        })
+        .withFailureHandler(() => {
+          resourcePayInFlight[resource] = false;
+          inventoryRows = previousRows;
+          inventoryResourceLedger = previousLedger;
+          cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+          lastResourceUndo[resource] = undo;
+          renderInventory();
+        })
+        .apiDeleteInventory(itemId);
+    }
+
+    function formatCount(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return '0';
+      if (Number.isInteger(num)) return String(num);
+      return String(Math.round(num * 100) / 100);
+    }
+
+    function formatShortDate(value) {
+      if (!value) return '';
+
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+
+      return date.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric'
+      });
+    }
+
+    function formatShortDateTime(value) {
+      if (!value) return '';
+
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+
+      return date.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+      });
+    }
+
+    /* ── Inventory: select / edit / save / delete ────────────────── */
+    function openInventoryIndexFromGesture(index) {
+      if (!Number.isFinite(index) || index < 0) return;
+      suppressInventoryClickUntil = Date.now() + 650;
+      openInventoryPrimaryAction(index);
+    }
+
+    function getInventoryIndexById(inventoryId) {
+      return inventoryRows.findIndex(r => r['Inventory ID'] === inventoryId);
+    }
+
+    function escapeSelectorValue(value) {
+      if (window.CSS && typeof window.CSS.escape === 'function') {
+        return window.CSS.escape(value);
+      }
+
+      return String(value).replace(/["\\]/g, '\\$&');
+    }
+
+    function setSelectedInventoryCardById(inventoryId) {
+      document.querySelectorAll('.inventory-card').forEach(c => c.classList.remove('selected'));
+      const rowEl = document.querySelector(`.inventory-row[data-representative-id="${escapeSelectorValue(inventoryId)}"] .inventory-card`);
+      if (rowEl) rowEl.classList.add('selected');
+    }
+
+    function handleInventoryCardClickById(inventoryId) {
+      if (Date.now() < suppressInventoryClickUntil) return;
+      openInventoryPrimaryActionById(inventoryId);
+    }
+
+    function openInventoryPrimaryActionById(inventoryId) {
+      const index = getInventoryIndexById(inventoryId);
+      if (index < 0) return;
+
+      suppressInventoryClickUntil = Date.now() + 650;
+      openInventoryPrimaryAction(index);
+    }
+
+    function openInventoryPrimaryAction(index) {
+      const row = inventoryRows[index];
+      if (!row) return;
+
+      selectedInventory = row;
+      setSelectedInventoryCardById(row['Inventory ID'] || '');
+      swipedInventoryId = '';
+
+      if (getQuickEditType(row)) {
+        openQuickEditPanel(row);
+        return;
+      }
+
+      openInventoryDescription(index);
+    }
+
+    function selectInventoryItem(index) {
+      const row = inventoryRows[index];
+      if (!row) return;
+
+      swipedInventoryId        = '';
+      selectedInventory        = row;
+      setSelectedInventoryCardById(row['Inventory ID'] || '');
+
+      if (getQuickEditType(row)) {
+        openQuickEditPanel(row);
+        return;
+      }
+
+      syncInventoryEditorFieldsFromRow(row);
+      setInventoryEditorOpen(true);
+
+      if (!isMobileLayout()) {
+        document.getElementById('desktopInventoryEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+
+    function openSelectedInventoryDescription() {
+      if (!selectedInventory) return;
+      const index = inventoryRows.findIndex(r => r['Inventory ID'] === selectedInventory['Inventory ID']);
+      openInventoryDescription(index);
+    }
+
+    function openInventoryDescriptionById(inventoryId) {
+      const index = getInventoryIndexById(inventoryId);
+      if (index < 0) return;
+      openInventoryDescription(index);
+    }
+
+    function openInventoryDescription(index) {
+      const row = inventoryRows[index];
+      if (!row) return;
+
+      selectedInventory = row;
+      setSelectedInventoryCardById(row['Inventory ID'] || '');
+      document.getElementById('descriptionTitle').textContent = row['Item'] || 'Description';
+      document.getElementById('descriptionCategory').textContent = row['Category'] || 'Uncategorized';
+      document.getElementById('descriptionRarity').textContent = row['Rarity'] || 'Unrated';
+      document.getElementById('descriptionText').textContent = row['Notes'] || 'No notes yet.';
+      document.getElementById('descriptionStatus').textContent = 'Inventory details';
+      document.getElementById('descriptionSheet').classList.add('active');
+      document.body.classList.add('app-modal-open');
+    }
+
+    function closeDescriptionSheet() {
+      document.getElementById('descriptionSheet').classList.remove('active');
+      document.querySelectorAll('.inventory-card').forEach(c => c.classList.remove('selected'));
+      syncModalOpenState();
+    }
+
+    function deleteSelectedInventoryFromDescription() {
+      if (!selectedInventory || !selectedInventory['Inventory ID']) return;
+      const inventoryId = selectedInventory['Inventory ID'];
+      closeDescriptionSheet();
+      deleteSelectedInventory(inventoryId);
+    }
+
+    function getQuickEditType(row) {
+      const name = String(row && row['Item'] || '').toLowerCase();
+      const category = String(row && row['Category'] || '').toLowerCase();
+
+      if (/\b(gold|gp|platinum|pp|silver|sp|copper|cp)\b/.test(name) || category === 'currency') {
+        return 'currency';
+      }
+
+      if (/health potion|potion of healing/.test(name)) {
+        return 'health potion';
+      }
+
+      if (/delerium|delirium/.test(name) || category === 'delerium') {
+        return 'delerium crystal';
+      }
+
+      return '';
+    }
+
+    function quickPrefix() {
+      return isMobileLayout() ? 'quickSheet' : 'quickDesktop';
+    }
+
+    function getQuickStatusElement() {
+      return document.getElementById(`${quickPrefix()}Status`);
+    }
+
+    function openQuickEditPanel(row) {
+      const editType = getQuickEditType(row);
+      const prefix = quickPrefix();
+      const qty = row['Qty'] || 0;
+      const meta = [
+        editType,
+        row['Holder'] ? `Holder: ${row['Holder']}` : '',
+        `Current: ${qty}`
+      ].filter(Boolean).join(' · ');
+
+      closeInventoryPanels(false);
+      selectedInventory = row;
+      selectedQuickEdit = {
+        itemId: row['Inventory ID'] || '',
+        itemName: row['Item'] || '',
+        editType,
+        quantity: qty,
+        holder: row['Holder'] || '',
+        sizeOptions: editType === 'delerium crystal'
+          ? ['chip', 'fragment', 'shard', 'crystal', 'geode', 'massive cluster', 'unknown']
+          : []
+      };
+
+      document.getElementById(`${prefix}Heading`).textContent = editType === 'currency'
+        ? 'Quick Currency'
+        : editType === 'health potion'
+          ? 'Quick Potion'
+          : 'Quick Delerium';
+      document.getElementById(`${prefix}Title`).textContent = selectedQuickEdit.itemName;
+      document.getElementById(`${prefix}Meta`).textContent = meta;
+      document.getElementById(`${prefix}Mode`).value = 'add';
+      document.getElementById(`${prefix}Amount`).value = '';
+      document.getElementById(`${prefix}Note`).value = '';
+      document.getElementById(`${prefix}Status`).textContent = '';
+
+      populateQuickSize(prefix, selectedQuickEdit.sizeOptions);
+      setQuickEditorOpen(true);
+
+      google.script.run
+        .withSuccessHandler(res => {
+          if (!selectedQuickEdit || selectedQuickEdit.itemId !== row['Inventory ID']) return;
+          if (!res || !res.ok || !res.item) {
+            setQuickEditorOpen(false);
+            syncInventoryEditorFieldsFromRow(row);
+            setInventoryEditorOpen(true);
+            getEditStatusElement().innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Opened full editor instead.')}</span>`;
+            return;
+          }
+
+          selectedQuickEdit = res.item;
+          const activePrefix = quickPrefix();
+          document.getElementById(`${activePrefix}Meta`).textContent = [
+            res.item.editType,
+            res.item.holder ? `Holder: ${res.item.holder}` : '',
+            `Current: ${res.item.quantity || 0}`
+          ].filter(Boolean).join(' · ');
+          populateQuickSize(activePrefix, res.item.sizeOptions || []);
+        })
+        .withFailureHandler(() => {
+          const status = getQuickStatusElement();
+          if (status) status.innerHTML = '<span class="error">Could not verify quick edit. You can still open details.</span>';
+        })
+        .apiGetCurrencyQuickEdit(row['Inventory ID']);
+
+      setTimeout(() => {
+        const amount = document.getElementById(`${quickPrefix()}Amount`);
+        if (amount) amount.focus();
+      }, 80);
+    }
+
+    function populateQuickSize(prefix, options) {
+      const field = document.getElementById(`${prefix}SizeField`);
+      const select = document.getElementById(`${prefix}Size`);
+      if (!field || !select) return;
+
+      field.classList.toggle('active', Boolean(options && options.length));
+      select.innerHTML = (options || []).map(value =>
+        `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`
+      ).join('');
+    }
+
+    function setQuickEditorOpen(isOpen) {
+      const sheet = document.getElementById('quickEditSheet');
+      const desktop = document.getElementById('desktopQuickEditor');
+      const inventoryEditor = document.getElementById('desktopInventoryEditor');
+
+      if (isMobileLayout()) {
+        sheet.classList.toggle('active', isOpen);
+        desktop.classList.remove('active');
+        syncModalOpenState();
+      } else {
+        sheet.classList.remove('active');
+        desktop.classList.toggle('active', isOpen);
+        if (inventoryEditor) inventoryEditor.style.display = 'none';
+        syncModalOpenState();
+        if (isOpen) desktop.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+
+    function closeQuickEditPanel() {
+      selectedQuickEdit = null;
+      setQuickEditorOpen(false);
+      document.querySelectorAll('.inventory-card').forEach(c => c.classList.remove('selected'));
+    }
+
+    function clearQuickEditFields() {
+      const prefix = quickPrefix();
+      document.getElementById(`${prefix}Amount`).value = '';
+      document.getElementById(`${prefix}Note`).value = '';
+      document.getElementById(`${prefix}Status`).textContent = '';
+      document.getElementById(`${prefix}Amount`).focus();
+    }
+
+    function openFullEditorFromQuick() {
+      const row = selectedInventory;
+      if (!row) return;
+
+      closeQuickEditPanel();
+      selectedInventory = row;
+      syncInventoryEditorFieldsFromRow(row);
+      setInventoryEditorOpen(true);
+    }
+
+    function confirmQuickEdit() {
+      if (!selectedQuickEdit || !selectedQuickEdit.itemId) return;
+
+      const prefix = quickPrefix();
+      const status = getQuickStatusElement();
+      const mode = document.getElementById(`${prefix}Mode`).value;
+      const rawAmount = document.getElementById(`${prefix}Amount`).value;
+      const amount = Number(rawAmount);
+      const note = document.getElementById(`${prefix}Note`).value;
+      const sizeSelect = document.getElementById(`${prefix}Size`);
+      const size = sizeSelect && sizeSelect.closest('.quick-size-field').classList.contains('active')
+        ? sizeSelect.value
+        : '';
+
+      if (!Number.isFinite(amount) || amount < 0) {
+        status.innerHTML = '<span class="error">Enter a valid amount.</span>';
+        return;
+      }
+
+      status.textContent = 'Saving…';
+
+      const finishSuccess = res => {
+        if (!res || !res.ok) {
+          status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Quick edit failed.')}</span>`;
+          return;
+        }
+
+        if (res.item) {
+          updateInventoryRowFromServer(res.item);
+        }
+
+        bustInventoryCache();
+        cacheInventoryRows(inventoryRows);
+        renderInventory();
+        status.innerHTML = `<span class="success">${escapeHtml(res.message || 'Saved.')}</span>`;
+        closeQuickEditPanel();
+      };
+
+      const fail = err => {
+        status.innerHTML = `<span class="error">Quick edit failed: ${escapeHtml(err.message || err)}</span>`;
+      };
+
+      if (mode === 'set') {
+        google.script.run
+          .withSuccessHandler(finishSuccess)
+          .withFailureHandler(fail)
+          .apiSetItemQuantity({
+            itemId: selectedQuickEdit.itemId,
+            quantity: amount,
+            note
+          });
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(finishSuccess)
+        .withFailureHandler(fail)
+        .apiAdjustInventory({
+          itemId: selectedQuickEdit.itemId,
+          delta: mode === 'remove' ? -amount : amount,
+          note,
+          size
+        });
+    }
+
+    function syncInventoryEditorFieldsFromRow(row) {
+      document.getElementById('editInventoryId').value           = row['Inventory ID'] || '';
+      document.getElementById('editLibraryItemId').value         = row['Library Item ID'] || '';
+      document.getElementById('editTitle').textContent           = row['Item'] || 'Item Details';
+      document.getElementById('editItem').value                  = row['Item'] || '';
+      document.getElementById('editQty').value                   = row['Qty'] || 1;
+      document.getElementById('editHolder').value                = row['Holder'] || '';
+      document.getElementById('editCategory').value              = row['Category'] || '';
+      document.getElementById('editRarity').value                = row['Rarity'] || '';
+      document.getElementById('editValueGp').value               = row['Value GP'] || '';
+      document.getElementById('editFactionRelevance').value      = row['Faction Relevance'] || '';
+      document.getElementById('editNotes').value                 = row['Notes'] || '';
+      document.getElementById('editStatusMessage').textContent   = '';
+
+      document.getElementById('sheetEditTitle').textContent          = row['Item'] || 'Edit Item';
+      document.getElementById('sheetEditItem').value                 = row['Item'] || '';
+      document.getElementById('sheetEditQty').value                  = row['Qty'] || 1;
+      document.getElementById('sheetEditHolder').value               = row['Holder'] || '';
+      document.getElementById('sheetEditCategory').value             = row['Category'] || '';
+      document.getElementById('sheetEditRarity').value               = row['Rarity'] || '';
+      document.getElementById('sheetEditValueGp').value              = row['Value GP'] || '';
+      document.getElementById('sheetEditFactionRelevance').value     = row['Faction Relevance'] || '';
+      document.getElementById('sheetEditNotes').value                = row['Notes'] || '';
+      document.getElementById('sheetEditStatusMessage').textContent  = '';
+    }
+
+    function setInventoryEditorOpen(isOpen) {
+      const sheet        = document.getElementById('inventorySheet');
+      const desktopEditor = document.getElementById('desktopInventoryEditor');
+      const quickEditor = document.getElementById('desktopQuickEditor');
+
+      if (isMobileLayout()) {
+        sheet.classList.toggle('active', isOpen);
+        desktopEditor.style.display = 'none';
+        syncModalOpenState();
+      } else {
+        sheet.classList.remove('active');
+        desktopEditor.style.display = isOpen ? 'block' : 'none';
+        if (quickEditor && isOpen) quickEditor.classList.remove('active');
+        syncModalOpenState();
+      }
+    }
+
+    function getInventoryEditorValues() {
+      if (isMobileLayout()) {
+        return {
+          inventoryId:       document.getElementById('editInventoryId').value,
+          libraryItemId:     document.getElementById('editLibraryItemId').value,
+          item:              document.getElementById('sheetEditItem').value,
+          category:          document.getElementById('sheetEditCategory').value,
+          rarity:            document.getElementById('sheetEditRarity').value,
+          qty:               document.getElementById('sheetEditQty').value,
+          holder:            document.getElementById('sheetEditHolder').value,
+          valueGp:           document.getElementById('sheetEditValueGp').value,
+          factionRelevance:  document.getElementById('sheetEditFactionRelevance').value,
+          notes:             document.getElementById('sheetEditNotes').value,
+        };
+      }
+      return {
+        inventoryId:       document.getElementById('editInventoryId').value,
+        libraryItemId:     document.getElementById('editLibraryItemId').value,
+        item:              document.getElementById('editItem').value,
+        category:          document.getElementById('editCategory').value,
+        rarity:            document.getElementById('editRarity').value,
+        qty:               document.getElementById('editQty').value,
+        holder:            document.getElementById('editHolder').value,
+        valueGp:           document.getElementById('editValueGp').value,
+        factionRelevance:  document.getElementById('editFactionRelevance').value,
+        notes:             document.getElementById('editNotes').value,
+      };
+    }
+
+    function getEditStatusElement() {
+      return document.getElementById(isMobileLayout() ? 'sheetEditStatusMessage' : 'editStatusMessage');
+    }
+
+    function closeInventoryPanels(shouldRender = true) {
+      selectedInventory        = null;
+      selectedQuickEdit        = null;
+      swipedInventoryId        = '';
+      document.querySelectorAll('.inventory-card').forEach(c => c.classList.remove('selected'));
+      setInventoryEditorOpen(false);
+      setQuickEditorOpen(false);
+      if (shouldRender) renderInventory();
+    }
+
+    function saveInventoryEdits() {
+      const status  = getEditStatusElement();
+      const button  = document.getElementById('saveInventoryButton');
+      const payload = getInventoryEditorValues();
+
+      if (!payload.inventoryId) {
+        status.innerHTML = '<span class="error">No item selected.</span>';
+        return;
+      }
+
+      button.disabled = true;
+      status.textContent = 'Saving…';
+
+      google.script.run
+        .withSuccessHandler(res => {
+          button.disabled = false;
+          if (!res || !res.ok) {
+            status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Save failed.')}</span>`;
+            return;
+          }
+          status.innerHTML = `<span class="success">${escapeHtml(res.message || 'Saved.')}</span>`;
+          updateInventoryRowLocally(payload);
+          cacheInventoryRows(inventoryRows);
+          renderInventory();
+        })
+        .withFailureHandler(err => {
+          button.disabled = false;
+          status.innerHTML = `<span class="error">Save failed: ${escapeHtml(err.message || err)}</span>`;
+        })
+        .apiUpdateInventory(payload);
+    }
+
+    function updateInventoryRowLocally(payload) {
+      const row = inventoryRows.find(r => r['Inventory ID'] === payload.inventoryId);
+      if (!row) return;
+      row['Qty']               = String(payload.qty || 1);
+      row['Holder']            = payload.holder || '';
+      row['Value GP']          = payload.valueGp === '' ? '' : String(payload.valueGp);
+      row['Total Value GP']    = payload.valueGp === '' ? '' : String(Number(payload.qty || 1) * Number(payload.valueGp));
+      row['Faction Relevance'] = payload.factionRelevance || '';
+      row['Notes']             = payload.notes || '';
+    }
+
+    function updateInventoryRowFromServer(item) {
+      const id = item && item['Inventory ID'];
+      if (!id) return;
+
+      const index = inventoryRows.findIndex(r => r['Inventory ID'] === id);
+      if (index === -1) return;
+
+      inventoryRows[index] = {
+        ...inventoryRows[index],
+        ...item
+      };
+    }
+
+    function getDeleteTargetRowByRepresentativeId(representativeId, rollupKey) {
+      if (rollupKey) {
+        const matchingRows = inventoryRows.filter(row => getInventoryRollupKey(row) === rollupKey);
+        if (matchingRows.length) {
+          return matchingRows.find(row => toNumber(row['Qty'] || 0) > 1) || matchingRows[0];
+        }
+      }
+      const index = getInventoryIndexById(representativeId);
+      return index >= 0 ? inventoryRows[index] : null;
+    }
+
+    function handleInventoryDeleteActionById(inventoryId, rollupKey) {
+      const row = getDeleteTargetRowByRepresentativeId(inventoryId, rollupKey);
+      if (!row || !row['Inventory ID']) return;
+
+      const wrapper = document.querySelector(`.inventory-row[data-representative-id="${escapeSelectorValue(inventoryId)}"]`);
+      const button = wrapper ? wrapper.querySelector('.inventory-delete-action') : null;
+      if (button) {
+        button.textContent = 'Deleting…';
+        button.classList.add('deleting');
+        button.disabled = true;
+      }
+
+      deleteSelectedInventory(row['Inventory ID'], { decrementOnly: true });
+    }
+
+    function deleteSelectedInventory(inventoryIdFromCard, options) {
+      const opts = options || {};
+      const inventoryId   = inventoryIdFromCard || document.getElementById('editInventoryId').value;
+      const detailButton  = document.getElementById('deleteInventoryButton');
+      const status        = getEditStatusElement();
+      const existingRow   = inventoryRows.find(r => r['Inventory ID'] === inventoryId);
+      const currentQty    = toNumber(existingRow && existingRow['Qty']);
+      const shouldDecrement = Boolean(opts.decrementOnly && currentQty > 1);
+
+      if (!inventoryId) {
+        status.innerHTML = '<span class="error">No item selected.</span>';
+        return;
+      }
+
+      if (detailButton) detailButton.disabled = true;
+      document.getElementById('inventoryStatus').classList.remove('centered');
+      document.getElementById('inventoryStatus').textContent = shouldDecrement ? 'Removing one…' : 'Deleting…';
+      if (status) status.textContent = shouldDecrement ? 'Removing one…' : 'Deleting…';
+
+      const previousRows = inventoryRows.slice();
+      const deletedRow = existingRow;
+      if (shouldDecrement) {
+        inventoryRows = inventoryRows.map(row =>
+          row['Inventory ID'] === inventoryId
+            ? {
+                ...row,
+                'Qty': String(currentQty - 1),
+                'Total Value GP': row['Value GP'] === '' || row['Value GP'] === null || row['Value GP'] === undefined
+                  ? row['Total Value GP']
+                  : String((currentQty - 1) * toNumber(row['Value GP']))
+              }
+            : row
+        );
+      } else {
+        inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== inventoryId);
+      }
+      swipedInventoryId = '';
+      closeInventoryPanels(false);
+      renderInventory();
+      document.getElementById('inventoryStatus').textContent = deletedRow
+        ? `${shouldDecrement ? 'Removing one from' : 'Deleting'} ${deletedRow['Item'] || 'item'}…`
+        : (shouldDecrement ? 'Removing one…' : 'Deleting…');
+
+      const runner = google.script.run
+        .withSuccessHandler(res => {
+          if (detailButton) detailButton.disabled = false;
+          if (!res || !res.ok) {
+            inventoryRows = previousRows;
+            renderInventory();
+            document.getElementById('inventoryStatus').innerHTML = `<span class="error">${escapeHtml((res && res.error) || (shouldDecrement ? 'Remove failed.' : 'Delete failed.'))}</span>`;
+            if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || (shouldDecrement ? 'Remove failed.' : 'Delete failed.'))}</span>`;
+            return;
+          }
+          bustInventoryCache();
+          if (res.item) {
+            updateInventoryRowFromServer(res.item);
+          }
+          document.getElementById('inventoryStatus').innerHTML = `<span class="success">${escapeHtml(res.message || (shouldDecrement ? 'Removed one.' : 'Deleted.'))}</span>`;
+        })
+        .withFailureHandler(err => {
+          if (detailButton) detailButton.disabled = false;
+          inventoryRows = previousRows;
+          renderInventory();
+          document.getElementById('inventoryStatus').innerHTML = `<span class="error">${escapeHtml((shouldDecrement ? 'Remove failed: ' : 'Delete failed: ') + (err.message || err))}</span>`;
+          if (status) status.innerHTML = `<span class="error">${escapeHtml((shouldDecrement ? 'Remove failed: ' : 'Delete failed: ') + (err.message || err))}</span>`;
+        });
+
+      if (shouldDecrement) {
+        runner.apiAdjustInventory({ itemId: inventoryId, delta: -1, note: 'Swipe remove one' });
+      } else {
+        runner.apiDeleteInventory(inventoryId);
+      }
+    }
+
+    /* ── Add Item: search & select ───────────────────────────────── */
+    function getEquipmentResultLimit() {
+      return isMobileLayout() ? 8 : 80;
+    }
+
+    function loadEquipmentIndex(preloadOnly = false) {
+      const status = document.getElementById('searchStatus');
+      const shouldPaintSearchUi = !preloadOnly || commandMode === 'add';
+
+      function maybePreloadNotes() {
+        if (preloadOnly && !campaignNotesLoaded && !campaignNotesLoading) {
+          checkCampaignNotesAccess(false, access => {
+            if (access.allowed) {
+              loadCampaignNotes(true);
+            }
+          });
+        }
+      }
+
+      if (equipmentIndexLoading) {
+        if (shouldPaintSearchUi) {
+          searchEquipment();
+        }
+        return;
+      }
+
+      if (equipmentIndexLoaded) {
+        if (shouldPaintSearchUi) {
+          searchEquipment();
+        }
+        maybePreloadNotes();
+        return;
+      }
+
+      let paintedFromCache = false;
+
+      if (!equipmentIndexLoaded) {
+        const cachedRows = readEquipmentIndexCache();
+
+        if (cachedRows.length) {
+          equipmentIndex = cachedRows;
+          equipmentIndexLoaded = true;
+          paintedFromCache = true;
+          if (shouldPaintSearchUi) {
+            status.classList.remove('centered');
+            status.textContent = 'Refreshing library…';
+            searchEquipment();
+          }
+        }
+      }
+
+      equipmentIndexLoading = true;
+
+      if (shouldPaintSearchUi && !paintedFromCache && !equipmentIndexLoaded) {
+        status.classList.add('centered');
+        status.textContent = 'Loading library…';
+        equipmentResults  = [];
+        selectedEquipment = null;
+        document.getElementById('searchResults').innerHTML = '';
+        updateAddFlow();
+      }
+
+      google.script.run
+        .withSuccessHandler(res => {
+          equipmentIndexLoading = false;
+          if (!res || !res.ok) {
+            if (!equipmentIndex.length) {
+              if (shouldPaintSearchUi) {
+                status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Library load failed.')}</span>`;
+              }
+            } else {
+              if (shouldPaintSearchUi) {
+                status.classList.remove('centered');
+                status.textContent = 'Refresh failed — showing cached library.';
+              }
+            }
+            return;
+          }
+          equipmentIndex = normalizeEquipmentIndexRows(res.rows || []);
+          equipmentIndexLoaded = true;
+          cacheEquipmentIndexRows(res.rows || []);
+          if (shouldPaintSearchUi) {
+            searchEquipment();
+          }
+          maybePreloadNotes();
+        })
+        .withFailureHandler(err => {
+          equipmentIndexLoading = false;
+          if (!equipmentIndex.length) {
+            if (shouldPaintSearchUi) {
+              status.innerHTML = `<span class="error">Load failed: ${escapeHtml(err.message || err)}</span>`;
+            }
+          } else {
+            if (shouldPaintSearchUi) {
+              status.classList.remove('centered');
+              status.textContent = 'Refresh failed — showing cached library.';
+            }
+          }
+          maybePreloadNotes();
+        })
+        .apiGetEquipmentIndex();
+    }
+
+    function debouncedSearchEquipment() {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(searchEquipment, 80);
+    }
+
+    function searchEquipment() {
+      const q      = document.getElementById('equipmentSearch').value.trim().toLowerCase();
+      const status = document.getElementById('searchStatus');
+      const limit  = getEquipmentResultLimit();
+
+      if (!equipmentIndexLoaded) { loadEquipmentIndex(); return; }
+
+      if (q.length < 2) {
+        equipmentResults = QUICK_ADD_ITEMS.slice(0, Math.min(6, limit))
+          .concat(equipmentIndex.slice(0, Math.max(0, limit - 6)));
+        renderEquipmentResults(`Showing first ${equipmentResults.length} of ${equipmentIndex.length}`);
+        return;
+      }
+
+      const quickMatches = getQuickAddMatches(q);
+      const libraryMatches = equipmentIndex
+        .filter(r => r.searchText.includes(q))
+        .slice(0, Math.max(0, limit - quickMatches.length));
+
+      equipmentResults = quickMatches.concat(libraryMatches);
+
+      if (!equipmentResults.length) {
+        status.classList.add('centered');
+        status.textContent = 'No matches.';
+        document.getElementById('searchResults').innerHTML = '';
+        return;
+      }
+
+      renderEquipmentResults(`${equipmentResults.length} result${equipmentResults.length === 1 ? '' : 's'}`);
+    }
+
+    function getQuickAddMatches(query) {
+      if (!query) return [];
+
+      return QUICK_ADD_ITEMS
+        .filter(item => {
+          const haystack = [item.name, item.category, ...(item.terms || [])].join(' ').toLowerCase();
+          return haystack.includes(query) || query.split(/\s+/).some(part => part.length > 1 && haystack.includes(part));
+        })
+        .slice(0, 5);
+    }
+
+    function renderEquipmentResults(message) {
+      const status  = document.getElementById('searchStatus');
+      const results = document.getElementById('searchResults');
+
+      status.classList.remove('centered');
+      status.textContent = message;
+
+      results.innerHTML = equipmentResults.map((row, i) => {
+        const name = escapeHtml(row.name || '');
+        const meta = row.quickAdd
+          ? ['Quick add', row.category || '', row.valueGp ? `${row.valueGp} gp each` : ''].filter(Boolean).join(' · ')
+          : [row.category || row.type || '', row.rarity || ''].filter(Boolean).join(' · ');
+        return `
+          <div id="result_${i}" class="result-card" onclick="selectEquipmentResult(${i})">
+            <div class="item-title">${name}</div>
+            ${meta ? `<div class="item-meta">${escapeHtml(meta)}</div>` : ''}
+          </div>`;
+      }).join('');
+    }
+
+    function selectEquipmentResult(index) {
+      const result = equipmentResults[index];
+      if (!result) return;
+
+      selectedEquipment = result;
+      fillAddFormFromEquipment(selectedEquipment, false);
+
+      document.querySelectorAll('.result-card').forEach(c => c.classList.remove('selected'));
+      const card = document.getElementById(`result_${index}`);
+      if (card) card.classList.add('selected');
+
+      updateAddFlow();
+      scrollAddDetailsIntoView();
+      focusPrimaryAddField();
+      if (!result.quickAdd) {
+        loadSelectedDescription(true);
+      }
+    }
+
+    function fillAddFormFromEquipment(item, includeDescription) {
+      document.getElementById('libraryItemId').value  = item.quickAdd ? '' : (item.itemId || '');
+      document.getElementById('quickAddKey').value    = item.quickAdd ? (item.quickKey || '') : '';
+      document.getElementById('item').value           = item.name || '';
+      document.getElementById('category').value       = item.category || item.type || '';
+      document.getElementById('rarity').value         = item.rarity || '';
+      document.getElementById('valueGp').value        = item.valueGp || '';
+
+      if (includeDescription && item.description) {
+        document.getElementById('notes').value = item.description.slice(0, 750);
+      } else if (!includeDescription) {
+        document.getElementById('notes').value = '';
+      }
+
+      document.getElementById('selectedName').textContent = item.name || '';
+      document.getElementById('selectedMeta').textContent = [
+        item.quickAdd ? 'Quick add' : '',
+        item.category || item.type || '',
+        item.rarity || ''
+      ].filter(Boolean).join(' · ');
+
+      const sizeField = document.getElementById('quickAddSizeField');
+      const sizeSelect = document.getElementById('quickAddSize');
+      const isDelerium = item.quickAdd && (item.category || '').toLowerCase() === 'delerium';
+      sizeField.classList.toggle('active', Boolean(isDelerium));
+      if (isDelerium) {
+        const itemName = (item.name || '').toLowerCase();
+        const selectedSize = itemName.includes('massive cluster') ? 'massive cluster'
+          : (itemName.includes('geode') || itemName.includes('large')) ? 'geode'
+          : itemName.includes('chip') ? 'chip'
+          : itemName.includes('fragment') ? 'fragment'
+          : itemName.includes('shard') ? 'shard'
+          : itemName.includes('unknown') ? 'unknown'
+          : 'crystal';
+        sizeSelect.value = selectedSize;
+      }
+
+      document.getElementById('searchStatus').textContent = 'Item selected.';
+      document.getElementById('selectedCardName').textContent = item.name || '';
+      document.getElementById('selectedCardMeta').textContent = [
+        item.quickAdd ? 'Quick add' : '',
+        item.category || item.type || '',
+        item.rarity || ''
+      ].filter(Boolean).join(' · ');
+      document.getElementById('addStatus').innerHTML =
+        item.quickAdd
+          ? `<span class="success">Quick adding: ${escapeHtml(item.name || '')}</span>`
+          : `<span class="success">Reviewing: ${escapeHtml(item.name || '')}</span>`;
+    }
+
+    function isQuickAddItem(item) {
+      return Boolean(item && item.quickAdd);
+    }
+
+    function isCustomItem(item) {
+      return Boolean(item && item.custom);
+    }
+
+    function focusPrimaryAddField() {
+      window.setTimeout(() => {
+        const target = isCustomItem(selectedEquipment)
+          ? document.getElementById('item')
+          : document.getElementById('qty');
+
+        if (!target) return;
+
+        target.focus();
+        addFormInteractionPrimed = true;
+        if (typeof target.select === 'function') {
+          target.select();
+        }
+      }, 80);
+    }
+
+    function scrollAddDetailsIntoView() {
+      if (!isMobileLayout()) return;
+
+      window.setTimeout(() => {
+        const detailsCard = document.getElementById('addDetailsCard');
+        if (detailsCard && detailsCard.style.display !== 'none') {
+          detailsCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 80);
+    }
+
+    function changeSelectedItem() {
+      selectedEquipment = null;
+      document.querySelectorAll('.result-card').forEach(c => c.classList.remove('selected'));
+      document.getElementById('libraryItemId').value = '';
+      document.getElementById('quickAddKey').value = '';
+      document.getElementById('quickAddSizeField').classList.remove('active');
+      document.getElementById('addDetailsCard').classList.remove('quick-add-mode');
+      document.getElementById('addDetailsCard').classList.remove('custom-mode');
+      updateAddFlow();
+    }
+
+    function startCustomItem() {
+      selectedEquipment = {
+        custom: true,
+        name: 'Custom Item',
+        category: 'Other',
+        rarity: ''
+      };
+
+      document.getElementById('libraryItemId').value = '';
+      document.getElementById('quickAddKey').value = '';
+      document.getElementById('item').value = '';
+      document.getElementById('category').value = 'Other';
+      document.getElementById('rarity').value = '';
+      document.getElementById('valueGp').value = '';
+      document.getElementById('notes').value = '';
+      document.getElementById('selectedName').textContent = 'Custom Item';
+      document.getElementById('selectedMeta').textContent = 'Homebrew';
+      document.getElementById('selectedCardName').textContent = 'Custom Item';
+      document.getElementById('selectedCardMeta').textContent = 'Homebrew';
+      document.getElementById('quickAddSizeField').classList.remove('active');
+      document.getElementById('addStatus').textContent = '';
+      updateAddFlow();
+      scrollAddDetailsIntoView();
+      focusPrimaryAddField();
+    }
+
+    /* ── Add flow: step visibility ───────────────────────────────── */
+    function updateAddFlow() {
+      const selectedCard  = document.getElementById('selectedItemCard');
+      const detailsCard   = document.getElementById('addDetailsCard');
+      const searchCard    = document.getElementById('addSearchCard');
+      const mobile        = isMobileLayout();
+
+      if (selectedEquipment) {
+        selectedCard.classList.add('active');
+        detailsCard.classList.toggle('quick-add-mode', isQuickAddItem(selectedEquipment));
+        detailsCard.classList.toggle('custom-mode', isCustomItem(selectedEquipment));
+        detailsCard.style.display = 'block';
+        searchCard.style.display = mobile ? 'none' : 'block';
+      } else {
+        selectedCard.classList.remove('active');
+        detailsCard.classList.remove('quick-add-mode');
+        detailsCard.classList.remove('custom-mode');
+        detailsCard.style.display = mobile ? 'none' : 'block';
+        searchCard.style.display = 'block';
+      }
+    }
+
+    /* ── Add Item: description load & submit ─────────────────────── */
+    function loadSelectedDescription(silent = false) {
+      if (selectedEquipment && selectedEquipment.quickAdd) return;
+      if (!selectedEquipment || !selectedEquipment.itemId) return;
+
+      const status          = document.getElementById('addStatus');
+      const requestedItemId = selectedEquipment.itemId;
+
+      if (!silent) {
+        status.textContent = 'Loading…';
+      }
+
+      google.script.run
+        .withSuccessHandler(res => {
+          if (!selectedEquipment || selectedEquipment.itemId !== requestedItemId) return;
+          if (!res || !res.ok || !res.item) {
+            document.getElementById('searchStatus').innerHTML =
+              `<span class="error">${escapeHtml((res && res.error) || 'Could not load details.')}</span>`;
+            return;
+          }
+          selectedEquipment = res.item;
+          fillAddFormFromEquipment(selectedEquipment, true);
+          status.innerHTML = silent
+            ? `<span class="success">Ready to review: ${escapeHtml(selectedEquipment.name || '')}</span>`
+            : '<span class="success">Description loaded.</span>';
+        })
+        .withFailureHandler(err => {
+          if (!selectedEquipment || selectedEquipment.itemId !== requestedItemId) return;
+          status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
+        })
+        .apiGetEquipmentItem(requestedItemId);
+    }
+
+    function addInventoryItem() {
+      const status   = document.getElementById('addStatus');
+      const itemName  = document.getElementById('item').value.trim();
+      const quickKey  = document.getElementById('quickAddKey').value.trim();
+
+      if (!itemName) {
+        status.innerHTML = '<span class="error">Enter or select an item first.</span>';
+        return;
+      }
+
+      const payload = {
+        libraryItemId:    document.getElementById('libraryItemId').value,
+        item:             itemName,
+        category:         document.getElementById('category').value,
+        rarity:           document.getElementById('rarity').value,
+        qty:              document.getElementById('qty').value,
+        holder:           document.getElementById('holder').value,
+        valueGp:          document.getElementById('valueGp').value,
+        factionRelevance: document.getElementById('factionRelevance').value,
+        notes:            document.getElementById('notes').value,
+      };
+      const isQuickAdd = Boolean(quickKey);
+      const isCustomAdd = isCustomItem(selectedEquipment);
+      const payloadSnapshot = { ...payload };
+      const selectedSnapshot = selectedEquipment ? { ...selectedEquipment } : null;
+
+      status.textContent = 'Adding…';
+      setMainStatus(`<span class="success">Adding ${escapeHtml(itemName)}… syncing in background.</span>`);
+      clearAddForm();
+      setCommandMode('inventory');
+
+      const runner = google.script.run
+        .withSuccessHandler(res => {
+          if (!res || !res.ok) {
+            setMainStatus(`<span class="error">${escapeHtml((res && res.error) || `Failed to add ${itemName}.`)}</span>`);
+            return;
+          }
+          if (res.ledgerEntry) {
+            inventoryResourceLedger = [res.ledgerEntry, ...(inventoryResourceLedger || [])].slice(0, 60);
+          }
+          const cachePrimed = primeInventoryCacheAfterAdd(res.item);
+          if (!cachePrimed) {
+            bustInventoryCache();
+          }
+          if (commandMode === 'inventory') {
+            renderInventory();
+          }
+          setMainStatus(`<span class="success">${escapeHtml(res.message || `${itemName} added.`)}</span>`);
+          const duplicateCandidate = findDuplicateInventoryCandidate(res.item);
+          if (duplicateCandidate) {
+            showCombineChoice(res.item, duplicateCandidate);
+          }
+        })
+        .withFailureHandler(err => {
+          setMainStatus(`<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`);
+          if (commandMode !== 'add') {
+            selectedEquipment = selectedSnapshot;
+            if (selectedSnapshot) {
+              fillAddFormFromEquipment(selectedSnapshot, false);
+            }
+            document.getElementById('libraryItemId').value = payloadSnapshot.libraryItemId || '';
+            document.getElementById('quickAddKey').value = quickKey;
+            document.getElementById('item').value = payloadSnapshot.item || '';
+            document.getElementById('category').value = payloadSnapshot.category || '';
+            document.getElementById('rarity').value = payloadSnapshot.rarity || '';
+            document.getElementById('qty').value = payloadSnapshot.qty || 1;
+            document.getElementById('holder').value = payloadSnapshot.holder || '';
+            document.getElementById('valueGp').value = payloadSnapshot.valueGp || '';
+            document.getElementById('factionRelevance').value = payloadSnapshot.factionRelevance || '';
+            document.getElementById('notes').value = payloadSnapshot.notes || '';
+            document.getElementById('addStatus').innerHTML = `<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`;
+            updateAddFlow();
+          }
+        });
+
+      if (isQuickAdd) {
+        runner.apiQuickAddInventory({
+          quickKey,
+          qty: payload.qty,
+          holder: payload.holder,
+          valueGp: payload.valueGp,
+          factionRelevance: payload.factionRelevance,
+          notes: payload.notes,
+          size: document.getElementById('quickAddSizeField').classList.contains('active')
+            ? document.getElementById('quickAddSize').value
+            : ''
+        });
+      } else if (isCustomAdd) {
+        runner.apiAddCustomInventory(payload);
+      } else {
+        runner.apiAddInventory(payload);
+      }
+    }
+
+    function clearAddForm(options = {}) {
+      const preserveCommandSearch = Boolean(options.preserveCommandSearch);
+      const skipSearchReload = Boolean(options.skipSearchReload);
+      const skipScrollReset = Boolean(options.skipScrollReset);
+      addFormInteractionPrimed = false;
+      selectedEquipment = null;
+      equipmentResults  = [];
+
+      ['equipmentSearch','libraryItemId','quickAddKey','item','category','rarity',
+       'holder','valueGp','factionRelevance','notes'].forEach(id => {
+        document.getElementById(id).value = '';
+      });
+      if (commandMode === 'add' && !preserveCommandSearch) {
+        document.getElementById('commandSearch').value = '';
+        handleSearchInput('commandSearch');
+      }
+      document.getElementById('qty').value = 1;
+      document.getElementById('quickAddSizeField').classList.remove('active');
+      document.getElementById('addDetailsCard').classList.remove('quick-add-mode');
+      document.getElementById('addDetailsCard').classList.remove('custom-mode');
+      document.getElementById('searchResults').innerHTML = '';
+      document.getElementById('searchStatus').classList.add('centered');
+      document.getElementById('searchStatus').textContent = '';
+      document.getElementById('addStatus').textContent    = '';
+      handleSearchInput('equipmentSearch');
+      updateAddFlow();
+
+      if (!skipSearchReload) {
+        if (equipmentIndexLoaded) {
+          searchEquipment();
+        } else if (!equipmentIndexLoading) {
+          loadEquipmentIndex();
+        }
+      }
+
+      if (!skipScrollReset) {
+        window.setTimeout(() => {
+          const searchResults = document.getElementById('searchResults');
+          const searchCard = document.getElementById('addSearchCard');
+          if (searchResults) searchResults.scrollTop = 0;
+          if (searchCard) searchCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 40);
+      }
+    }
+
+    /* ── Utility ─────────────────────────────────────────────────── */
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&',  '&amp;')
+        .replaceAll('<',  '&lt;')
+        .replaceAll('>',  '&gt;')
+        .replaceAll('"',  '&quot;')
+        .replaceAll("'",  '&#039;');
+    }
+
+    function escapeJsString(value) {
+      return String(value ?? '')
+        .replaceAll('\\', '\\\\')
+        .replaceAll("'", "\\'");
+    }
+
+    /* ── Global event listeners ──────────────────────────────────── */
+    document.addEventListener('click', e => {
+      if (!e.target.closest('.inventory-row') && swipedInventoryId) {
+        swipedInventoryId        = '';
+        renderInventory();
+      }
+    });
+
+    document.addEventListener('focusin', e => {
+      updateAddFormInteractionState(e.target);
+    });
+
+    (function initDescriptionSheetSwipeClose() {
+      const sheet = document.getElementById('descriptionSheet');
+      const panel = sheet ? sheet.querySelector('.mobile-sheet-panel') : null;
+      if (!sheet || !panel) return;
+
+      let startY = 0;
+      let startX = 0;
+
+      panel.addEventListener('touchstart', e => {
+        const touch = e.changedTouches[0];
+        startY = touch.clientY;
+        startX = touch.clientX;
+      }, { passive: true });
+
+      panel.addEventListener('touchend', e => {
+        const touch = e.changedTouches[0];
+        const dy = touch.clientY - startY;
+        const dx = Math.abs(touch.clientX - startX);
+
+        if (dy > 70 && dx < 40) {
+          closeDescriptionSheet();
+        }
+      }, { passive: true });
+    })();
+
+    window.addEventListener('resize', () => {
+      updatePhoneClass();
+      setInventoryEditorOpen(false);
+      closeDescriptionSheet();
+      updateAddFlow();
+      setCommandMode(commandMode);
+      syncModalOpenState();
+    });
+
+    /* ── Boot ────────────────────────────────────────────────────── */
+    updatePhoneClass();
+    setCommandMode('inventory');
+    updateAddFlow();
+    loadCharacters();
+    loadEquipmentIndex(true);
+  </script>
+
+</body>
+</html>
+
+
+
+
