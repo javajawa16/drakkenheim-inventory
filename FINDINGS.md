@@ -1,7 +1,7 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 2. Code.js lines 501–1100 (auth, character, inventory read)
+Next section: 3. Code.js lines 1101–1700 (inventory write — add, edit, delete)
 
 ## Sessions
 
@@ -47,6 +47,15 @@ Re-verified the previously-applied fixes: `DEV_ALLOW_UNCONFIGURED_ACCESS: false`
 releaseLock()` (425–583), `CAMPAIGN_NOTES_HEADERS` 5-col schema named correctly
 (135). Config blocks, header constants, menu, setup, and the import batcher are
 all consistent. No new findings.
+
+#### Note · Code.js:501–1100 · Section 2 re-audit — no new issues
+Re-verified `apiSellInventoryBatch` lock (highest-row-first delete, `finally`
+release on all paths incl. auth failure, 667–756), `categorizeItem_` fallback now
+only fires on `text.includes('magic item')` (1039), and `apiGetCharacters` carries
+no PII `Logger.log` calls on the success path (only the catch error at 804).
+`detectMagicItem_` still returns `'Yes'` for any non-blank rarity (1052) — this is
+a 5e-reasonable heuristic on import data (mundane items have blank rarity), not a
+defect. No new findings.
 
 ### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 
