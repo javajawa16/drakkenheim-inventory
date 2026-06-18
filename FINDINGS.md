@@ -1,11 +1,11 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 10. Index.html lines 3001–4500 (inventory render, search)
+Next section: 11. Index.html lines 4501–6000 (gold/delerium UI, sync)
 
 ## Sessions
 
-### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7, 8, 9
+### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 
 #### ~~RISK · Code.js:10 · Dev access gate still open~~ FIXED
 `DEV_ALLOW_UNCONFIGURED_ACCESS` flipped to `false`. `requireAllowedUser_` now
@@ -150,3 +150,37 @@ single-signal design. Low risk; flag for consistency with the stated approach.
 `#identitySheet` is a static element in the DOM (line 2677), so it always
 resolves. Recording as checked — not the missing-null-check class of bug
 called out in the harness pitfalls.
+
+#### RISK · Index.html:3077 · Inventory tap-to-open is wired on BOTH `pointerup` and `touchend`
+`initInventoryGestures` registers a tap-detector in the `pointerup` handler
+(3077–3094) **and** in the `touchend` handler (3162–3166); both call
+`openInventoryPrimaryActionById(getRepId(row))`. They share a single
+`tapHandled` closure flag to dedupe, and `pointerup` early-returns when
+`tapHandled` is already set. This relies on `touchend` firing (and setting the
+flag) *before* the compatibility `pointerup` on the GAS/iOS webview. That order
+is not guaranteed across engines — if `pointerdown` (which resets
+`tapHandled=false` at 3074) is delivered after `touchend`, the dedupe is
+defeated and the item sheet opens twice. Recommend driving tap from a single
+event source (touch on phones, pointer/click on desktop) or guarding the open
+with a short timestamp debounce like the existing `suppressInventoryClickUntil`.
+
+#### IDEA · Index.html:3638 · Dead `ondblclick` on campaign-note cards (unreachable on touch)
+`renderCampaignNotes` emits `ondblclick="…startEditCampaignNote(…)"` on each
+`.notes-note-card`. Double-tap/dblclick does not fire on the phone webview this
+app targets, mirroring the README's "Remove dead `ondblclick` on inventory
+cards" TODO. Edit is already reachable via the Edit button and right-swipe, so
+the handler is dead weight. Cleanup candidate.
+
+#### Note · Index.html:3723 · v1 campaign-note swipe-delete fires with no confirmation
+`bindCampaignNoteGestures` calls `deleteCampaignNote(row.dataset.noteId)` the
+instant a left-swipe passes `NOTE_ACTION_ACTIVATE` (380px), with no inline
+confirm step. This matches the existing README TODO ("Swipe-delete has no undo
+— consider inline confirmation"). Not a new finding; recording that the v1
+notes list shares the same no-undo gesture as inventory.
+
+#### IDEA · Index.html:3036 · `isMobileLayout()` repeats the `window.innerWidth < 700` signal
+`isMobileLayout()` returns `is-phone || window.innerWidth < 700`. In the GAS
+webview `innerWidth ≈ 980`, so the `is-phone` class (driven by `pointer:coarse`)
+is the real signal and the width arm is inert on-device — same documented
+single-signal concern noted for `updatePhoneClass`. Consistent-but-redundant;
+flag for tidy-up alongside the section-9 phone-detection note.
