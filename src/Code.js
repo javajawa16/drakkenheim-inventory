@@ -3099,11 +3099,12 @@ function apiSellDelerium(payload) {
         qty: -qty, valueGp: '', inventoryId: rowObj['Inventory ID'],
         item: rowObj['Item'], notes: sellNote,
         character: safeText_(payload && payload.clientCharacter) });
-      ledgerEntries.push({
+      ledgerEntries.push(sanitizeResourceLedgerForClient_({
         'Timestamp': nowStr, 'Action': 'SELL', 'Resource': 'delerium',
         'Subtype': size, 'Qty': -qty, 'Value GP': '',
-        'Inventory ID': rowObj['Inventory ID'], 'Item': rowObj['Item'], 'Notes': sellNote
-      });
+        'Inventory ID': rowObj['Inventory ID'], 'Item': rowObj['Item'], 'Notes': sellNote,
+        'Character': safeText_(payload && payload.clientCharacter)
+      }));
       return sanitizeInventoryForClient_(rowObj);
     });
 
@@ -3121,11 +3122,12 @@ function apiSellDelerium(payload) {
         qty: goldAmount, valueGp: 1, inventoryId: gRow['Inventory ID'],
         item: 'Gold (delerium sale)', notes: sellNote,
         character: safeText_(payload && payload.clientCharacter) });
-      ledgerEntries.push({
+      ledgerEntries.push(sanitizeResourceLedgerForClient_({
         'Timestamp': nowStr, 'Action': 'ADD', 'Resource': 'gold',
         'Subtype': 'gold', 'Qty': goldAmount, 'Value GP': 1,
-        'Inventory ID': gRow['Inventory ID'], 'Item': 'Gold (delerium sale)', 'Notes': sellNote
-      });
+        'Inventory ID': gRow['Inventory ID'], 'Item': 'Gold (delerium sale)', 'Notes': sellNote,
+        'Character': safeText_(payload && payload.clientCharacter)
+      }));
       goldItem = sanitizeInventoryForClient_(gRow);
     }
 
@@ -3207,10 +3209,10 @@ function apiSplitGold(payload) {
       qty: -amount, valueGp: 1, inventoryId: poolDeduct['Inventory ID'],
       item: 'Gold (party pool deduct)', notes: splitNote,
       character: safeText_(payload && payload.clientCharacter) });
-    ledgerEntries.push({ 'Timestamp': nowStr, 'Action': 'SPLIT_DEDUCT', 'Resource': 'gold',
+    ledgerEntries.push(sanitizeResourceLedgerForClient_({ 'Timestamp': nowStr, 'Action': 'SPLIT_DEDUCT', 'Resource': 'gold',
       'Subtype': 'gold', 'Qty': -amount, 'Value GP': 1,
       'Inventory ID': poolDeduct['Inventory ID'], 'Item': 'Gold (party pool deduct)', 'Notes': splitNote,
-      'Character': safeText_(payload && payload.clientCharacter) });
+      'Character': safeText_(payload && payload.clientCharacter) }));
 
     // Credit each member their share (Holder = character name)
     const items = charRows.map(character => {
@@ -3234,10 +3236,10 @@ function apiSplitGold(payload) {
         qty: perMember, valueGp: 1, inventoryId: rowObj['Inventory ID'],
         item: `Gold (${character})`, notes: splitNote,
         character: safeText_(payload && payload.clientCharacter) });
-      ledgerEntries.push({ 'Timestamp': nowStr, 'Action': 'SPLIT', 'Resource': 'gold',
+      ledgerEntries.push(sanitizeResourceLedgerForClient_({ 'Timestamp': nowStr, 'Action': 'SPLIT', 'Resource': 'gold',
         'Subtype': 'gold', 'Qty': perMember, 'Value GP': 1,
         'Inventory ID': rowObj['Inventory ID'], 'Item': `Gold (${character})`, 'Notes': splitNote,
-        'Character': safeText_(payload && payload.clientCharacter) });
+        'Character': safeText_(payload && payload.clientCharacter) }));
       return sanitizeInventoryForClient_(rowObj);
     });
 
@@ -3256,9 +3258,10 @@ function apiSplitGold(payload) {
         qty: remainder, valueGp: 1, inventoryId: remRow['Inventory ID'],
         item: 'Gold (remainder to pool)', notes: splitNote,
         character: safeText_(payload && payload.clientCharacter) });
-      ledgerEntries.push({ 'Timestamp': nowStr, 'Action': 'SPLIT_REMAINDER', 'Resource': 'gold',
+      ledgerEntries.push(sanitizeResourceLedgerForClient_({ 'Timestamp': nowStr, 'Action': 'SPLIT_REMAINDER', 'Resource': 'gold',
         'Subtype': 'gold', 'Qty': remainder, 'Value GP': 1,
-        'Inventory ID': remRow['Inventory ID'], 'Item': 'Gold (remainder to pool)', 'Notes': splitNote });
+        'Inventory ID': remRow['Inventory ID'], 'Item': 'Gold (remainder to pool)', 'Notes': splitNote,
+        'Character': safeText_(payload && payload.clientCharacter) }));
       remainderItem = sanitizeInventoryForClient_(remRow);
     }
 
