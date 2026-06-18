@@ -1,0 +1,34 @@
+.DS_Store
+Thumbs.db
+
+# Dependencies and generated output
+node_modules/
+.npm-cache/
+dist/
+build/
+.tmp/
+
+# Local/editor state
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+
+# Spreadsheet exports that may contain live data
+data/raw/
+data/exports/
+
+# Large generated/binary files (regenerate locally with `node parse_compendium.js`)
+Complete_Compendium_5.5e.xml
+equipment_library_5e.xlsx
+wallpaper_app.jpg
+
+# Temp / scratch files
+temp_patch.py
+DM
+tmp_remote_compare/
+*.bak
+
+# Claude Code project state
+.claude/

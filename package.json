@@ -1,0 +1,13 @@
+{
+  "scripts": {
+    "clasp:status": "clasp status",
+    "clasp:push": "clasp push",
+    "clasp:pull": "clasp pull"
+  },
+  "devDependencies": {
+    "@google/clasp": "^3.0.6-alpha"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
+}
