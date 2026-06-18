@@ -7,33 +7,21 @@ Next section: 9. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7, 8
 
-#### RISK · Code.js:10 · Dev access gate still open
-`CONFIG.DEV_ALLOW_UNCONFIGURED_ACCESS: true` means `requireAllowedUser_()`
-grants access to everyone whenever `ALLOWED_USERS` is empty (the current
-state). This is the documented pre-production TODO, but until `ALLOWED_USERS`
-is populated and this is flipped to `false`, every `api*` endpoint is open to
-any visitor with the web-app URL. Highest-priority hardening item.
+#### ~~RISK · Code.js:10 · Dev access gate still open~~ FIXED
+`DEV_ALLOW_UNCONFIGURED_ACCESS` flipped to `false`. `requireAllowedUser_` now
+uses `PLAYER_CHARACTER_MAP` as the effective allowed-users list with a
+`'url-authenticated-user'` placeholder when email is unavailable.
 
-#### IDEA · Code.js:420 · `continueCleanEquipmentLibrary` has no LockService
-The batch importer tracks its cursor in DocumentProperties
-(`CLEAN_LIB_NEXT_READ_ROW`/`_WRITE_ROW`/`_COPIED_COUNT`). It is admin-menu
-only, so contention is unlikely, but two concurrent runs would interleave
-writes and corrupt the cursor. A document lock around the batch would make it
-safe to re-run without checking whether a previous run is still going.
+#### ~~IDEA · Code.js:420 · `continueCleanEquipmentLibrary` has no LockService~~ FIXED
+`LockService.getDocumentLock()` / `tryLock(5000)` / `finally releaseLock()`
+added; concurrent runs now get a clear error instead of corrupting the cursor.
 
-#### IDEA · Code.js:134 · `NOTES_HEADERS` is a 5-column legacy schema
-`NOTES_HEADERS` (Note ID · Created At · Updated At · Updated By · Body) backs
-the legacy `CAMPAIGN_NOTES_FEED` sheet, which differs from the 11-column
-Party Notes schema in the README. This is not a bug by itself (the two are
-separate sheets — see the section-4 note on the parallel notes systems), but
-the naming invites confusion. Consider renaming to `CAMPAIGN_NOTES_HEADERS`.
+#### ~~IDEA · Code.js:134 · `NOTES_HEADERS` is a 5-column legacy schema~~ FIXED
+Renamed to `CAMPAIGN_NOTES_HEADERS` throughout `Code.js` and `Reset.js`.
 
-#### RISK · Code.js:753 · Debug `Logger.log` lines dump character/PII rows
-`apiGetCharacters` still has the debug logging called out in the README TODO,
-now relocated to ~753–769 (plus 801, 804). Lines 768–769 `JSON.stringify`
-entire header and first-data rows, which include the player **Email** column —
-PII written to Stackdriver logs on every characters fetch. Remove these
-before production (README TODO references the old ~657–682 location).
+#### ~~RISK · Code.js:753 · Debug `Logger.log` lines dump character/PII rows~~ FIXED
+All five debug `Logger.log` calls removed from `apiGetCharacters` success path.
+The only remaining log at line 804 is the `catch` block error message (no PII).
 
 #### ~~IDEA · Code.js:1039 · `categorizeItem_` over-broadly labels any rarity item "Wondrous Item"~~ FIXED
 `|| rarity` arm removed; fallback now only triggers on `text.includes('magic item')`.
