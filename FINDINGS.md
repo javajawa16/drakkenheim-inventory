@@ -1,9 +1,75 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 10. Index.html lines 3001–4500 (inventory render, search)
+Next section: 11. Index.html lines 4501–6000 (gold/delerium UI, sync)
 
 ## Sessions
+
+### 2026-06-18 (run 10) — Sections audited: 10
+
+#### BUG · Index.html:4116 · Poll-triggered `loadInventory(true)` clobbers an in-flight optimistic write and never self-heals
+**Story traced: Cross-cutting "Collaborative sync interference" + Remove item / Sell item.** `pollSync`
+(4338) fires every 20 s; when it sees another user's write (`res.inventory.by !== syncClientId`) it
+calls `loadInventory(true)` (4344). `loadInventory`'s success handler does `inventoryRows = newRows`
+(4116) **unconditionally** — there is no `_inFlightWrites` guard on the in-memory replacement, only
+`cacheInventoryRows` (2927) is guarded. Concrete failure sequence for **Remove item** (description
+sheet → Remove → Confirm, `confirmDescRemove` 6872):
+
+1. User confirms a remove. `inventoryRows` is optimistically FIFO-drained (6899–6909), cache written,
+   `renderInventory()` shows the items gone, and `apiSellInventoryBatch` fires (still in flight).
+2. The 20 s poll fires and detects a *different* user's write → `loadInventory(true)`. GAS serializes
+   on the document lock, so if `apiGetInventory` runs before the remove commits, it returns rows that
+   **still contain the items being removed**. `inventoryRows = newRows` puts them back; the signature
+   check (4102 vs 4122 — pre-fetch signature is from the drained array, post-fetch from the full
+   server set) differs, so `renderInventory()` (4124) re-paints the removed items as present.
+3. The remove's success handler (6918) only calls `bustInventoryCache()` on the `ok` path — it does
+   **not** re-apply the removal to the now-clobbered in-memory `inventoryRows`, and does not
+   `renderInventory()`. So the UI keeps showing the removed items.
+4. The remove committed with `SYNC_INVENTORY_BY = this user`, so every subsequent poll hits the
+   `by === syncClientId` skip (4344) and never force-reloads. **The stale "items still present" view
+   persists** until an unrelated user writes (or the revalidate window lets a manual load refetch).
+   Server truth is correct; the client lies indefinitely.
+
+The same clobber-window exists for Give (5957), Sell-for-Gold (5556), sell-batch, and the optimistic
+Add (8012) — Add happens to self-heal because its success handler re-inserts the real row via
+`primeInventoryCacheAfterAdd`, but Remove/Sell have no such re-application. Fix: gate the poll trigger
+or the in-memory swap on `_inFlightWrites` — e.g. in `pollSync` skip `loadInventory(true)` when
+`_inFlightWrites > 0` (and re-check on the next tick), or in `loadInventory`'s success handler bail out
+of the `inventoryRows = newRows` swap while a local write is pending. The cleanest is the `pollSync`
+guard since it also avoids the wasted round-trip mid-write.
+
+#### BUG · Index.html:6917 · `confirmDescRemove` omits the `_inFlightWrites` bump its siblings all have — poisons the cache during the clobber above
+**Story traced: Remove item (description sheet → Remove → stepper → Confirm).** Every other comparable
+optimistic write brackets its server call with `_inFlightWrites++ … _inFlightWrites--`: Give
+(5957/5977/5991), Sell-for-Gold (5556), and Undo-pay (6618/6626/6639). `confirmDescRemove` (6872) does
+**not** — it mutates `inventoryRows`, calls `cacheInventoryRows` (6914), and fires
+`apiSellInventoryBatch` (6917) with no bump. Consequence: during the in-flight window, the
+`_inFlightWrites > 0` guard in `cacheInventoryRows` (2927) is **not** asserted, so the
+poll-triggered `loadInventory(true)` from the finding above will happily write the stale
+"items-present" snapshot to the `localStorage` cache as well as to memory. The post-commit
+`bustInventoryCache()` (6925) clears it, but `loadInventory` already set `lastInventoryLoadAt`
+(4119), so a later non-force load can re-paint stale from memory inside the revalidate window before
+any refetch. Fix: bracket the `apiSellInventoryBatch` call in `confirmDescRemove` with
+`_inFlightWrites++` / `_inFlightWrites--` on both success and failure handlers, matching its siblings.
+This is necessary but not sufficient on its own — the in-memory clobber (above) still needs its own
+guard.
+
+#### Note · Index.html:3064,3193,3419,4338,4422 · Tap-to-open, tab-switch, combine, and Party-Notes-v2 render traced clean
+**Stories traced: View item details (tap card), Tab-switch-during-in-flight, Combine duplicate,
+Create/Edit/Pin/Archive note (render side).** Tap-to-open: `pointerup` (3072) and `touchend` (3138)
+both route through `openInventoryPrimaryActionById(getRepId(row))` and both set/check
+`lastTapOpenedAt` with the 500 ms timestamp guard (3078/3086/3157) — the run-4 race fix holds, no
+double-open. Tab switch (`setCommandMode` 3193) clears the filter, re-applies scope as holder on the
+Add tab, and on return to inventory calls non-force `loadInventory()` which paints from in-memory
+`inventoryRows` (4071) — an in-flight add's success handler reconciles by `optId`, so a tab-switch
+mid-add lands correctly. Combine: `showCombineChoice`/`confirmCombineInventoryItem` (3419/3442)
+double-tap guard (null `pendingCombineChoice`, restore on error) is intact; the only combine defect
+remains the run-9 `combineSheet` invisibility BUG (still open, not re-counted). Party Notes v2
+`loadNotes` (4396) `notesLoading` re-entrancy guard + stale/TTL revalidate and `renderNotesList`
+(4422) pinned-first sort, pending-badge dimming, and `escapeHtml`/`escapeJsString` on every interpolated
+field are all correct — no XSS or stuck-state in the render path. v1 campaign-notes optimistic
+submit/delete (3762/3849) snapshot+rollback verified; swipe-delete-no-confirm is the existing README
+TODO, not re-counted.
 
 ### 2026-06-18 (run 9) — Sections audited: 9
 
