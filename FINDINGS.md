@@ -7,48 +7,23 @@ Next section: 12. Index.html lines 6001–7500 (inventory groups, description sh
 
 ### 2026-06-18 (run 4) — Sections audited: 8, 9, 10, 11
 
-#### BUG · Index.html:4060 · Background sync reload closes an open edit sheet mid-edit (input loss)
-`loadInventory(force)` unconditionally calls `closeInventoryPanels(false)` at its
-very top (4060). The collaborative-sync poll (`pollSync`, 4332) fires
-`loadInventory(true)` every time *another* player makes any inventory write
-(`res.inventory.by !== syncClientId`, 4338) — i.e. roughly every 20 s during a
-live multi-player session. `closeInventoryPanels(false)` → `setInventoryEditorOpen(false)`
-/ `setQuickEditorOpen(false)` (7168/7033) toggles the `#inventorySheet` /
-`#quickEditSheet` mobile sheets closed. So if a user is editing an item — typing
-a Notes field, changing Qty/Holder in the quick editor — and any other player
-writes, the editor sheet is yanked shut and all un-submitted input is silently
-discarded. The user is in the `editing` state and an external (remote) transition
-forces them out with no warning and no way to recover what they typed.
-Suggested fix: in the sync-triggered reload path, skip `closeInventoryPanels`
-(and defer the re-render) when an editor sheet is open —
-`if (!document.querySelector('#inventorySheet.active, #quickEditSheet.active')) closeInventoryPanels(false);`
-— still refresh `inventoryRows` in memory so the data is current once the sheet closes.
+#### ~~BUG · Index.html:4060 · Background sync reload closes an open edit sheet mid-edit (input loss)~~ FIXED
+`closeInventoryPanels(false)` at the top of `loadInventory` is now guarded:
+`if (!document.querySelector('#inventorySheet.active, #quickEditSheet.active'))`.
+When the editor or quick-edit sheet is open, the close is skipped; `inventoryRows`
+still refreshes in memory so the list is current once the user dismisses the sheet.
 
-#### BUG · Index.html:4561 · Party Notes v2 save/delete/pin failures roll back silently (no feedback)
-`saveNoteForm` (4561) closes the form sheet *before* the server round-trip
-(`closeNoteForm()` at 4582/4600), then on `withFailureHandler` / `!res.ok`
-restores the backup and re-renders the list with **no** status message or alert —
-for both the edit branch (4587/4591) and the create branch (4610/4616).
-`deleteNoteFromForm` (4541) and `toggleNotePin` (4645) have the same pattern:
-optimistic mutation, silent revert on failure. Net effect: a user edits/creates/
-archives/pins a note, the form closes as if it succeeded, the change appears, then
-(on server failure) the note silently reverts or vanishes with no explanation —
-the classic "why did my edit disappear?" silent-error. Note `archiveNote` (4623,
-the card-button path) *does* `alert()` on failure, so the inconsistency is internal.
-Suggested fix: surface failures via `setMainStatus(...)` or an alert in every
-failure/`!ok` branch of `saveNoteForm`, `deleteNoteFromForm`, and `toggleNotePin`,
-matching `archiveNote`.
+#### ~~BUG · Index.html:4561 · Party Notes v2 save/delete/pin failures roll back silently~~ FIXED
+Every silent-revert path now calls `setMainStatus(...)` with an error message:
+`saveNoteForm` (edit + create), `deleteNoteFromForm`, and `toggleNotePin` all
+surface failures via the main status bar, consistent with every other write
+handler in the app. `archiveNote`'s existing `alert()` is left unchanged.
 
-#### IDEA · Index.html:3441 · `confirmCombineInventoryItem` doesn't guard against double-tap
-The Combine button (`onclick="confirmCombineInventoryItem()"`) sets
-`combineStatus` to "Combining…" but never disables the button or sets an
-in-flight flag, and the success handler closes the sheet via
-`keepDuplicateInventoryItem()`. A fast double-tap fires `apiCombineInventoryItems`
-twice with the same `sourceId`; the second call's server error lands in
-`combineStatus` after the sheet has already closed, so the error is invisible.
-Low impact (server rejects the second merge), but the closure correctly captures
-`choice` via spread (3443), so the primary path is sound. Suggested fix: disable
-the button / set a flag on first tap.
+#### ~~IDEA · Index.html:3441 · `confirmCombineInventoryItem` doesn't guard against double-tap~~ FIXED
+`pendingCombineChoice` is nulled immediately when the API call fires (after
+spreading to `choice`), preventing a second tap from re-entering. On API error,
+`pendingCombineChoice` is restored from `choice` so the user can retry from the
+still-open combine sheet.
 
 #### Note · Index.html:5063,5156 · Delerium receive/sell optimistic write + rollback is correct (positive baseline)
 `receiveDelerium` and `sellDelerium` each snapshot `previousRows`/`previousLedger`,

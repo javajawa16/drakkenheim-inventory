@@ -3441,10 +3441,12 @@
     function confirmCombineInventoryItem() {
       if (!pendingCombineChoice) return;
       const choice = { ...pendingCombineChoice };
+      pendingCombineChoice = null;
       document.getElementById('combineStatus').textContent = 'Combining…';
       google.script.run
         .withSuccessHandler(res => {
           if (!res || !res.ok || !res.item) {
+            pendingCombineChoice = choice;
             document.getElementById('combineStatus').innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Combine failed.')}</span>`;
             return;
           }
@@ -3457,6 +3459,7 @@
           keepDuplicateInventoryItem();
         })
         .withFailureHandler(err => {
+          pendingCombineChoice = choice;
           document.getElementById('combineStatus').innerHTML = `<span class="error">Combine failed: ${escapeHtml(err.message || err)}</span>`;
         })
         .apiCombineInventoryItems({
@@ -4057,7 +4060,9 @@
       const list   = document.getElementById('inventoryList');
       const now = Date.now();
 
-      closeInventoryPanels(false);
+      if (!document.querySelector('#inventorySheet.active, #quickEditSheet.active')) {
+        closeInventoryPanels(false);
+      }
 
       let paintedFromCache = false;
 
@@ -4550,10 +4555,12 @@
         .withSuccessHandler(res => {
           if (!res || !res.ok) {
             if (backup !== null && idx >= 0) { notesData.splice(idx, 0, backup); renderNotesList(); }
+            setMainStatus(`<span class="error">Delete failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
           }
         })
         .withFailureHandler(() => {
           if (backup !== null) { notesData.splice(idx >= 0 ? idx : notesData.length, 0, backup); renderNotesList(); }
+          setMainStatus('<span class="error">Delete failed — please try again.</span>');
         })
         .apiArchiveNote({ noteId, _syncClientId: syncClientId });
     }
@@ -4584,11 +4591,17 @@
         google.script.run
           .withSuccessHandler(res => {
             notesSaving = false;
-            if (!res || !res.ok) { if (backup && idx >= 0) notesData[idx] = backup; renderNotesList(); }
+            if (!res || !res.ok) {
+              if (backup && idx >= 0) notesData[idx] = backup;
+              renderNotesList();
+              setMainStatus(`<span class="error">Save failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
+            }
           })
           .withFailureHandler(() => {
             notesSaving = false;
-            if (backup && idx >= 0) notesData[idx] = backup; renderNotesList();
+            if (backup && idx >= 0) notesData[idx] = backup;
+            renderNotesList();
+            setMainStatus('<span class="error">Save failed — please try again.</span>');
           })
           .apiUpdateNote({ noteId: notesFormNoteId, patch: { Category: category, Title: title, Note: note, Tags: tags, Pinned: pinned, 'Related Item ID': relatedItemId }, _syncClientId: syncClientId });
       } else {
@@ -4608,13 +4621,15 @@
               lastNotesLoadAt = Date.now();
             } else {
               if (tidx >= 0) notesData.splice(tidx, 1);
+              renderNotesList();
+              setMainStatus(`<span class="error">Save failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
             }
-            renderNotesList();
           })
           .withFailureHandler(() => {
             notesSaving = false;
             notesData = notesData.filter(x => x.noteId !== tempId);
             renderNotesList();
+            setMainStatus('<span class="error">Save failed — please try again.</span>');
           })
           .apiCreateNote({ title, category, note, tags, pinned, relatedItemId, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
       }
@@ -4649,8 +4664,18 @@
       n.pinned = newPinned;
       renderNotesList();
       google.script.run
-        .withSuccessHandler(res => { if (!res || !res.ok) { n.pinned = !newPinned; renderNotesList(); } })
-        .withFailureHandler(() => { n.pinned = !newPinned; renderNotesList(); })
+        .withSuccessHandler(res => {
+          if (!res || !res.ok) {
+            n.pinned = !newPinned;
+            renderNotesList();
+            setMainStatus(`<span class="error">Pin failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
+          }
+        })
+        .withFailureHandler(() => {
+          n.pinned = !newPinned;
+          renderNotesList();
+          setMainStatus('<span class="error">Pin failed — please try again.</span>');
+        })
         .apiUpdateNote({ noteId, patch: { Pinned: newPinned }, _syncClientId: syncClientId });
     }
 
