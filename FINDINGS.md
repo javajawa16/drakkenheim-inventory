@@ -1,9 +1,88 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 11. Index.html lines 4501–6000 (gold/delerium UI, sync)
+Next section: 12. Index.html lines 6001–7500 (inventory groups, description sheet, sell batch)
 
 ## Sessions
+
+### 2026-06-18 (run 11) — Sections audited: 11
+
+#### BUG · Index.html:5100,5193 · `receiveDelerium`/`sellDelerium` skip the `_inFlightWrites` bump, so the run-10 poll guard never protects them — a concurrent write gets reverted + cache-poisoned on failure
+**Stories traced: Receive crystals, Sell crystals + Cross-cutting "Collaborative sync interference."**
+The run-10 fix added a guard in `pollSync` (4350): when another user's write arrives *and*
+`_inFlightWrites > 0`, the reload is deferred (`syncState` is intentionally left un-advanced so the
+next tick retries). That guard is the only thing standing between an in-flight optimistic write and a
+clobbering `loadInventory(true)`. But **only three heavy paths bump `_inFlightWrites`**
+(`confirmSellItem` 5567, `giveItemToCharacter` 5968, plus remove/undo elsewhere). `receiveDelerium`
+(5100) and `sellDelerium` (5193) **do not**, even though both optimistically mutate `inventoryRows`
+(prepend temp rows, 5123/5226) and snapshot `previousRows`/`previousLedger` (5115/5218). Failure
+sequence for **Sell crystals**:
+
+1. Treasurer decrements counters and taps Sell. `sellDelerium` snapshots `previousRows`, prepends
+   negative-qty optimistic rows, caches, fires `apiSellDelerium` (still in flight).
+2. The 20 s poll fires and sees a *different* user's write. Because `_inFlightWrites === 0`, the guard
+   at 4350 is skipped → the `else` runs: `syncState.inventory = res.inventory` (4353, **advanced**) and
+   `loadInventory(true)` (4354). `inventoryRows` is replaced with the server set (which includes the
+   other user's committed change and excludes my temp rows).
+3. `apiSellDelerium` comes back `!ok` (or transport fails). The handler does a **blind**
+   `inventoryRows = previousRows` (5256 / 5283) — the snapshot taken in step 1, which predates and
+   therefore **erases the other user's synced-in change** — then `cacheInventoryRows(previousRows…)`
+   (5260/5285) writes that stale set to `localStorage`, and `renderDeleriumSheetBody()` repaints from
+   it. The main inventory DOM still shows the poll's render, so DOM and `inventoryRows` now disagree.
+4. Because the poll already advanced `syncState.inventory` to the other user's `ts` (step 2), no future
+   poll re-triggers for that write. The other user's change is gone from this client's memory **and**
+   cache until some *later* unrelated write bumps the sync timestamp again.
+
+The success path happens to self-heal (temp rows are filtered out and `res.items` are re-applied via
+`primeInventoryCacheAfterAdd`, like Add), so the damage is confined to the **failure** branch — but
+that is exactly when the user most needs correct state. Note `receiveDelerium`'s failure handler
+(5169–5178) additionally omits any `renderInventory()`, so the main list is left showing the poll's
+data while `inventoryRows`/cache hold the stale revert. Fix: bracket both `apiSellDelerium` /
+`apiReceiveResource` calls with `_inFlightWrites++` / `_inFlightWrites--` on **all** exit paths
+(matching `confirmSellItem`/`giveItemToCharacter`), so `pollSync` defers the mid-write reload. This is
+the same gap the run-4 note explicitly waved off ("rely on the `by === syncClientId` poll skip") — but
+that skip only covers the *writer's own* poll, not a concurrent *other* user's write, which is the case
+that breaks here.
+
+#### BUG · Index.html:5240 · `sellDelerium`'s optimistic pending ledger entry is built AFTER the render, so the "Selling…" entry never shows (and isn't cached)
+**Story traced: Sell crystals (optimistic ledger feedback).** `receiveDelerium` builds its `_pending`
+RECEIVE ledger entry at 5131–5137 **before** `renderDeleriumSheetBody()` (5144) and before
+`cacheInventoryRows` (5143), so the pending row appears in the ledger immediately and is persisted.
+`sellDelerium` does the opposite: it calls `cacheInventoryRows(inventoryRows, inventoryResourceLedger)`
+(5234) and `renderDeleriumSheetBody()` (5238) **first**, and only *then* prepends the `_pending` SELL
+entry to `inventoryResourceLedger` (5240–5247) — with no further render or cache write before the
+`google.script.run` call. Consequences during the in-flight window: (a) the SELL pending entry is
+**invisible** in the ledger (the negative-qty crystal rows and the title total do update, but the
+ledger does not), inconsistent with the documented optimistic-feedback behavior and with the RECEIVE
+path; (b) the pending entry is **not** in the cached payload, so a reload/navigate-away mid-flight
+shows no trace of the pending sell. On success the real entry is prepended and rendered (5271–5278), so
+this is cosmetic/feedback only, not data loss. Fix: move the `_pending` ledger-entry construction
+(5240–5247) above the `cacheInventoryRows`/`renderDeleriumSheetBody` calls (5234/5238), mirroring
+`receiveDelerium`.
+
+#### Note · Index.html:5382,5442,5955,4830,4727,4580 · Receive-gold, pay-routing, give, identity, and notes write paths traced clean
+**Stories traced: Receive gold, Pay gold (routing/setup), Give item to character, Create/Edit/Pin/Archive
+note, First-open identity.** `receivedGold` (5382) is optimistic on the *ledger only* (no
+`inventoryRows` mutation), so a poll clobber during its in-flight window loses nothing — the pending
+entry self-heals on success (`removePending` + prepend `res.ledgerEntries`) and on failure the poll's
+fresh server ledger is already correct; the cleared amount/note inputs are not restored on failure
+(shared cosmetic gap with the other pay handlers, already recorded run-5). Double-tap is blocked by the
+immediate `amountInput.value=''` (second tap hits the amount≤0 guard). `openPayReasonSheet` (5442)
+re-validates the amount, excludes any `/^DM/` payee from the member list, and the confirm
+(`confirmPayWithReason`, verified clean run-5) is reachable. `giveItemToCharacter` (5955) brackets
+`_inFlightWrites` up/down on success and failure, reverts `Holder` on both error paths, and captures
+`item`/`inventoryId`/`idx` into locals before closing panels (survives navigate-away). The notes
+optimistic writes — `saveNoteForm` create/edit (4580), `deleteNoteFromForm` (4558), `archiveNote`
+(4650), `toggleNotePin` (4672) — all snapshot a backup, roll back on `!ok` and on transport failure,
+clear `notesSaving` on every path, and surface errors via `setMainStatus`/`alert`; notes are an
+independent in-memory store (`notesData`) untouched by `loadInventory`, so the inventory-poll clobber
+class does not apply. Identity: `confirmIdentity` (4830) is `identityChoiceSaving`-guarded;
+`startSyncPoll` (4366) is idempotent (`if (syncPollTimer) return`), so the multiple `applyIdentity`
+calls during startup (cached → fallback → server) create only one poll interval. `confirmSellBatch`
+(5890) is **non-optimistic** (mutates `inventoryRows` only inside its success handler) and ends with a
+`loadInventory(true)` refetch, so although it also omits `_inFlightWrites`, the worst case is a
+transient double-subtract that the trailing refetch immediately corrects — no persistent divergence,
+unlike the delerium paths above which revert to a stale snapshot.
 
 ### 2026-06-18 (run 10) — Sections audited: 10
 
