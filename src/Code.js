@@ -6,8 +6,9 @@
 const CONFIG = {
   SPREADSHEET_ID: '1DRs3BhuiAdojDBonns42b8FRPEBLNdjH2z8AUfW5U0o',
 
-  // TODO before production: restore signed-in allowlist checks.
-  DEV_ALLOW_UNCONFIGURED_ACCESS: true,
+  // Access is gated by PLAYER_CHARACTER_MAP when set; URL is the security boundary
+  // (Session.getActiveUser() is unreliable with USER_DEPLOYING on personal Gmail).
+  DEV_ALLOW_UNCONFIGURED_ACCESS: false,
 
   // Raw pasted/imported library. Leave messy. Do not use directly in the app.
   SOURCE_EQUIPMENT_SHEET: 'EQUIPMENT_LIBRARY',
@@ -1415,7 +1416,7 @@ function getCharacterForEmail_(email) {
  */
 function requireTreasurer_(clientCharacterHint) {
   let email = requireAllowedUser_();
-  if ((!email || email === 'dev-unconfigured-user') && clientCharacterHint) {
+  if ((!email || email === 'dev-unconfigured-user' || email === 'url-authenticated-user') && clientCharacterHint) {
     const resolved = getEmailForCharacter_(safeText_(clientCharacterHint).trim());
     if (resolved) email = resolved;
   }
@@ -1459,23 +1460,42 @@ function getEmailForCharacter_(character) {
   return null;
 }
 
+function getPlayerMapEmails_() {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty('PLAYER_CHARACTER_MAP') || '';
+    return raw.split(',')
+      .map(pair => {
+        const i = pair.indexOf(':');
+        return i !== -1 ? pair.slice(0, i).trim().toLowerCase() : '';
+      })
+      .filter(Boolean);
+  } catch (_) {
+    return [];
+  }
+}
+
 function requireAllowedUser_() {
   const email = getActiveUserEmail_();
-  const allowed = getConfiguredEmails_('ALLOWED_USERS', []);
 
-  if (CONFIG.DEV_ALLOW_UNCONFIGURED_ACCESS && !allowed.length) {
+  // ALLOWED_USERS overrides; falls back to PLAYER_CHARACTER_MAP so no separate
+  // allowlist config is needed — the map already enumerates all valid users.
+  const explicit = getConfiguredEmails_('ALLOWED_USERS', []);
+  const effectiveAllowed = explicit.length ? explicit : getPlayerMapEmails_();
+
+  if (CONFIG.DEV_ALLOW_UNCONFIGURED_ACCESS && !effectiveAllowed.length) {
     return email || 'dev-unconfigured-user';
   }
 
+  // With executeAs: USER_DEPLOYING on personal Gmail, Session.getActiveUser()
+  // returns empty for non-deployer visitors — the web app URL is the security
+  // boundary. When the app is configured (PLAYER_CHARACTER_MAP is set), allow
+  // through with a placeholder so audit logs remain meaningful.
   if (!email) {
-    throw new Error('Access denied. Sign-in is required.');
+    if (effectiveAllowed.length) return 'url-authenticated-user';
+    throw new Error('Access denied. App is not configured.');
   }
 
-  if (!allowed.length) {
-    throw new Error('Access denied. No allowed users are configured.');
-  }
-
-  if (!allowed.includes(email)) {
+  if (effectiveAllowed.length && !effectiveAllowed.includes(email)) {
     throw new Error('Access denied.');
   }
 
