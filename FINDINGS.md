@@ -1,11 +1,11 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 3. Code.js lines 1101–1700 (inventory write — add, edit, delete)
+Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
 
 ## Sessions
 
-### 2026-06-18 — Sections audited: 1, 2 (in progress)
+### 2026-06-18 — Sections audited: 1, 2, 3 (in progress)
 
 #### RISK · Code.js:10 · Dev access gate still open
 `CONFIG.DEV_ALLOW_UNCONFIGURED_ACCESS: true` means `requireAllowedUser_()`
@@ -47,3 +47,22 @@ Verified the document lock is acquired with `tryLock(10000)` and released in a
 `finally` block guarded by try/catch, including the auth-failure path. Rows are
 processed highest-row-first so `deleteRow` shifts only already-processed rows.
 No issue — recording as a positive baseline for the section-4 lock comparison.
+
+#### RISK · Code.js:1360 · Hardcoded "DM Josh" bypasses the CHARACTERS-sheet check
+`validateCharacterChoice_` short-circuits with
+`if (/^DM\s+Josh$/i.test(chosen)) return 'DM Josh';` **before** validating
+against the CHARACTERS sheet. Because `resolveIdentityForCharacter_` grants
+`isDM`/`isTreasurer` to any name matching `/^DM/`, any client can call
+`apiSetMyCharacter('DM Josh')` and self-elevate to DM/treasurer, gaining
+split-gold and sell-delerium rights — no sheet entry or email mapping needed.
+The whole identity model is trust-on-client by design for this group, but this
+is a hardcoded backdoor independent of the sheet. Recommend removing the
+short-circuit and requiring DM characters to exist (and be Active) in the
+sheet like every other character.
+
+#### IDEA · Code.js:1137 · `ensureHeaderRow_` appends missing headers at the end
+When a header is missing from an existing sheet, it is appended at
+`existing.length + 1` rather than inserted at its canonical position. If a
+middle column were ever dropped, subsequent reads keyed by header name still
+work, but column order would diverge from the constant and any positional
+read would be off. Low risk given current usage; flagging for awareness.
