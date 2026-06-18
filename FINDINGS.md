@@ -1,11 +1,52 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 8. Index.html lines 1–1500 (HTML structure, CSS)
+Next section: 9. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
 
-### 2026-06-18 (run 7) — Sections audited: 7
+### 2026-06-18 (run 8) — Sections audited: 8
+
+#### RISK · Index.html:1098 · `.notes-list` chat scroll uses `align-content: end` (iOS WKWebView top-clip)
+**Story traced: Party Notes (v1 campaign-notes chat list, `#campaignNotesList`).** The list is a
+scrollable flex child: `.notes-sheet-body` is `display:flex; flex-direction:column`, and
+`.notes-list` (1098) is `flex:1; display:grid; align-content:end; overflow-y:auto`. `align-content:
+end` pins entries to the bottom (chat style, newest last). This is the classic WebKit/WKWebView
+overflow-clip pitfall: when a grid/flex scroll container aligns its content to `end` (or `center`)
+and the content is taller than the container, the overflowing items in the *start* (top) direction
+get clipped above `scrollTop: 0` and cannot be reached by scrolling on older iOS Safari/WKWebView.
+The app explicitly targets the iOS GAS webview, and the campaign-notes list grows unbounded with
+use, so once there are more notes than fit on screen the **oldest notes become unreachable**. A JS
+scroll-to-bottom does not help — the clipped region sits above the scrollable origin. Safer pattern:
+order entries normally (top-aligned), push them to the bottom with `margin-block-start: auto` on the
+first child (or a leading spacer `div`), and keep `overflow-y:auto` — that bottom-anchors without the
+end-alignment clip. Severity is RISK rather than BUG because newer WKWebView builds have largely
+fixed the clip; flagging because the target runtime and the unbounded list make it reachable.
+
+#### Note · Index.html:110,3397,4804,4832,6838,6943 · Body scroll-lock reconciliation is sound across nested sheets
+**Stories traced: View item details → Give to… / Sell / Remove (description→give nesting), First-open
+identity, Quick-adjust currency.** `body.app-modal-open { overflow:hidden }` (110) is driven by two
+mechanisms: `syncModalOpenState()` (3397) recomputes the class from `Boolean(document.querySelector(
+'.mobile-sheet.active'))`, and a few flows `add`/`remove` it directly (identity 4804/4832, description
+6838). Confirmed every overlay (`#descriptionSheet` 2406, `#giveItemSheet` 2655, `#identitySheet`
+2677, `#notesSheet` 2495) carries the `.mobile-sheet` class, so the direct adds/removes are
+idempotent with the toggle. `closeDescriptionSheet` (6943) routes through `syncModalOpenState`, so the
+description→give→close-give→close-description nesting keeps the lock asserted while any sheet remains
+open and releases it exactly once the last sheet closes. No stuck-scroll state. Stacking order is also
+non-blocking: `html::before/::after`, `.scope-slider-indicator`, and the wallpaper layers all carry
+`pointer-events:none`; sheet z-indexes (description 70 < give/payReason 80 < identity 90) nest taps
+correctly above `.app-header` (22) and `.bottom-nav` (30).
+
+#### Note · Index.html:1124–1168 · Notes/inventory swipe-action CSS resting state matches the JS reveal
+**Stories traced: Edit/Archive note (swipe), Delete inventory item (swipe).** `.notes-edit-action`/
+`.notes-delete-action` (1136) default to `opacity:0` with a small offset transform; `setNoteSwipeVisual`
+(3663) drives `opacity` and `transform` via inline styles proportional to drag progress, so the CSS
+`opacity:0` is the correct resting state, not a dead rule — no CSS↔JS class mismatch that would leave
+the actions invisible. `.inventory-card` (542) intentionally omits a transform transition (JS-driven
+live drag) and `.snap` (555) re-adds it for release; `.inventory-delete-action` (569) sits at z-index 1
+behind the card (z-index 2). `.inventory-row.saving` (532) and `.notes-note.pending`/`.editing`
+(1170/1174) optimistic-state classes are all defined and exercised by the render paths. Section 8 is a
+pure CSS/token range; no other write paths or interactive logic live here.
 
 #### ~~BUG · Index.html:7132 · Quick-adjust discards the server's ADJUST ledger entry~~ FIXED
 `finishSuccess` in `confirmQuickEdit` now prepends `res.ledgerEntry` to `inventoryResourceLedger`
