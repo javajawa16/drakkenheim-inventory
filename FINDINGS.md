@@ -84,7 +84,6 @@ When a valid `size` is provided, `rowObj['Item']` is now relabeled to
 `Delerium <Size>` and `Size: <size>` is appended to the note, matching the
 pattern used by `apiEditInventory`.
 
-
 #### ~~BUG · Index.html:1461 · `var(--card-bg)` used with no fallback — `--card-bg` is never defined~~ FIXED
 Added `--card-bg: #212f4b` (same as `--panel-strong`) to the `:root` token block.
 All three usages (`#diceTab`, `.notes-cat-select`, `.note-card`) now resolve.
@@ -150,13 +149,10 @@ Removed three success-path logs from `loadFallbackCharacterIdentity`,
 `showIdentitySheet`, and `confirmIdentity`. Failure-path handler retained.
 
 #### Note · Index.html:4811 · `confirmIdentity` client-side DM self-grant — cross-ref Code.js:1360
-The optimistic identity built on character selection sets
-`isTreasurer/isDM = /^DM(\s|$)/i.test(character)`, so picking the "DM Josh"
-card grants treasurer/DM locally before the server round-trips. This is the
-client-side face of the already-recorded RISK at Code.js:1360 (hardcoded
-"DM Josh" bypasses the CHARACTERS-sheet check). Consistent with the group's
-trust-on-client model; recording the linkage, no new action beyond the
-server-side fix already proposed.
+The optimistic identity sets `isTreasurer/isDM = /^DM(\s|$)/i.test(character)`
+before the server round-trips. This is the client-side face of Code.js:1360
+(now fixed — hardcoded bypass removed). Trust-on-client by design; no further
+server-side action needed.
 
 #### Note · Index.html:5930 · "Give to…" moves only the representative row (known TODO confirmed)
 `giveItemToCharacter` updates the single `item['Inventory ID']`'s holder, even
@@ -166,7 +162,7 @@ other underlying rows keep their old holder. This matches the README's existing
 (5506) which FIFO-drains across all rollup rows, give has no multi-row
 distribution. Recording as confirmation, not a new finding.
 
-#### RISK · Index.html:6301 · Ledger-note edit is keyed only on `Timestamp` — DEFERRED
+#### ~~RISK · Index.html:6301 · Ledger-note edit is keyed only on `Timestamp`~~ DEFERRED
 Requires adding a stable `Entry ID` column to `RESOURCE_LEDGER_HEADERS` (schema
 change), generating IDs in every `appendResourceLedger_` call, and threading the
 ID through the client ledger cache and `apiUpdateLedgerNote`. Low urgency —
