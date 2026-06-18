@@ -1,7 +1,7 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 6. Code.js lines 2901–3500 (batch sell, give, remove)
+Next section: 7. Code.js lines 3501–end (sync, audit, utilities)
 
 ## Sessions
 
@@ -49,6 +49,18 @@ optimistic ledger Timestamp the client receives matches what gets persisted: bot
 `normalizeForClient_` (3895) and `apiUpdateLedgerNote.norm()` (2907) format Dates with
 `formatDate(scriptTimeZone,'yyyy-MM-dd HH:mm:ss')` — no timezone skew, so the only residual is
 the previously-DEFERRED same-second collision in batch ledger ops, not re-counted. No new findings.
+
+#### Note · Code.js:2901–3500 · Section 6 re-audit — clean
+The multi-row write handlers (`apiReceiveResource` 2932, `apiSellDelerium` 3073, `apiSplitGold`
+3158, `apiSendGoldToMember` 3296) each build their `ledgerEntries[]`/`items[]` arrays from the
+same rowObjects they append, so every optimistic entry returned to the client mirrors a persisted
+row. Treasurer gate is correct: split + sell-delerium use `requireTreasurer_(clientCharacter)`;
+`apiSendGoldToMember` blocks any `/^DM(\s|$)/i` payee (3308). `apiSplitGold` math
+(`floor` per-member + rounded remainder to pool, 3189–3190) reconciles to the input total and
+guards `perMember <= 0`. `apiDeleteInventory` accepts both bare-string and object payloads (3472)
+and `apiCombineInventoryItems` (3537) re-checks name+category+rarity equality before merging,
+writes the merged target, deletes the source, and surfaces a value-mismatch note. All paths
+`finally releaseLock()`. No new findings.
 
 ### 2026-06-18 (run 5) — Sections audited: 12, 13, 1, 2
 
