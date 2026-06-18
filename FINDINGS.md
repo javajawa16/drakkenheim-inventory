@@ -1,7 +1,7 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
+Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
 
 ## Sessions
 
@@ -19,6 +19,23 @@ exactly the user-actionable prefixes and masks everything else as "Request faile
 callers in §4–6. `saveUserProfile_`/`getUserProfileForKey_` write `Last Seen` without a
 lock, but the row is keyed on a single browser's temp user key (no real concurrent
 writer), so no campaign-data divergence. No new findings.
+
+#### Note · Code.js:1701–2300 · Section 4 re-audit — clean
+`getResourceLedgerForClient_` (1700) read-limit clamp (1–200) and `.reverse()` newest-first
+order verified; `appendResourceLedger_`/`auditWrite_` swallow their own errors so a logging
+failure never aborts the parent write. Campaign-notes v1 handlers (`apiAddCampaignNote`
+2013 / `apiUpdateCampaignNote` 2072 / `apiDeleteCampaignNote` 2142) each acquire
+`tryLock(10000)`, release in `finally`, return the sanitized note on success, and route
+catches through `publicApiError_`. `apiGetSyncState` (2206) is read-only and degrades to
+`{ts:'0',by:''}` on error so a transient failure can't wedge the poll loop. `apiGetNotes`
+(2259) applies all filters server-side over an in-memory snapshot. No new findings.
+
+#### Note · Code.js:dead `apiSellInventoryItem` (3017) confirmed unreferenced
+`apiSellInventoryItem` deletes the entire inventory row regardless of `Qty` (no partial/FIFO
+handling), which would lose a whole stack — but a full Index.html grep shows the client only
+ever calls `apiSellInventoryBatch` (5589/5934/6932). The single-item endpoint is dead, so the
+whole-row-delete is not reachable by any user. Recording the trace so a future re-wiring of
+this endpoint doesn't silently reintroduce stack-loss. (Dead code itself is out of audit scope.)
 
 ### 2026-06-18 (run 5) — Sections audited: 12, 13, 1, 2
 
