@@ -7,7 +7,7 @@ Next section: 11. Index.html lines 4501–6000 (gold/delerium UI, sync)
 
 ### 2026-06-18 (run 10) — Sections audited: 10
 
-#### BUG · Index.html:4116 · Poll-triggered `loadInventory(true)` clobbers an in-flight optimistic write and never self-heals
+#### ~~BUG · Index.html:4116 · Poll-triggered `loadInventory(true)` clobbers an in-flight optimistic write and never self-heals~~ FIXED
 **Story traced: Cross-cutting "Collaborative sync interference" + Remove item / Sell item.** `pollSync`
 (4338) fires every 20 s; when it sees another user's write (`res.inventory.by !== syncClientId`) it
 calls `loadInventory(true)` (4344). `loadInventory`'s success handler does `inventoryRows = newRows`
@@ -38,7 +38,7 @@ or the in-memory swap on `_inFlightWrites` — e.g. in `pollSync` skip `loadInve
 of the `inventoryRows = newRows` swap while a local write is pending. The cleanest is the `pollSync`
 guard since it also avoids the wasted round-trip mid-write.
 
-#### BUG · Index.html:6917 · `confirmDescRemove` omits the `_inFlightWrites` bump its siblings all have — poisons the cache during the clobber above
+#### ~~BUG · Index.html:6917 · `confirmDescRemove` omits the `_inFlightWrites` bump its siblings all have — poisons the cache during the clobber above~~ FIXED
 **Story traced: Remove item (description sheet → Remove → stepper → Confirm).** Every other comparable
 optimistic write brackets its server call with `_inFlightWrites++ … _inFlightWrites--`: Give
 (5957/5977/5991), Sell-for-Gold (5556), and Undo-pay (6618/6626/6639). `confirmDescRemove` (6872) does
@@ -73,7 +73,7 @@ TODO, not re-counted.
 
 ### 2026-06-18 (run 9) — Sections audited: 9
 
-#### BUG · Index.html:1516 · `combineSheet` is invisible on every device — Combine duplicate story is dead, plus a phantom scroll-lock
+#### ~~BUG · Index.html:1516 · `combineSheet` is invisible on every device — Combine duplicate story is dead, plus a phantom scroll-lock~~ FIXED
 **Story traced: Combine duplicate (duplicate detected after add → combine sheet → Confirm).** The
 desktop media query `@media (min-width: 700px)` sets `.mobile-sheet { display: none !important }`
 (1516) and then re-enables only a hardcoded whitelist of sheet ids via
@@ -127,7 +127,7 @@ state declarations (2745–2849) are consistent with their consumers.
 
 ### 2026-06-18 (run 8) — Sections audited: 8
 
-#### RISK · Index.html:1098 · `.notes-list` chat scroll uses `align-content: end` (iOS WKWebView top-clip)
+#### ~~RISK · Index.html:1098 · `.notes-list` chat scroll uses `align-content: end` (iOS WKWebView top-clip)~~ FIXED
 **Story traced: Party Notes (v1 campaign-notes chat list, `#campaignNotesList`).** The list is a
 scrollable flex child: `.notes-sheet-body` is `display:flex; flex-direction:column`, and
 `.notes-list` (1098) is `flex:1; display:grid; align-content:end; overflow-y:auto`. `align-content:

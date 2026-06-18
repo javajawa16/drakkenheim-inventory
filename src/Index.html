@@ -1097,11 +1097,17 @@
 
     .notes-list {
       flex: 1;
-      display: grid;
-      align-content: end;
+      display: flex;
+      flex-direction: column;
       gap: 10px;
       padding-bottom: 8px;
       overflow-y: auto;
+      min-height: 0;
+    }
+
+    .notes-list::before {
+      content: '';
+      flex: 1;
       min-height: 0;
     }
 
@@ -1523,6 +1529,7 @@
       #deleriumSheet.active    { display: block !important; }
       #sellItemSheet.active    { display: block !important; }
       #sellBatchSheet.active   { display: block !important; }
+      #combineSheet.active     { display: block !important; }
       #identitySheet.active    { display: block !important; }
 
       .bottom-nav {
@@ -4340,8 +4347,12 @@
         .withSuccessHandler(res => {
           if (!res || !res.ok) return;
           if (res.inventory.ts !== syncState.inventory.ts) {
-            syncState.inventory = res.inventory;
-            if (res.inventory.by !== syncClientId) loadInventory(true);
+            if (res.inventory.by !== syncClientId && _inFlightWrites > 0) {
+              // another user's write while a local write is in flight — defer reload to next tick
+            } else {
+              syncState.inventory = res.inventory;
+              if (res.inventory.by !== syncClientId) loadInventory(true);
+            }
           }
           if (res.notes.ts !== syncState.notes.ts) {
             syncState.notes = res.notes;
@@ -6914,8 +6925,10 @@
       cacheInventoryRows(inventoryRows, inventoryResourceLedger);
       renderInventory();
 
+      _inFlightWrites++;
       google.script.run
         .withSuccessHandler(res => {
+          _inFlightWrites--;
           if (!res || !res.ok) {
             inventoryRows = previousRows;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
@@ -6926,6 +6939,7 @@
           }
         })
         .withFailureHandler(err => {
+          _inFlightWrites--;
           inventoryRows = previousRows;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
