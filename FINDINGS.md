@@ -1,11 +1,11 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
+Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
 
 ## Sessions
 
-### 2026-06-18 — Sections audited: 1, 2, 3 (in progress)
+### 2026-06-18 — Sections audited: 1, 2, 3, 4
 
 #### RISK · Code.js:10 · Dev access gate still open
 `CONFIG.DEV_ALLOW_UNCONFIGURED_ACCESS: true` means `requireAllowedUser_()`
@@ -66,3 +66,40 @@ When a header is missing from an existing sheet, it is appended at
 middle column were ever dropped, subsequent reads keyed by header name still
 work, but column order would diverge from the constant and any positional
 read would be off. Low risk given current usage; flagging for awareness.
+
+#### BUG · Code.js:2208 · `apiCreateNote` silently downgrades 4 of the 8 note categories
+`PARTY_NOTES_CATEGORIES = ['General','Quest','NPC','Location']` lists only 4
+categories, but the README and client UI define 8 (adds Loot, Theory, Rules,
+Session Recap). Line 2293 validates with
+`PARTY_NOTES_CATEGORIES.includes(payload.category) ? payload.category : 'General'`,
+so a note created as Loot/Theory/Rules/Session Recap is silently stored as
+**General**. The user sees their chosen category on the optimistic client card,
+then it flips to General on the next sync/refresh — a confusing data-loss bug.
+Fix: extend `PARTY_NOTES_CATEGORIES` to the full 8 internal category names.
+
+#### RISK · Code.js:2238 · Party Notes server endpoints not gated to treasurer
+`apiGetNotes`, `apiCreateNote` (and the update/archive paths below) call only
+`requireAllowedUser_()`. The README states Party Notes is "treasurer-only for
+beta, gated in setCommandMode and applyIdentity" — i.e. the gate is purely
+client-side. Any allowed user can call these endpoints directly via
+`google.script.run`. Combined with the open dev access gate (section 1) and
+the DM-Josh backdoor (section 3), notes are effectively world-readable/writable.
+If the beta gating is meant to be enforced, add `requireTreasurer_` server-side.
+
+#### IDEA · Code.js:2286 · Party Notes v2 writes lack LockService
+`apiCreateNote` (and the v2 update/archive handlers) append/edit the NOTES
+sheet with no document lock, unlike the legacy campaign-note handlers
+(`apiAddCampaignNote`/`apiUpdateCampaignNote`/`apiDeleteCampaignNote` at
+2051–2171, which correctly `tryLock`/release in `finally`). Concurrent edits
+to the same note could race (last-write-wins / lost update). Given optimistic
+client saves sync in the background, two players editing near-simultaneously is
+plausible. Recommend the same lock pattern used by the v1 handlers.
+
+#### IDEA · Code.js:1950 · Two parallel notes systems coexist (likely dead v1 code)
+Legacy "Campaign Notes" (`CAMPAIGN_NOTES_FEED` sheet, 5-col `NOTES_HEADERS`,
+`apiGetCampaignNotes`/`apiAddCampaignNote`/`apiUpdateCampaignNote`/
+`apiDeleteCampaignNote`, gated by `requireCampaignNotesOwner_`) appears fully
+superseded by Party Notes v2 (`NOTES` sheet, 11-col `PARTY_NOTES_HEADERS`,
+`apiGetNotes`/`apiCreateNote`/…). If the client no longer calls the v1
+endpoints, removing them would cut ~220 lines and eliminate the schema
+confusion noted in section 1. Verify against Index.html before deleting.
