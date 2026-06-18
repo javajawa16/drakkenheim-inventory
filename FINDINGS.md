@@ -1,11 +1,11 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 9. Index.html lines 1501–3000 (CSS continued, early JS)
+Next section: 10. Index.html lines 3001–4500 (inventory render, search)
 
 ## Sessions
 
-### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7, 8
+### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7, 8, 9
 
 #### ~~RISK · Code.js:10 · Dev access gate still open~~ FIXED
 `DEV_ALLOW_UNCONFIGURED_ACCESS` flipped to `false`. `requireAllowedUser_` now
@@ -126,3 +126,27 @@ warning applies to CSS-only variable chains where the property itself contains a
 `getInventoryRowObjectById_` at line 1752. Audit misread the dependency
 direction. `testAddInventoryDirect_` and `testGetInventoryDirect_` were
 confirmed dead and removed.
+
+#### IDEA · Index.html:2915 · Debug `console.log`/`console.warn` still in `loadCharacters`
+`loadCharacters` logs `[loadCharacters] API response:`, the populated
+`characterOptions`, and warn/error lines on every identity resolve (lines 2915,
+2917, 2922, 2926). This is one of the README's own Known TODOs ("Remove debug
+`console.log` lines in `loadCharacters`"). `characterOptions` includes player
+names — minor PII leaking into the webview console. Recommend removing the three
+success-path logs; keep the failure-path `console.error` if desired.
+
+#### IDEA · Index.html:3000 · Phone detection still ORs `(max-width: 699px)` with `(pointer: coarse)`
+`updatePhoneClass()` uses `window.matchMedia('(max-width: 699px), (pointer: coarse)')`.
+The project's own CSS note (README + harness pitfalls) states phone detection
+should use `(pointer: coarse)` **not** `(max-width: 699px)`, because the GAS
+webview reports `innerWidth ≈ 980` and the width query never fires there anyway.
+The width arm is harmless on-device (never matches in the webview) but does flip
+a narrow desktop browser window into phone layout, contradicting the documented
+single-signal design. Low risk; flag for consistency with the stated approach.
+
+#### Note · Index.html:2924 · `getElementById('identitySheet')` deref is safe here
+`loadCharacters`' success handler reads
+`document.getElementById('identitySheet').classList` with no null guard, but
+`#identitySheet` is a static element in the DOM (line 2677), so it always
+resolves. Recording as checked — not the missing-null-check class of bug
+called out in the harness pitfalls.
