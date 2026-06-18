@@ -5143,8 +5143,10 @@
       cacheInventoryRows(inventoryRows, inventoryResourceLedger);
       renderDeleriumSheetBody();
 
+      _inFlightWrites++;
       google.script.run
         .withSuccessHandler(res => {
+          _inFlightWrites--;
           inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
           inventoryRows = inventoryRows.filter(r => !optimisticIds.includes(r['Inventory ID']));
           if (!res || !res.ok) {
@@ -5167,6 +5169,7 @@
           renderInventory();
         })
         .withFailureHandler(err => {
+          _inFlightWrites--;
           inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
           inventoryRows = inventoryRows.filter(r => !optimisticIds.includes(r['Inventory ID']));
           inventoryRows = previousRows;
@@ -5175,6 +5178,7 @@
           if (status) status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderDeleriumSheetBody();
+          renderInventory();
         })
         .apiReceiveResource({ resource: 'delerium', items, note: recNote, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
     }
@@ -5231,11 +5235,6 @@
       });
       deleriumSheetMutated = true;
       refreshDeleriumStateFromInventory_();
-      cacheInventoryRows(inventoryRows, inventoryResourceLedger);
-      if (goldInput) goldInput.value = '';
-      if (noteInput) noteInput.value = '';
-      if (status) status.textContent = 'Selling…';
-      renderDeleriumSheetBody();
 
       const pendingId = '_pending_' + Date.now();
       const totalQty  = items.reduce((s, i) => s + i.qty, 0);
@@ -5246,8 +5245,16 @@
         'Qty': -totalQty, 'Value GP': '', 'Notes': sellNote
       }, ...inventoryResourceLedger].slice(0, 60);
 
+      cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+      if (goldInput) goldInput.value = '';
+      if (noteInput) noteInput.value = '';
+      if (status) status.textContent = 'Selling…';
+      renderDeleriumSheetBody();
+
+      _inFlightWrites++;
       google.script.run
         .withSuccessHandler(res => {
+          _inFlightWrites--;
           inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
           // Remove optimistic rows regardless of outcome
           inventoryRows = inventoryRows.filter(r => !optimisticIds.includes(r['Inventory ID']));
@@ -5279,6 +5286,7 @@
           renderInventory();
         })
         .withFailureHandler(err => {
+          _inFlightWrites--;
           inventoryResourceLedger = previousLedger;
           inventoryRows = previousRows;
           refreshDeleriumStateFromInventory_();
@@ -5537,15 +5545,13 @@
       const note = (noteInput && noteInput.value) || `Sold ${item['Item'] || 'item'}`;
 
       // FIFO drain across rollup rows — same logic as confirmDescRemove
-      const rollupKey  = item._rollupKey || getInventoryRollupKey(item);
-      const repHolder  = String(item['Holder'] || '').trim();
-      const isMultiple = repHolder === 'Multiple';
-      const matchingRows = inventoryRows
-        .filter(r => {
-          if (getInventoryRollupKey(r) !== rollupKey) return false;
-          if (!isMultiple && String(r['Holder'] || '').trim() !== repHolder) return false;
-          return true;
-        })
+      const rollupKey = item._rollupKey || getInventoryRollupKey(item);
+      const repHolder = String(item['Holder'] || '').trim();
+      const allForKey = inventoryRows.filter(r => getInventoryRollupKey(r) === rollupKey);
+      const holders = new Set(allForKey.map(r => String(r['Holder'] || '').trim()));
+      const isMultiple = holders.size > 1;
+      const matchingRows = allForKey
+        .filter(r => isMultiple || String(r['Holder'] || '').trim() === repHolder)
         .sort((a, b) => new Date(a['Date Added'] || 0) - new Date(b['Date Added'] || 0));
 
       const items = [];
@@ -6851,15 +6857,13 @@
 
     function getDescRemoveTotalQty_() {
       if (!selectedInventory) return 1;
-      const rollupKey  = selectedInventory._rollupKey || getInventoryRollupKey(selectedInventory);
-      const repHolder  = String(selectedInventory['Holder'] || '').trim();
-      const isMultiple = repHolder === 'Multiple';
-      const total = (inventoryRows || [])
-        .filter(r => {
-          if (getInventoryRollupKey(r) !== rollupKey) return false;
-          if (!isMultiple && String(r['Holder'] || '').trim() !== repHolder) return false;
-          return true;
-        })
+      const rollupKey = selectedInventory._rollupKey || getInventoryRollupKey(selectedInventory);
+      const repHolder = String(selectedInventory['Holder'] || '').trim();
+      const allForKey = (inventoryRows || []).filter(r => getInventoryRollupKey(r) === rollupKey);
+      const holders = new Set(allForKey.map(r => String(r['Holder'] || '').trim()));
+      const isMultiple = holders.size > 1;
+      const total = allForKey
+        .filter(r => isMultiple || String(r['Holder'] || '').trim() === repHolder)
         .reduce((sum, r) => sum + toNumber(r['Qty'] || 1), 0);
       return total || 1;
     }
@@ -6882,16 +6886,14 @@
 
     function confirmDescRemove() {
       if (!selectedInventory) return;
-      const rollupKey  = selectedInventory._rollupKey || getInventoryRollupKey(selectedInventory);
-      const repHolder  = String(selectedInventory['Holder'] || '').trim();
-      const isMultiple = repHolder === 'Multiple';
+      const rollupKey = selectedInventory._rollupKey || getInventoryRollupKey(selectedInventory);
+      const repHolder = String(selectedInventory['Holder'] || '').trim();
+      const allForKey = inventoryRows.filter(r => getInventoryRollupKey(r) === rollupKey);
+      const holders = new Set(allForKey.map(r => String(r['Holder'] || '').trim()));
+      const isMultiple = holders.size > 1;
 
-      const matchingRows = inventoryRows
-        .filter(r => {
-          if (getInventoryRollupKey(r) !== rollupKey) return false;
-          if (!isMultiple && String(r['Holder'] || '').trim() !== repHolder) return false;
-          return true;
-        })
+      const matchingRows = allForKey
+        .filter(r => isMultiple || String(r['Holder'] || '').trim() === repHolder)
         .sort((a, b) => new Date(a['Date Added'] || 0) - new Date(b['Date Added'] || 0));
 
       if (!matchingRows.length) return;
@@ -7422,8 +7424,10 @@
         ? `${shouldDecrement ? 'Removing one from' : 'Deleting'} ${deletedRow['Item'] || 'item'}…`
         : (shouldDecrement ? 'Removing one…' : 'Deleting…');
 
+      _inFlightWrites++;
       const runner = google.script.run
         .withSuccessHandler(res => {
+          _inFlightWrites--;
           if (detailButton) detailButton.disabled = false;
           if (!res || !res.ok) {
             inventoryRows = previousRows;
@@ -7439,6 +7443,7 @@
           document.getElementById('inventoryStatus').innerHTML = `<span class="success">${escapeHtml(res.message || (shouldDecrement ? 'Removed one.' : 'Deleted.'))}</span>`;
         })
         .withFailureHandler(err => {
+          _inFlightWrites--;
           if (detailButton) detailButton.disabled = false;
           inventoryRows = previousRows;
           renderInventory();

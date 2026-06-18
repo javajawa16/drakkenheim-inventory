@@ -7,7 +7,7 @@ Next section: 13. Index.html lines 7501–end (add item flow, custom item, form 
 
 ### 2026-06-18 (run 12) — Sections audited: 12
 
-#### BUG · Index.html:7366 · `deleteSelectedInventory` omits the `_inFlightWrites` bump — the one optimistic write path the run-10 poll-clobber fix missed; full-delete reverts and never self-heals
+#### ~~BUG · Index.html:7366 · `deleteSelectedInventory` omits the `_inFlightWrites` bump — the one optimistic write path the run-10 poll-clobber fix missed; full-delete reverts and never self-heals~~ FIXED
 **Stories traced: Delete inventory item (swipe card → Delete; editor → Delete / Confirm delete all) + Cross-cutting "Collaborative sync interference."** Run-10 closed the poll-clobber hole by adding a `pollSync` guard (4350: defer `loadInventory(true)` when `_inFlightWrites > 0`) and bracketing `confirmDescRemove` with `_inFlightWrites++/--`. Run-10 enumerated the other clobber-prone optimistic writes (Give 5968, Sell-for-Gold 5567, Undo 6629) — all of which **do** now bump the counter — but **`deleteSelectedInventory` (7366) was not on that list and still does not bump it** (grep confirms the only four bumpers are 5567/5968/6629/6928). This function backs the entire **Delete inventory item** story: swipe-delete-one (`handleInventoryDeleteActionById` 6363 → `decrementOnly`), swipe-delete of a qty-1 row, and the editor "Delete / Confirm delete all" buttons. Failure sequence for a **full delete** (qty-1 swipe, or editor delete-all):
 
 1. User deletes. `inventoryRows` is optimistically filtered (7416), `closeInventoryPanels(false)` + `renderInventory()` (7419–7420) paint the item gone, and `apiDeleteInventory` fires (7452) — **no `_inFlightWrites++`**.
@@ -17,7 +17,7 @@ Next section: 13. Index.html lines 7501–end (add item flow, custom item, form 
 
 The swipe-**remove-one** sub-path (qty>1 → `apiAdjustInventory` delta −1, 7450) happens to self-heal because `apiAdjustInventory` returns `res.item` and `updateInventoryRowFromServer` re-applies the decrement — so the damage is confined to the full-delete branch, exactly as Add self-heals but Remove did not in run-10. Fix: bracket both the `apiDeleteInventory` and `apiAdjustInventory` calls in `deleteSelectedInventory` with `_inFlightWrites++` (before the call) / `_inFlightWrites--` (first line of both success and failure handlers), matching its four siblings. Note this path also never writes the optimistic mutation to cache (no `cacheInventoryRows` before the call, unlike `confirmDescRemove` 6925) — relying solely on in-memory + `bustInventoryCache` on success — so the bump is the complete fix here; there is no stale-cache write to additionally guard.
 
-#### BUG · Index.html:6855,6886,5540 · Multiple-holder rollup: the `isMultiple` branch is dead, so a DM-scope cross-holder stack shows a card qty the description sheet can't match or fully remove/sell
+#### ~~BUG · Index.html:6855,6886,5540 · Multiple-holder rollup: the `isMultiple` branch is dead, so a DM-scope cross-holder stack shows a card qty the description sheet can't match or fully remove/sell~~ FIXED
 **Stories traced: View item details (tap card → description sheet), Remove item, Sell item (description sheet → Sell for Gold → stepper).** `rollupInventoryRows` (6506) merges rows by `name|category|rarity` (holder is **not** in the key) and sets `existing['Holder'] = 'Multiple'` (6531) when the merged rows span different holders, summing `Qty` across them. The grouped card therefore shows the *full* cross-holder total. But `selectedInventory` is **only ever assigned a raw `inventoryRows[index]` row** (6735/6752/6784 and the `*ById` entry points) — never the rolled-up object — so `selectedInventory['Holder']` is always a concrete single holder and `selectedInventory._rollupKey` is always `undefined`. Consequences:
 
 - In `getDescRemoveTotalQty_` (6852) and `confirmDescRemove` (6883) and `confirmSellItem` (5540), `isMultiple = repHolder === 'Multiple'` is **always false** — the entire `isMultiple` handling is dead code.
@@ -30,7 +30,7 @@ Concrete defect in **DM scope** (the only scope where a rollup spans holders —
 
 ### 2026-06-18 (run 11) — Sections audited: 11
 
-#### BUG · Index.html:5100,5193 · `receiveDelerium`/`sellDelerium` skip the `_inFlightWrites` bump, so the run-10 poll guard never protects them — a concurrent write gets reverted + cache-poisoned on failure
+#### ~~BUG · Index.html:5100,5193 · `receiveDelerium`/`sellDelerium` skip the `_inFlightWrites` bump, so the run-10 poll guard never protects them — a concurrent write gets reverted + cache-poisoned on failure~~ FIXED
 **Stories traced: Receive crystals, Sell crystals + Cross-cutting "Collaborative sync interference."**
 The run-10 fix added a guard in `pollSync` (4350): when another user's write arrives *and*
 `_inFlightWrites > 0`, the reload is deferred (`syncState` is intentionally left un-advanced so the
@@ -67,7 +67,7 @@ the same gap the run-4 note explicitly waved off ("rely on the `by === syncClien
 that skip only covers the *writer's own* poll, not a concurrent *other* user's write, which is the case
 that breaks here.
 
-#### BUG · Index.html:5240 · `sellDelerium`'s optimistic pending ledger entry is built AFTER the render, so the "Selling…" entry never shows (and isn't cached)
+#### ~~BUG · Index.html:5240 · `sellDelerium`'s optimistic pending ledger entry is built AFTER the render, so the "Selling…" entry never shows (and isn't cached)~~ FIXED
 **Story traced: Sell crystals (optimistic ledger feedback).** `receiveDelerium` builds its `_pending`
 RECEIVE ledger entry at 5131–5137 **before** `renderDeleriumSheetBody()` (5144) and before
 `cacheInventoryRows` (5143), so the pending row appears in the ledger immediately and is persisted.
