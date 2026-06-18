@@ -1,9 +1,24 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 3. Code.js lines 1101–1700 (inventory write — add, edit, delete)
+Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
 
 ## Sessions
+
+### 2026-06-18 (run 6) — Sections audited: 3, 4, 5, 6
+
+#### Note · Code.js:1101–1700 · Section 3 re-audit — clean
+Range is helpers / validation / identity / sanitizers — no client-facing optimistic
+write path lives here. Re-verified the pieces that feed the write handlers:
+`requireTreasurer_` (1415) resolves the client-character hint only when
+`requireAllowedUser_` yields the `url-authenticated-user` / `dev-unconfigured-user`
+placeholder (documented USER_DEPLOYING model); `validateCharacterChoice_` (1357)
+rejects inactive characters; `publicValidationError_` (1562) allowlist passes through
+exactly the user-actionable prefixes and masks everything else as "Request failed.";
+`validateQuantity_`/`validateMoney_`/`validateId_` bounds are consistent with the
+callers in §4–6. `saveUserProfile_`/`getUserProfileForKey_` write `Last Seen` without a
+lock, but the row is keyed on a single browser's temp user key (no real concurrent
+writer), so no campaign-data divergence. No new findings.
 
 ### 2026-06-18 (run 5) — Sections audited: 12, 13, 1, 2
 
