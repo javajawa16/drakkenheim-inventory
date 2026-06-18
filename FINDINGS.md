@@ -135,18 +135,12 @@ phone layout in narrow desktop browsers.
 resolves. Recording as checked — not the missing-null-check class of bug
 called out in the harness pitfalls.
 
-#### RISK · Index.html:3077 · Inventory tap-to-open is wired on BOTH `pointerup` and `touchend`
-`initInventoryGestures` registers a tap-detector in the `pointerup` handler
-(3077–3094) **and** in the `touchend` handler (3162–3166); both call
-`openInventoryPrimaryActionById(getRepId(row))`. They share a single
-`tapHandled` closure flag to dedupe, and `pointerup` early-returns when
-`tapHandled` is already set. This relies on `touchend` firing (and setting the
-flag) *before* the compatibility `pointerup` on the GAS/iOS webview. That order
-is not guaranteed across engines — if `pointerdown` (which resets
-`tapHandled=false` at 3074) is delivered after `touchend`, the dedupe is
-defeated and the item sheet opens twice. Recommend driving tap from a single
-event source (touch on phones, pointer/click on desktop) or guarding the open
-with a short timestamp debounce like the existing `suppressInventoryClickUntil`.
+#### ~~RISK · Index.html:3077 · Inventory tap-to-open is wired on BOTH `pointerup` and `touchend`~~ FIXED
+Replaced `tapHandled` boolean with `lastTapOpenedAt` timestamp (same pattern as
+`suppressInventoryClickUntil`). Both handlers now guard with
+`Date.now() - lastTapOpenedAt < 500` — race-condition-proof regardless of
+event ordering since time only moves forward. `pointerdown` no longer resets
+the guard.
 
 #### IDEA · Index.html:3638 · Dead `ondblclick` on campaign-note cards (unreachable on touch)
 `renderCampaignNotes` emits `ondblclick="…startEditCampaignNote(…)"` on each
