@@ -1,9 +1,67 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 7. Code.js lines 3501–end (sync, audit, utilities)
+Next section: 8. Index.html lines 1–1500 (HTML structure, CSS)
 
 ## Sessions
+
+### 2026-06-18 (run 7) — Sections audited: 7
+
+#### BUG · Index.html:7132 · Quick-adjust discards the server's ADJUST ledger entry
+Story: **Quick-adjust currency/delerium** (add/remove branch). The run-3 server fix made
+`apiAdjustInventory` (Code.js:3797) append an `ADJUST` row to `RESOURCE_LEDGER` and return the
+sanitized `ledgerEntry` to the client *"so the ledger list updates immediately without waiting
+for the next full sync."* But the client never honors it: `confirmQuickEdit`'s `finishSuccess`
+(Index.html:7125–7141) only calls `updateInventoryRowFromServer(res.item)` and never prepends
+`res.ledgerEntry` to `inventoryResourceLedger`. So after a gold/delerium quick add/remove, the
+new ADJUST entry does **not** appear in the Gold/Delerium tab ledger history. Worse, because the
+20 s poll skips reload when `by === syncClientId` (the writer already "has" the data), the writer
+never cold-reloads from their own write — the ledger entry stays invisible to them indefinitely
+until another user writes or a manual refresh. Same class as the run-5 `updateLedgerNoteFromBottom`
+fix (mutated ledger never re-cached); here the entry is handed to the client and thrown away.
+Fix: in `finishSuccess`, when `res.ledgerEntry`, do
+`inventoryResourceLedger = [res.ledgerEntry, ...inventoryResourceLedger].slice(0, 60)` before
+`cacheInventoryRows(inventoryRows, inventoryResourceLedger)` and `renderInventory()`, mirroring
+`receiveDelerium`/`sellDelerium` (5150/5261).
+
+#### BUG · Index.html:7148 · "Set total" quick-adjust on gold/delerium writes no ledger entry at all
+Story: **Quick-adjust currency/delerium** ("set" branch). The mode dropdown offers add / remove /
+**set total** for every quick-edit item, including currency and delerium (Index.html:2457–2460,
+2099–2102). When `mode === 'set'`, `confirmQuickEdit` routes to `apiSetItemQuantity`
+(Code.js:3830), which only writes the inventory row + an `INVENTORY_LOG` audit row — it never
+calls `appendResourceLedger_`. So setting a gold or delerium *total* via the quick-edit sheet
+changes the balance with **zero** RESOURCE_LEDGER history, not even after a reload, while add/remove
+on the same card produce `ADJUST` entries. The Gold/Delerium tab ledger therefore has a permanent
+gap for set-mode adjustments — silent and inconsistent. Fix: either route currency/delerium set-mode
+through a ledger-writing endpoint (compute delta server-side and call the `apiAdjustInventory`
+ledger path), or have `apiSetItemQuantity` append an `ADJUST` (delta = qty − oldQty) entry when
+`classifyQuickEdit_` returns `currency`/`delerium crystal`.
+
+#### IDEA · Index.html:6960 · Client/server disagree on whether platinum/silver/copper is quick-editable
+Story: **Quick-adjust currency/delerium** (open step). Client `getQuickEditType` (6960) classifies
+any name matching `\b(gold|gp|platinum|pp|silver|sp|copper|cp)\b` or `category === 'currency'` as
+`'currency'`, so tapping a platinum/silver/copper coin stack opens the quick-edit sheet. But the
+run-3 server fix made `classifyQuickEdit_` (Code.js:1772, reached via `apiGetCurrencyQuickEdit`
+3678) return `''` for platinum/silver/copper. Net effect: `openQuickEditPanel` opens the sheet,
+`apiGetCurrencyQuickEdit` comes back `ok:false`, and the success handler (7020–7025) immediately
+closes the quick sheet and pops the full inventory editor with "Not a quick-edit item." — a visible
+flash-and-swap on every tap of a non-gold coin stack, and those stacks silently lose the stepper +
+ledger entry that gold gets. The run-3 fix targeted *adjective* uses ("Silver Holy Symbol"), but it
+also catches legitimate platinum/silver/copper currency. Suggest aligning the two: either let the
+server quick-edit real coin currency (so the client doesn't flash), or have the client not classify
+non-gold coins as `'currency'` so it opens the full editor directly with no flash.
+
+#### Note · Code.js:3501–end / Index.html:3466,6646,7430 · Combine + delete + swipe-remove stories re-traced clean
+Traced **Combine duplicate**, **Delete inventory item**, and the swipe remove-one/delete paths.
+Server `apiCombineInventoryItems` (3537), `apiDeleteInventory` tail (3501), `apiAdjustInventory`
+(3710), `apiSetItemQuantity` (3830), and `apiGetCurrencyQuickEdit` (3659) all acquire
+`tryLock(10000)`, release in `finally` on every throw/return, and route catches through
+`publicValidationError_`/`publicApiError_` — consistent with the run-6 server baseline. Navigate-away
+on `confirmQuickEdit`: handlers capture static sheet elements (`status`, `prefix`) that survive a
+tab switch; `quickEditInFlight` is paired up/down on both success and fail; `closeQuickEditPanel`
+nulls `selectedQuickEdit` without leaving the in-flight flag stuck. The run-4 close guard keeps the
+quick sheet open across a poll-triggered `loadInventory(true)`. The two BUGs above are the only
+write-path defects found; the lock/rollback/state-machine shape is otherwise sound.
 
 ### 2026-06-18 (run 6) — Sections audited: 3, 4, 5, 6
 
