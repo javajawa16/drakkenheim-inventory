@@ -123,14 +123,10 @@ confirmed dead and removed.
 Three success-path logs removed (API response, not-ok warn, characterOptions dump).
 Failure-path `console.error` retained. README Known TODO entry removed.
 
-#### IDEA · Index.html:3000 · Phone detection still ORs `(max-width: 699px)` with `(pointer: coarse)`
-`updatePhoneClass()` uses `window.matchMedia('(max-width: 699px), (pointer: coarse)')`.
-The project's own CSS note (README + harness pitfalls) states phone detection
-should use `(pointer: coarse)` **not** `(max-width: 699px)`, because the GAS
-webview reports `innerWidth ≈ 980` and the width query never fires there anyway.
-The width arm is harmless on-device (never matches in the webview) but does flip
-a narrow desktop browser window into phone layout, contradicting the documented
-single-signal design. Low risk; flag for consistency with the stated approach.
+#### ~~IDEA · Index.html:3000 · Phone detection still ORs `(max-width: 699px)` with `(pointer: coarse)`~~ FIXED
+`updatePhoneClass()` now uses `window.matchMedia('(pointer: coarse)')` only.
+Width arm removed — it never fired in GAS WebView and incorrectly triggered
+phone layout in narrow desktop browsers.
 
 #### Note · Index.html:2924 · `getElementById('identitySheet')` deref is safe here
 `loadCharacters`' success handler reads

@@ -2992,7 +2992,7 @@
 
     /* ── Phone detection & DPR-based scaling ─────────────────────── */
     function updatePhoneClass() {
-      const isPhone = window.matchMedia('(max-width: 699px), (pointer: coarse)').matches;
+      const isPhone = window.matchMedia('(pointer: coarse)').matches;
       document.documentElement.classList.toggle('is-phone', isPhone);
 
       if (!isPhone) {
