@@ -137,17 +137,10 @@ fails safely since that library item does not exist). Cleanup candidates — ver
 Added `--card-bg: #212f4b` (same as `--panel-strong`) to the `:root` token block.
 All three usages (`#diceTab`, `.notes-cat-select`, `.note-card`) now resolve.
 
-#### RISK · Index.html:1358 · Pervasive `calc(var(--phone-*) * N)` contradicts the project's own CSS note
-The CSS Architecture note in the README states `calc()` with CSS custom
-properties "does NOT reliably resolve in GAS WebView — use `var(--name)`
-directly." Yet phone-mode sizing leans on `calc(var(--phone-…) * N)` in ~20
-places (992, 1358, 1363, 1607, 1677, 1682, 1688, 1692–1695, 1900–1901, etc.),
-many of them multiplications that cannot be rewritten as a bare `var()`. If
-these silently fail to resolve in the iOS GAS webview, the affected card/
-button/input `min-height`s and dice-key font sizes fall back to their
-non-phone values — which matches the class of "appears too small" bugs the
-note was written to prevent. Recommend either confirming on-device that
-`calc()+var` actually works here (in which case soften the README note), or
-precomputing the scaled px in the DPR-scaling JS (where `--phone-*` is already
-set) and emitting concrete `--phone-card-min-height` etc. so the CSS can use a
-direct `var()`.
+#### ~~RISK · Index.html:1358 · Pervasive `calc(var(--phone-*) * N)` contradicts the project's own CSS note~~ FALSE POSITIVE
+The `--phone-*` variables are set by JS (Index.html:3020–3030) to **concrete px
+strings** (e.g. `"95px"`), not to further `var()` references. So
+`calc(var(--phone-card-min-height) * 1.25)` resolves to `calc(95px * 1.25)` at
+runtime — standard numeric CSS math that works fine in GAS WebView. The README
+warning applies to CSS-only variable chains where the property itself contains a
+`var()` reference; JS-set concrete values are safe.
