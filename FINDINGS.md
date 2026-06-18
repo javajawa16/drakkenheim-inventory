@@ -80,14 +80,11 @@ Notes are no longer beta-gated; `requireAllowedUser_()` is the correct and inten
 `LockService.getDocumentLock()` with `tryLock(10000)` / `finally releaseLock()`,
 matching the v1 handler pattern.
 
-#### IDEA · Code.js:1950 · Two parallel notes systems coexist (likely dead v1 code)
-Legacy "Campaign Notes" (`CAMPAIGN_NOTES_FEED` sheet, 5-col `NOTES_HEADERS`,
-`apiGetCampaignNotes`/`apiAddCampaignNote`/`apiUpdateCampaignNote`/
-`apiDeleteCampaignNote`, gated by `requireCampaignNotesOwner_`) appears fully
-superseded by Party Notes v2 (`NOTES` sheet, 11-col `PARTY_NOTES_HEADERS`,
-`apiGetNotes`/`apiCreateNote`/…). If the client no longer calls the v1
-endpoints, removing them would cut ~220 lines and eliminate the schema
-confusion noted in section 1. Verify against Index.html before deleting.
+#### ~~IDEA · Code.js:1950 · Two parallel notes systems coexist (likely dead v1 code)~~ VERIFIED LIVE
+Audit assumption was wrong. Index.html actively calls all five v1 endpoints
+(`apiGetCampaignNotesAccess`, `apiGetCampaignNotes`, `apiAddCampaignNote`,
+`apiUpdateCampaignNote`, `apiDeleteCampaignNote`) and has a full composer UI
+at lines 2501–2513. Both systems serve different UI tabs; neither is removable.
 
 #### RISK · Code.js:2875 · `apiUpdateLedgerNote` has no LockService
 Every other write handler in this section (`apiCreateNote`, `apiUpdateNote`,
