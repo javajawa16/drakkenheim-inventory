@@ -1,11 +1,11 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 8. Index.html lines 1–1500 (HTML structure, CSS)
+Next section: 9. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
 
-### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7
+### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7, 8
 
 #### RISK · Code.js:10 · Dev access gate still open
 `CONFIG.DEV_ALLOW_UNCONFIGURED_ACCESS: true` means `requireAllowedUser_()`
@@ -143,3 +143,31 @@ editor-run test harnesses left in the production file; `testAddInventoryDirect_`
 would attempt a real `apiAddInventory` with `libraryItemId: 'TEST_ITEM'` (which
 fails safely since that library item does not exist). Cleanup candidates — verify
 `findInventoryRowById_` has no remaining callers, then remove.
+
+#### BUG · Index.html:1461 · `var(--card-bg)` used with no fallback — `--card-bg` is never defined
+`#diceTab` (1461), and two more rules at 1958 and 1979, set
+`background: var(--card-bg)` with no fallback value. `--card-bg` is not in the
+`:root` design tokens (10–44) and is never declared or `setProperty`-ed
+anywhere in the file (confirmed by search). An undefined custom property with
+no fallback makes the whole `background` declaration invalid, so these elements
+render with a transparent background instead of the intended card fill — the
+dice button blends into whatever is behind it. Either add `--card-bg` to the
+tokens or give each usage an explicit fallback, e.g.
+`var(--card-bg, rgba(37,50,76,.8))`. (`#diceTab`'s `border-radius` at 1460 uses
+the undefined `--input-radius` too, but that one has a `12px` fallback, so it
+is fine.)
+
+#### RISK · Index.html:1358 · Pervasive `calc(var(--phone-*) * N)` contradicts the project's own CSS note
+The CSS Architecture note in the README states `calc()` with CSS custom
+properties "does NOT reliably resolve in GAS WebView — use `var(--name)`
+directly." Yet phone-mode sizing leans on `calc(var(--phone-…) * N)` in ~20
+places (992, 1358, 1363, 1607, 1677, 1682, 1688, 1692–1695, 1900–1901, etc.),
+many of them multiplications that cannot be rewritten as a bare `var()`. If
+these silently fail to resolve in the iOS GAS webview, the affected card/
+button/input `min-height`s and dice-key font sizes fall back to their
+non-phone values — which matches the class of "appears too small" bugs the
+note was written to prevent. Recommend either confirming on-device that
+`calc()+var` actually works here (in which case soften the README note), or
+precomputing the scaled px in the DPR-scaling JS (where `--phone-*` is already
+set) and emitting concrete `--phone-card-min-height` etc. so the CSS can use a
+direct `var()`.
