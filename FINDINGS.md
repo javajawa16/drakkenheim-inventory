@@ -133,18 +133,9 @@ would attempt a real `apiAddInventory` with `libraryItemId: 'TEST_ITEM'` (which
 fails safely since that library item does not exist). Cleanup candidates — verify
 `findInventoryRowById_` has no remaining callers, then remove.
 
-#### BUG · Index.html:1461 · `var(--card-bg)` used with no fallback — `--card-bg` is never defined
-`#diceTab` (1461), and two more rules at 1958 and 1979, set
-`background: var(--card-bg)` with no fallback value. `--card-bg` is not in the
-`:root` design tokens (10–44) and is never declared or `setProperty`-ed
-anywhere in the file (confirmed by search). An undefined custom property with
-no fallback makes the whole `background` declaration invalid, so these elements
-render with a transparent background instead of the intended card fill — the
-dice button blends into whatever is behind it. Either add `--card-bg` to the
-tokens or give each usage an explicit fallback, e.g.
-`var(--card-bg, rgba(37,50,76,.8))`. (`#diceTab`'s `border-radius` at 1460 uses
-the undefined `--input-radius` too, but that one has a `12px` fallback, so it
-is fine.)
+#### ~~BUG · Index.html:1461 · `var(--card-bg)` used with no fallback — `--card-bg` is never defined~~ FIXED
+Added `--card-bg: #212f4b` (same as `--panel-strong`) to the `:root` token block.
+All three usages (`#diceTab`, `.notes-cat-select`, `.note-card`) now resolve.
 
 #### RISK · Index.html:1358 · Pervasive `calc(var(--phone-*) * N)` contradicts the project's own CSS note
 The CSS Architecture note in the README states `calc()` with CSS custom
