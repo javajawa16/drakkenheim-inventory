@@ -1769,7 +1769,10 @@ function classifyQuickEdit_(rowObj) {
   const name = safeText_(rowObj['Item']).toLowerCase();
   const category = safeText_(rowObj['Category']).toLowerCase();
 
-  if (/\b(gold|gp|platinum|pp|silver|sp|copper|cp)\b/.test(name) || category === 'currency') {
+  if (/\b(platinum|pp|silver|sp|copper|cp)\b/.test(name)) {
+    return '';
+  }
+  if (/\b(gold|gp)\b/.test(name) || category === 'currency') {
     return 'currency';
   }
 
@@ -2298,7 +2301,7 @@ function apiGetNotes(payload) {
     });
 
     return { ok: true, notes };
-  } catch (e) { return { ok: false, error: e.message, notes: [] }; }
+  } catch (e) { return publicApiError_('apiGetNotes', e, { notes: [] }); }
 }
 
 function apiCreateNote(payload) {
@@ -2337,7 +2340,7 @@ function apiCreateNote(payload) {
       pinned: !!(payload && payload.pinned), archived: false,
       relatedItemId: String((payload && payload.relatedItemId) || '')
     }};
-  } catch (e) { return { ok: false, error: e.message }; } finally {
+  } catch (e) { return publicApiError_('apiCreateNote', e); } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
 }
@@ -2368,7 +2371,7 @@ function apiUpdateNote(payload) {
     sheet.getRange(sheetRow, i('Updated At') + 1).setValue(now);
     bumpSync_('notes', payload && payload._syncClientId);
     return { ok: true };
-  } catch (e) { return { ok: false, error: e.message }; } finally {
+  } catch (e) { return publicApiError_('apiUpdateNote', e); } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
 }
@@ -2390,7 +2393,7 @@ function apiArchiveNote(payload) {
     sheet.getRange(sheetRow, i('Updated At') + 1).setValue(now);
     bumpSync_('notes', payload && payload._syncClientId);
     return { ok: true };
-  } catch (e) { return { ok: false, error: e.message }; } finally {
+  } catch (e) { return publicApiError_('apiArchiveNote', e); } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
 }
@@ -2714,7 +2717,9 @@ function apiQuickAddInventory(payload) {
         'Qty': ledgerEntry.qty,
         'Value GP': ledgerEntry.valueGp,
         'Inventory ID': ledgerEntry.inventoryId,
-        'Item': ledgerEntry.item
+        'Item': ledgerEntry.item,
+        'Notes': ledgerEntry.notes,
+        'Character': ledgerEntry.character
       }) : null
     };
   } catch (err) {
@@ -3576,7 +3581,9 @@ function apiCombineInventoryItems(payload) {
       'Qty': combinedQty
     });
 
+    const sourceValue = validateMoney_(source.rowObj['Value GP']);
     const targetValue = validateMoney_(merged['Value GP']);
+    const valueMismatch = sourceValue !== '' && targetValue !== '' && sourceValue !== targetValue;
     merged['Total Value GP'] = targetValue === '' ? '' : combinedQty * targetValue;
 
     const sourceHolder = safeText_(source.rowObj['Holder']);
@@ -3624,7 +3631,9 @@ function apiCombineInventoryItems(payload) {
     bumpSync_('inventory', payload && payload._syncClientId);
     return {
       ok: true,
-      message: `Combined "${merged['Item']}".`,
+      message: valueMismatch
+        ? `Combined "${merged['Item']}" (values differed — kept ${targetValue} gp/unit from target).`
+        : `Combined "${merged['Item']}".`,
       item: sanitizeInventoryForClient_(merged),
       removedId: sourceId
     };
@@ -3748,6 +3757,26 @@ function apiAdjustInventory(payload) {
 
     writeInventoryRow_(sheet, headers, found.rowNumber, rowObj);
 
+    let ledgerEntry = null;
+    if (quickType === 'currency' || quickType === 'delerium crystal') {
+      const isGold = quickType === 'currency';
+      const ledgerTs = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+      ledgerEntry = {
+        userEmail,
+        action: 'ADJUST',
+        resource: isGold ? 'gold' : 'delerium',
+        subtype: isGold ? 'gold' : (normalizeDeleriumSize_(rowObj['Item']) || 'crystal'),
+        qty: delta,
+        valueGp: isGold ? validateMoney_(rowObj['Value GP']) : '',
+        inventoryId: rowObj['Inventory ID'],
+        item: rowObj['Item'],
+        notes: note || '',
+        character: safeText_(payload && payload.clientCharacter)
+      };
+      appendResourceLedger_(ledgerEntry);
+      ledgerEntry._ts = ledgerTs;
+    }
+
     auditWrite_({
       userEmail,
       action: 'ADJUST_INVENTORY',
@@ -3761,7 +3790,23 @@ function apiAdjustInventory(payload) {
     });
 
     bumpSync_('inventory', payload && payload._syncClientId);
-    return { ok: true, message: 'Inventory adjusted.', item: sanitizeInventoryForClient_(rowObj) };
+    return {
+      ok: true,
+      message: 'Inventory adjusted.',
+      item: sanitizeInventoryForClient_(rowObj),
+      ledgerEntry: ledgerEntry ? sanitizeResourceLedgerForClient_({
+        'Timestamp': ledgerEntry._ts,
+        'Action': ledgerEntry.action,
+        'Resource': ledgerEntry.resource,
+        'Subtype': ledgerEntry.subtype,
+        'Qty': ledgerEntry.qty,
+        'Value GP': ledgerEntry.valueGp,
+        'Inventory ID': ledgerEntry.inventoryId,
+        'Item': ledgerEntry.item,
+        'Notes': ledgerEntry.notes,
+        'Character': ledgerEntry.character
+      }) : null
+    };
   } catch (err) {
     auditWrite_({
       userEmail,

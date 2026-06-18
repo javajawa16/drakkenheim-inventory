@@ -71,57 +71,34 @@ markup verified — no findings.
 
 ### 2026-06-18 (run 3) — Sections audited: 4, 5, 6, 7
 
-#### BUG · Code.js:3701 · `apiAdjustInventory` currency/delerium quick-adjust writes NO ledger entry
-`apiAdjustInventory` (reached for currency via `apiAdjustCurrency` 3691, and for
-delerium-crystal quick-edits directly) rewrites the inventory row's `Qty` but
-never calls `appendResourceLedger_`. Every other gold/delerium mutation
-(quick-add 2689, deplete 2820, receive 2961/2989, sell 3052/3105, split 3215+,
-send 3327) records a `RESOURCE_LEDGER` row. So when a treasurer uses the +/−
-stepper to adjust a Gold or Delerium row, the live total (summed from inventory
-`Qty`) shifts but the ledger history shows nothing — the ledger silently
-diverges from the actual balance, defeating the audit trail. Suggested fix:
-when `quickType === 'currency'` or `'delerium crystal'`, append an `ADJUST`
-ledger entry with `qty: delta` (and `subtype` = gold/size), mirroring
-`apiDepleteResource`.
+#### ~~BUG · Code.js:3701 · `apiAdjustInventory` currency/delerium quick-adjust writes NO ledger entry~~ FIXED
+When `quickType` is `'currency'` or `'delerium crystal'`, `apiAdjustInventory`
+now calls `appendResourceLedger_` with action `ADJUST`, resource/subtype/qty/
+character/notes, and returns the sanitized entry to the client so the ledger
+list updates immediately without waiting for the next full sync.
 
-#### BUG · Code.js:1772 · `classifyQuickEdit_` over-broad currency regex (the flagged pitfall class)
-`/\b(gold|gp|platinum|pp|silver|sp|copper|cp)\b/.test(name)` classifies any item
-whose name contains one of those words as `editType: 'currency'`. This is the
-same over-broad-currency pattern that already broke the inventory display
-(fixed in `isGoldItem_`, which rejects platinum/silver/copper FIRST), but the
-server-side classifier was never given the same treatment. Consequences:
-`apiGetCurrencyQuickEdit` (3669) returns `editType: 'currency'` for a "Gold
-Ring", "Silver Holy Symbol", "Copper Key", etc., so the item is offered the
-currency +/− quick-edit instead of the normal edit form — and combined with the
-ledger gap above, adjusting it mutates qty with no trail. Suggested fix: reject
-`\b(platinum|pp|silver|sp|copper|cp)\b` before matching `\b(gold|gp)\b`, the
-same precedence `isGoldItem_` uses in Index.html.
+#### ~~BUG · Code.js:1772 · `classifyQuickEdit_` over-broad currency regex~~ FIXED
+Split the single regex into two guards: non-gold currency names
+(`platinum|pp|silver|sp|copper|cp`) now return `''` first, then gold/gp/
+category-currency matches return `'currency'`. Mirrors the same precedence used
+by `isGoldItem_` in Index.html. "Silver Holy Symbol", "Copper Key", etc. now
+fall through to the normal edit path instead of getting the currency stepper.
 
-#### RISK · Code.js:2301,2340,2371,2393 · v2 notes handlers leak raw `e.message` to client
-`apiGetNotes`, `apiCreateNote`, `apiUpdateNote`, and `apiArchiveNote` all
-`return { ok: false, error: e.message }` directly, bypassing the
-`publicValidationError_` / `publicApiError_` sanitizers that every other handler
-in Code.js routes through. Internal errors (sheet schema messages, lock text,
-stack-adjacent detail) reach the client verbatim. Low severity (notes are
-gated to allowed users) but inconsistent with the established error-reporting
-contract. Suggested fix: wrap the catch returns in `publicApiError_(name, e, {…})`.
+#### ~~RISK · Code.js:2301,2340,2371,2393 · v2 notes handlers leak raw `e.message` to client~~ FIXED
+`apiGetNotes`, `apiCreateNote`, `apiUpdateNote`, and `apiArchiveNote` catch
+blocks now route through `publicApiError_` (which calls `publicValidationError_`
++ `log_`), consistent with every other handler in Code.js.
 
-#### IDEA · Code.js:2709 · `apiQuickAddInventory` optimistic ledger entry drops Notes + Character
-The `ledgerEntry` returned to the client for a gold/delerium quick-add
-sanitizes only `Timestamp…Item` — it omits `'Notes'` and `'Character'`, unlike
-`apiDepleteResource` (2839), `apiReceiveResource` (2964), and every other
-handler that returns a ledger entry. The optimistic row the client renders
-right after a quick-add of gold/delerium therefore shows no note and no
-attributed character until the next full sync. Suggested fix: add
-`'Notes': ledgerEntry.notes` and `'Character': ledgerEntry.character`.
+#### ~~IDEA · Code.js:2709 · `apiQuickAddInventory` optimistic ledger entry drops Notes + Character~~ FIXED
+Added `'Notes': ledgerEntry.notes` and `'Character': ledgerEntry.character` to
+the `sanitizeResourceLedgerForClient_` call in the success return, matching
+`apiDepleteResource` and `apiReceiveResource`.
 
-#### IDEA · Code.js:3579 · `apiCombineInventoryItems` silently discards a Value GP mismatch
-Combine matches on Item + Category + Rarity but not on `Value GP`. The merged
-row keeps the *target's* `Value GP` and recomputes `Total Value GP` from it, so
-if the source row carried a different per-unit value (e.g. two "Trade Goods"
-stacks priced differently) the source's value is lost with no warning. Likely
-acceptable for fungible stacks; flagging so a future "combine" UX can confirm or
-block mismatched-value merges.
+#### ~~IDEA · Code.js:3579 · `apiCombineInventoryItems` silently discards a Value GP mismatch~~ FIXED
+`sourceValue` vs `targetValue` are now compared after `validateMoney_`. When
+they differ, the success message includes a note: "values differed — kept
+X gp/unit from target." The merge proceeds (fungible stacks are the common
+case); the mismatch is surfaced so the user knows.
 
 #### Note · Code.js:3068–3373 · Sell / split / send handlers — locks + sanitize all correct (positive baseline)
 `apiSellDelerium`, `apiSplitGold`, and `apiSendGoldToMember` each acquire
