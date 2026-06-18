@@ -35,12 +35,9 @@ entire header and first-data rows, which include the player **Email** column —
 PII written to Stackdriver logs on every characters fetch. Remove these
 before production (README TODO references the old ~657–682 location).
 
-#### IDEA · Code.js:1039 · `categorizeItem_` over-broadly labels any rarity item "Wondrous Item"
-After the type checks fall through, `if (text.includes('magic item') || rarity)
-return 'Wondrous Item';` means *any* item that has a rarity value but didn't
-match an earlier type (e.g. a flavored consumable or tool with a rarity) is
-classified Wondrous Item. Low impact since weapons/armor/potions match earlier,
-but worth tightening if misgrouped items show up in the wrong inventory group.
+#### ~~IDEA · Code.js:1039 · `categorizeItem_` over-broadly labels any rarity item "Wondrous Item"~~ FIXED
+`|| rarity` arm removed; fallback now only triggers on `text.includes('magic item')`.
+Items with a rarity but no matching type fall through to `Tool / Gear`.
 
 #### Note · Code.js:655 · `apiSellInventoryBatch` LockService handled correctly
 Verified the document lock is acquired with `tryLock(10000)` and released in a
