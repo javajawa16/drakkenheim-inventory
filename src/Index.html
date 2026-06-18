@@ -2780,6 +2780,7 @@
     let sellBatchAllRows      = []; // cache of all sellable rows
     let sellBatchRollups      = []; // rolled-up items (same name+holder combined)
     let _inFlightWrites       = 0;
+    let _inFlightNoteWrites   = 0;
     let deleriumSellQtys    = {};
     let deleriumOriginalQtys = {};
     let deleriumReceiveQtys  = {};
@@ -4355,8 +4356,12 @@
             }
           }
           if (res.notes.ts !== syncState.notes.ts) {
-            syncState.notes = res.notes;
-            if (res.notes.by !== syncClientId) loadNotes(true);
+            if (res.notes.by !== syncClientId && _inFlightNoteWrites > 0) {
+              // another user's note write while a local note write is in flight — defer reload to next tick
+            } else {
+              syncState.notes = res.notes;
+              if (res.notes.by !== syncClientId) loadNotes(true);
+            }
           }
         })
         .withFailureHandler(() => {})
@@ -4600,8 +4605,10 @@
         if (idx >= 0) Object.assign(notesData[idx], { title, category, note, tags, pinned, relatedItemId, updatedAt: now });
         closeNoteForm();
         renderNotesList();
+        _inFlightNoteWrites++;
         google.script.run
           .withSuccessHandler(res => {
+            _inFlightNoteWrites--;
             notesSaving = false;
             if (!res || !res.ok) {
               if (backup && idx >= 0) notesData[idx] = backup;
@@ -4610,6 +4617,7 @@
             }
           })
           .withFailureHandler(() => {
+            _inFlightNoteWrites--;
             notesSaving = false;
             if (backup && idx >= 0) notesData[idx] = backup;
             renderNotesList();
@@ -4624,12 +4632,19 @@
         notesLoaded = true;
         closeNoteForm();
         renderNotesList();
+        _inFlightNoteWrites++;
         google.script.run
           .withSuccessHandler(res => {
+            _inFlightNoteWrites--;
             notesSaving = false;
             const tidx = notesData.findIndex(x => x.noteId === tempId);
             if (res && res.ok && res.note) {
-              if (tidx >= 0) notesData[tidx] = res.note;
+              if (tidx >= 0) {
+                notesData[tidx] = res.note;
+              } else if (!notesData.some(x => x.noteId === res.note.noteId)) {
+                // loadNotes replaced notesData mid-flight — add note if not already synced in
+                notesData.push(res.note);
+              }
               lastNotesLoadAt = Date.now();
               renderNotesList();
             } else {
@@ -4639,6 +4654,7 @@
             }
           })
           .withFailureHandler(() => {
+            _inFlightNoteWrites--;
             notesSaving = false;
             notesData = notesData.filter(x => x.noteId !== tempId);
             renderNotesList();
@@ -4654,8 +4670,10 @@
       const backup = idx >= 0 ? notesData[idx] : null;
       if (idx >= 0) notesData.splice(idx, 1);
       renderNotesList();
+      _inFlightNoteWrites++;
       google.script.run
         .withSuccessHandler(res => {
+          _inFlightNoteWrites--;
           if (!res || !res.ok) {
             if (backup) notesData.splice(idx, 0, backup);
             renderNotesList();
@@ -4663,6 +4681,7 @@
           }
         })
         .withFailureHandler(() => {
+          _inFlightNoteWrites--;
           if (backup) notesData.splice(idx, 0, backup);
           renderNotesList();
           alert('Archive failed — please try again.');
@@ -4676,8 +4695,10 @@
       const newPinned = !n.pinned;
       n.pinned = newPinned;
       renderNotesList();
+      _inFlightNoteWrites++;
       google.script.run
         .withSuccessHandler(res => {
+          _inFlightNoteWrites--;
           if (!res || !res.ok) {
             n.pinned = !newPinned;
             renderNotesList();
@@ -4685,6 +4706,7 @@
           }
         })
         .withFailureHandler(() => {
+          _inFlightNoteWrites--;
           n.pinned = !newPinned;
           renderNotesList();
           setMainStatus('<span class="error">Pin failed — please try again.</span>');
@@ -6049,10 +6071,15 @@
       const removePending = () => {
         inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
       };
+      const restoreInputs = () => {
+        if (amountInput) amountInput.value = amount;
+        if (noteInput) noteInput.value = note;
+      };
 
       const onSuccess = res => {
         removePending();
         if (!res || !res.ok) {
+          restoreInputs();
           if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Failed.')}</span>`;
           renderGoldSheetBody();
           return;
@@ -6068,6 +6095,7 @@
       };
       const onFail = err => {
         removePending();
+        restoreInputs();
         if (status) status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
         renderGoldSheetBody();
       };
@@ -6584,6 +6612,7 @@
         .withSuccessHandler(res => {
           resourcePayInFlight[resource] = false;
           if (!res || !res.ok) {
+            if (amountInput) amountInput.value = amount;
             if (button) {
               button.disabled = false;
               button.textContent = 'Pay';
@@ -6606,6 +6635,7 @@
         })
         .withFailureHandler(err => {
           resourcePayInFlight[resource] = false;
+          if (amountInput) amountInput.value = amount;
           if (button) {
             button.disabled = false;
             button.textContent = 'Pay';
@@ -8041,8 +8071,10 @@
         if (_addSearchEl) { _addSearchEl.focus(); _addSearchEl.select(); }
       }, 80);
 
+      _inFlightWrites++;
       const runner = google.script.run
         .withSuccessHandler(res => {
+          _inFlightWrites--;
           // Remove optimistic row
           inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optId);
           if (!res || !res.ok) {
@@ -8077,6 +8109,7 @@
           if (duplicateCandidate) showCombineChoice(res.item, duplicateCandidate);
         })
         .withFailureHandler(err => {
+          _inFlightWrites--;
           inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optId);
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           if (commandMode === 'inventory') renderInventory();

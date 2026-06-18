@@ -2696,8 +2696,6 @@ function apiQuickAddInventory(payload) {
       'Added By': safeText_(payload && payload.clientCharacter)
     };
 
-    sheet.appendRow(headers.map(h => rowObj[h] !== undefined ? rowObj[h] : ''));
-
     let ledgerEntry = null;
     if (quick.editType === 'currency' || quick.editType === 'delerium crystal') {
       ledgerEntry = {
@@ -2714,6 +2712,8 @@ function apiQuickAddInventory(payload) {
       };
       appendResourceLedger_(ledgerEntry);
     }
+
+    sheet.appendRow(headers.map(h => rowObj[h] !== undefined ? rowObj[h] : ''));
 
     auditWrite_({
       userEmail,
@@ -2844,8 +2844,8 @@ function apiDepleteResource(payload) {
       character: safeText_(payload && payload.clientCharacter)
     };
 
-    sheet.appendRow(headers.map(h => rowObj[h] !== undefined ? rowObj[h] : ''));
     appendResourceLedger_(ledgerEntry);
+    sheet.appendRow(headers.map(h => rowObj[h] !== undefined ? rowObj[h] : ''));
 
     auditWrite_({
       userEmail,
