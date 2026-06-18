@@ -199,7 +199,7 @@
 
 **Backend — new `NOTES` sheet (Code.js):**
 - `PARTY_NOTES_HEADERS`: 11-column schema — Note ID, Created At, Updated At, Author, Category, Title, Note, Tags, Pinned, Archived, Related Item ID
-- `PARTY_NOTES_CATEGORIES`: General, Quest, NPC, Location, Loot, Theory, Rules, Session Recap
+- `PARTY_NOTES_CATEGORIES`: General, Quest, Location
 - `ensurePartyNotesSheet_()`: creates the `NOTES` sheet on first use; safely appends missing headers to existing sheet
 - `makeNoteId_()`: generates `NOTE_XXXXXXXX` IDs
 - `apiGetNotes(payload)` — uses `requireAllowedUser_()` (NOT admin-only). Supports filters: search (title/note/tags/category), category, relatedItemId, pinnedOnly, includeArchived. Sort: pinned first, then updatedAt desc.

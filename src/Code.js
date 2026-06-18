@@ -132,7 +132,7 @@ const RESOURCE_LEDGER_HEADERS = [
   'Character'
 ];
 
-const NOTES_HEADERS = [
+const CAMPAIGN_NOTES_HEADERS = [
   'Note ID',
   'Created At',
   'Updated At',
@@ -268,7 +268,7 @@ function setupInventoryTabs() {
     writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.INVENTORY_SHEET), INVENTORY_HEADERS);
     writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.DELERIUM_SHEET), DELERIUM_HEADERS);
     writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.RESOURCE_LEDGER_SHEET), RESOURCE_LEDGER_HEADERS);
-    writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.NOTES_SHEET), NOTES_HEADERS);
+    writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.NOTES_SHEET), CAMPAIGN_NOTES_HEADERS);
     writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.CHARACTERS_SHEET), CHARACTERS_HEADERS);
     writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.USER_PROFILES_SHEET), USER_PROFILE_HEADERS);
     setupLookupsSheet_(ss);
@@ -293,7 +293,7 @@ function resetAppDataSheets() {
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.INVENTORY_SHEET), INVENTORY_HEADERS);
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.DELERIUM_SHEET), DELERIUM_HEADERS);
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.RESOURCE_LEDGER_SHEET), RESOURCE_LEDGER_HEADERS);
-    clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.NOTES_SHEET), NOTES_HEADERS);
+    clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.NOTES_SHEET), CAMPAIGN_NOTES_HEADERS);
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.CHARACTERS_SHEET), CHARACTERS_HEADERS);
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.LOG_SHEET), [
       'Timestamp',
@@ -421,6 +421,13 @@ function resetCleanEquipmentLibrary() {
 function continueCleanEquipmentLibrary() {
   return runLogged_('continueCleanEquipmentLibrary', function () {
     requireAdminUser_();
+
+    const lock = LockService.getDocumentLock();
+    if (!lock.tryLock(5000)) {
+      throw new Error('Another import batch is already running. Wait for it to finish before continuing.');
+    }
+    try {
+
     const started = Date.now();
     const maxRuntimeMs = 4.25 * 60 * 1000;
     const batchSize = 150;
@@ -569,6 +576,10 @@ function continueCleanEquipmentLibrary() {
         nextReadRow: readRow,
         nextWriteRow: writeRow
       });
+    }
+
+    } finally {
+      lock.releaseLock();
     }
   });
 }
@@ -750,24 +761,13 @@ function apiGetCharacters() {
     const ss = getInventorySpreadsheet_();
     const sheet = getSheetByTrimmedName_(ss, CONFIG.CHARACTERS_SHEET);
 
-    if (!sheet) {
-      Logger.log('[apiGetCharacters] Sheet not found: ' + CONFIG.CHARACTERS_SHEET);
-      return { ok: true, rows: [] };
-    }
+    if (!sheet) return { ok: true, rows: [] };
 
     const lastRow = sheet.getLastRow();
-    Logger.log('[apiGetCharacters] Sheet found, lastRow: ' + lastRow);
-
-    if (lastRow < 2) {
-      Logger.log('[apiGetCharacters] No data rows (lastRow < 2)');
-      return { ok: true, rows: [] };
-    }
+    if (lastRow < 2) return { ok: true, rows: [] };
 
     // Get specific range synchronously (not getDataRange to avoid stale references)
     const values = sheet.getRange(1, 1, lastRow, sheet.getLastColumn()).getValues();
-    Logger.log('[apiGetCharacters] Read ' + values.length + ' rows, ' + (values[0] ? values[0].length : 0) + ' columns');
-    Logger.log('[apiGetCharacters] Row 1 (headers): ' + JSON.stringify(values[0]));
-    Logger.log('[apiGetCharacters] Row 2 (first data): ' + JSON.stringify(values[1]));
 
     const headers = values.shift().map(String);
 
@@ -799,7 +799,6 @@ function apiGetCharacters() {
         notes: safeText_(row.Notes)
       }));
 
-    Logger.log('[apiGetCharacters] Returning ' + rows.length + ' character rows');
     return { ok: true, rows, dmRows };
   } catch (err) {
     Logger.log('[apiGetCharacters] ERROR: ' + err.message);
@@ -1037,7 +1036,7 @@ function categorizeItem_(typeRaw, rarity, description) {
   if (type.includes('wondrous')) return 'Wondrous Item';
   if (type.includes('treasure')) return 'Other';
 
-  if (text.includes('magic item') || rarity) return 'Wondrous Item';
+  if (text.includes('magic item')) return 'Wondrous Item';
 
   return 'Tool / Gear';
 }
@@ -1972,7 +1971,7 @@ function apiGetCampaignNotes() {
     requireCampaignNotesOwner_();
     const ss = getInventorySpreadsheet_();
     const sheet = getOrCreateSheet_(ss, CONFIG.NOTES_SHEET);
-    writeHeaderOnly_(sheet, NOTES_HEADERS);
+    writeHeaderOnly_(sheet, CAMPAIGN_NOTES_HEADERS);
 
     if (sheet.getLastRow() < 2) {
       return {
@@ -1981,7 +1980,7 @@ function apiGetCampaignNotes() {
       };
     }
 
-    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, NOTES_HEADERS.length).getValues();
+    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, CAMPAIGN_NOTES_HEADERS.length).getValues();
     const notes = values
       .filter(row => String(row[0] || '').trim() && String(row[4] || '').trim())
       .map(row => ({
@@ -2020,7 +2019,7 @@ function apiAddCampaignNote(payload) {
     const body = validateText_(payload && payload.body, 'Note', 5000);
     const ss = getInventorySpreadsheet_();
     const sheet = getOrCreateSheet_(ss, CONFIG.NOTES_SHEET);
-    writeHeaderOnly_(sheet, NOTES_HEADERS);
+    writeHeaderOnly_(sheet, CAMPAIGN_NOTES_HEADERS);
 
     const createdAt = new Date();
     const noteId = `note_${createdAt.getTime()}_${Math.floor(Math.random() * 100000)}`;
@@ -2080,7 +2079,7 @@ function apiUpdateCampaignNote(payload) {
     const body = validateText_(payload && payload.body, 'Note', 5000);
     const ss = getInventorySpreadsheet_();
     const sheet = getOrCreateSheet_(ss, CONFIG.NOTES_SHEET);
-    writeHeaderOnly_(sheet, NOTES_HEADERS);
+    writeHeaderOnly_(sheet, CAMPAIGN_NOTES_HEADERS);
 
     const values = sheet.getDataRange().getValues();
     const headers = values.shift().map(String);
@@ -2149,7 +2148,7 @@ function apiDeleteCampaignNote(noteId) {
     const id = validateId_(noteId, 'note ID');
     const ss = getInventorySpreadsheet_();
     const sheet = getOrCreateSheet_(ss, CONFIG.NOTES_SHEET);
-    writeHeaderOnly_(sheet, NOTES_HEADERS);
+    writeHeaderOnly_(sheet, CAMPAIGN_NOTES_HEADERS);
 
     const values = sheet.getDataRange().getValues();
     const headers = values.shift().map(String);
@@ -2221,12 +2220,12 @@ function apiGetSyncState() {
 
 /* ── Party Notes (v2) ───────────────────────────────────────────────── */
 
-const PARTY_NOTES_HEADERS = [
+const PARTY_CAMPAIGN_NOTES_HEADERS = [
   'Note ID','Created At','Updated At','Author',
   'Category','Title','Note','Tags','Pinned','Archived','Related Item ID'
 ];
 const PARTY_NOTES_CATEGORIES = [
-  'General','Quest','NPC','Location'
+  'General','Quest','Location'
 ];
 const PARTY_NOTES_SHEET = 'NOTES';
 
@@ -2235,11 +2234,11 @@ function ensurePartyNotesSheet_() {
   let sheet = ss.getSheetByName(PARTY_NOTES_SHEET);
   if (!sheet) {
     sheet = ss.insertSheet(PARTY_NOTES_SHEET);
-    sheet.getRange(1, 1, 1, PARTY_NOTES_HEADERS.length).setValues([PARTY_NOTES_HEADERS]);
+    sheet.getRange(1, 1, 1, PARTY_CAMPAIGN_NOTES_HEADERS.length).setValues([PARTY_CAMPAIGN_NOTES_HEADERS]);
     return sheet;
   }
   const existing = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
-  PARTY_NOTES_HEADERS.forEach(h => {
+  PARTY_CAMPAIGN_NOTES_HEADERS.forEach(h => {
     if (!existing.includes(h)) {
       sheet.getRange(1, existing.length + 1).setValue(h);
       existing.push(h);
@@ -2304,14 +2303,16 @@ function apiGetNotes(payload) {
 }
 
 function apiCreateNote(payload) {
+  const lock = LockService.getDocumentLock();
   try {
     requireAllowedUser_();
+    if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
     const sheet = ensurePartyNotesSheet_();
     const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
     const noteId = makeNoteId_();
     const author = String((payload && payload.clientCharacter) || '');
     const cat = PARTY_NOTES_CATEGORIES.includes(payload && payload.category) ? payload.category : 'General';
-    const row = PARTY_NOTES_HEADERS.map(h => {
+    const row = PARTY_CAMPAIGN_NOTES_HEADERS.map(h => {
       switch (h) {
         case 'Note ID':         return noteId;
         case 'Created At':      return now;
@@ -2334,12 +2335,16 @@ function apiCreateNote(payload) {
       title: payload.title || '', note: payload.note || '', tags: payload.tags || '',
       pinned: !!(payload && payload.pinned), archived: false, relatedItemId: payload.relatedItemId || ''
     }};
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch (e) { return { ok: false, error: e.message }; } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
 }
 
 function apiUpdateNote(payload) {
+  const lock = LockService.getDocumentLock();
   try {
     requireAllowedUser_();
+    if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
     const sheet = ensurePartyNotesSheet_();
     const data  = sheet.getDataRange().getValues();
     const hdrs  = data[0].map(String);
@@ -2361,12 +2366,16 @@ function apiUpdateNote(payload) {
     sheet.getRange(sheetRow, i('Updated At') + 1).setValue(now);
     bumpSync_('notes', payload && payload._syncClientId);
     return { ok: true };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch (e) { return { ok: false, error: e.message }; } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
 }
 
 function apiArchiveNote(payload) {
+  const lock = LockService.getDocumentLock();
   try {
     requireAllowedUser_();
+    if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
     const sheet = ensurePartyNotesSheet_();
     const data  = sheet.getDataRange().getValues();
     const hdrs  = data[0].map(String);
@@ -2379,7 +2388,9 @@ function apiArchiveNote(payload) {
     sheet.getRange(sheetRow, i('Updated At') + 1).setValue(now);
     bumpSync_('notes', payload && payload._syncClientId);
     return { ok: true };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch (e) { return { ok: false, error: e.message }; } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
 }
 
 function apiAddInventory(payload) {

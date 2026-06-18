@@ -62,7 +62,7 @@ function resetCampaignData() {
     { name: CONFIG.INVENTORY_SHEET,      headers: INVENTORY_HEADERS },
     { name: CONFIG.RESOURCE_LEDGER_SHEET, headers: RESOURCE_LEDGER_HEADERS },
     { name: CONFIG.DELERIUM_SHEET,       headers: DELERIUM_HEADERS },
-    { name: CONFIG.NOTES_SHEET,          headers: NOTES_HEADERS },
+    { name: CONFIG.NOTES_SHEET,          headers: CAMPAIGN_NOTES_HEADERS },
     { name: CONFIG.LOG_SHEET,            headers: [
         'Timestamp', 'Level', 'Function', 'Message', 'Details',
         'User Email', 'Action', 'Item ID', 'Item Name',
@@ -109,7 +109,7 @@ function resetCampaignDataDirect() {
     { name: CONFIG.INVENTORY_SHEET,       headers: INVENTORY_HEADERS },
     { name: CONFIG.RESOURCE_LEDGER_SHEET, headers: RESOURCE_LEDGER_HEADERS },
     { name: CONFIG.DELERIUM_SHEET,        headers: DELERIUM_HEADERS },
-    { name: CONFIG.NOTES_SHEET,           headers: NOTES_HEADERS },
+    { name: CONFIG.NOTES_SHEET,           headers: CAMPAIGN_NOTES_HEADERS },
     { name: CONFIG.LOG_SHEET,             headers: [
         'Timestamp', 'Level', 'Function', 'Message', 'Details',
         'User Email', 'Action', 'Item ID', 'Item Name',

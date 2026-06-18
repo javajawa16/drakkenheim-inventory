@@ -85,13 +85,8 @@ Local working repo for the **Wieners of Drakkenheim** D&D campaign inventory web
 | Internal | Display label |
 |---|---|
 | General | General Nonsense |
-| Quest | Plot Coupons |
-| NPC | Suspicious People |
-| Location | Bad Places |
-| Loot | Shiny Evidence |
-| Theory | Conspiracy Soup |
-| Rules | Rules Goblins |
-| Session Recap | What Happened? |
+| Quest | Quest |
+| Location | Location |
 
 - **Note cards**: category pill + tags on same row (tags right-aligned), title, 3-line body preview, author + date, Pin/Archive buttons. Cards with in-flight creates are dimmed + non-clickable with "Saving…" badge.
 - **Optimistic saves**: create/edit/archive/pin all update local state immediately; server syncs in background; rollback on failure

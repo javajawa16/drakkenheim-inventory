@@ -67,33 +67,18 @@ middle column were ever dropped, subsequent reads keyed by header name still
 work, but column order would diverge from the constant and any positional
 read would be off. Low risk given current usage; flagging for awareness.
 
-#### BUG · Code.js:2208 · `apiCreateNote` silently downgrades 4 of the 8 note categories
-`PARTY_NOTES_CATEGORIES = ['General','Quest','NPC','Location']` lists only 4
-categories, but the README and client UI define 8 (adds Loot, Theory, Rules,
-Session Recap). Line 2293 validates with
-`PARTY_NOTES_CATEGORIES.includes(payload.category) ? payload.category : 'General'`,
-so a note created as Loot/Theory/Rules/Session Recap is silently stored as
-**General**. The user sees their chosen category on the optimistic client card,
-then it flips to General on the next sync/refresh — a confusing data-loss bug.
-Fix: extend `PARTY_NOTES_CATEGORIES` to the full 8 internal category names.
+#### ~~BUG · Code.js:2208 · `apiCreateNote` silently downgrades note categories~~ FIXED
+`PARTY_NOTES_CATEGORIES` and `NOTE_CATEGORIES` (client) now both define the same
+3 active categories: General, Quest, Location. Extra categories (NPC, Loot, Theory,
+Rules, Session Recap) removed intentionally; all references cleaned from README/HANDOFF.
 
-#### RISK · Code.js:2238 · Party Notes server endpoints not gated to treasurer
-`apiGetNotes`, `apiCreateNote` (and the update/archive paths below) call only
-`requireAllowedUser_()`. The README states Party Notes is "treasurer-only for
-beta, gated in setCommandMode and applyIdentity" — i.e. the gate is purely
-client-side. Any allowed user can call these endpoints directly via
-`google.script.run`. Combined with the open dev access gate (section 1) and
-the DM-Josh backdoor (section 3), notes are effectively world-readable/writable.
-If the beta gating is meant to be enforced, add `requireTreasurer_` server-side.
+#### ~~RISK · Code.js:2238 · Party Notes server endpoints not gated to treasurer~~ N/A
+Notes are no longer beta-gated; `requireAllowedUser_()` is the correct and intended gate.
 
-#### IDEA · Code.js:2286 · Party Notes v2 writes lack LockService
-`apiCreateNote` (and the v2 update/archive handlers) append/edit the NOTES
-sheet with no document lock, unlike the legacy campaign-note handlers
-(`apiAddCampaignNote`/`apiUpdateCampaignNote`/`apiDeleteCampaignNote` at
-2051–2171, which correctly `tryLock`/release in `finally`). Concurrent edits
-to the same note could race (last-write-wins / lost update). Given optimistic
-client saves sync in the background, two players editing near-simultaneously is
-plausible. Recommend the same lock pattern used by the v1 handlers.
+#### ~~IDEA · Code.js:2286 · Party Notes v2 writes lack LockService~~ FIXED
+`apiCreateNote`, `apiUpdateNote`, and `apiArchiveNote` now each acquire a
+`LockService.getDocumentLock()` with `tryLock(10000)` / `finally releaseLock()`,
+matching the v1 handler pattern.
 
 #### IDEA · Code.js:1950 · Two parallel notes systems coexist (likely dead v1 code)
 Legacy "Campaign Notes" (`CAMPAIGN_NOTES_FEED` sheet, 5-col `NOTES_HEADERS`,
