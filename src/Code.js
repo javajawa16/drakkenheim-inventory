@@ -3945,23 +3945,3 @@ function findInventoryRowById_(sheet, inventoryId) {
   return match ? match.getRow() : null;
 }
 
-function testAddInventoryDirect_() {
-  const result = apiAddInventory({
-    libraryItemId: 'TEST_ITEM',
-    item: 'Test Inventory Item',
-    category: 'Test',
-    rarity: 'Test',
-    qty: 1,
-    holder: 'Party',
-    valueGp: '',
-    factionRelevance: '',
-    notes: 'Direct backend test.'
-  });
-
-  Logger.log(JSON.stringify(result, null, 2));
-}
-
-function testGetInventoryDirect_() {
-  const result = apiGetInventory();
-  Logger.log(JSON.stringify(result, null, 2));
-}

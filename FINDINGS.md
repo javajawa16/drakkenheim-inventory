@@ -144,3 +144,9 @@ strings** (e.g. `"95px"`), not to further `var()` references. So
 runtime — standard numeric CSS math that works fine in GAS WebView. The README
 warning applies to CSS-only variable chains where the property itself contains a
 `var()` reference; JS-set concrete values are safe.
+
+#### ~~IDEA · Code.js:3927 · Dead/unused helpers and test functions remain in source~~ PARTIALLY FIXED
+`findInventoryRowById_` is NOT dead — it is the implementation called by
+`getInventoryRowObjectById_` at line 1752. Audit misread the dependency
+direction. `testAddInventoryDirect_` and `testGetInventoryDirect_` were
+confirmed dead and removed.
