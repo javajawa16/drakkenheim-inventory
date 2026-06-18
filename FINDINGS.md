@@ -1,11 +1,11 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 12. Index.html lines 6001–7500 (inventory groups, description sheet, sell batch)
+Next section: 13. Index.html lines 7501–end (add item flow, custom item, form handling)
 
 ## Sessions
 
-### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 
 #### ~~RISK · Code.js:10 · Dev access gate still open~~ FIXED
 `DEV_ALLOW_UNCONFIGURED_ACCESS` flipped to `false`. `requireAllowedUser_` now
@@ -220,3 +220,40 @@ other underlying rows keep their old holder. This matches the README's existing
 "Give to… moves only the representative row" TODO. Unlike `confirmSellItem`
 (5506) which FIFO-drains across all rollup rows, give has no multi-row
 distribution. Recording as confirmation, not a new finding.
+
+#### RISK · Index.html:6301 · Ledger-note edit is keyed only on `Timestamp`
+`updateLedgerNoteFromBottom` locates the in-memory entry with
+`inventoryResourceLedger.find(e => e['Timestamp'] === timestamp)` and the server
+call `apiUpdateLedgerNote({ timestamp, resource, notes })` keys the sheet write
+the same way. Several write paths in section 11 emit *multiple* ledger rows with
+the same ISO timestamp in a single operation (e.g. `sellDelerium`/`apiSellDelerium`
+push one entry per crystal size plus a gold row, and `splitGold` emits a deduct +
+per-member rows). When a treasurer taps one of those rows to edit its note, both
+the local `find` (first match only) and the server's timestamp match can hit the
+wrong row — or every row sharing that millisecond. Recommend keying ledger edits
+on a stable per-row id (the RESOURCE_LEDGER row number or a generated entry id)
+rather than the timestamp. Worth confirming the server-side matcher's behavior in
+section 5/`apiUpdateLedgerNote` against same-timestamp siblings.
+
+#### IDEA · Index.html:6434 · `isAccessoryItem_` requires BOTH a wondrous/accessory category AND a name keyword
+Accessory grouping only fires when `category` contains `wondrous`/`accessor`
+*and* the name matches the ring/amulet/cloak/etc. word list. A magic accessory
+whose Category is something else (e.g. a custom-added "Ring of X" typed with
+category `Magic Item` or `Ring`, or a library item categorized `Rod`/`Ring`)
+falls through to **Bonus Junk** instead of **Accessories**. Given custom items
+let the user type a free-form category, this likely misfiles some accessories.
+Consider making the name-keyword match sufficient on its own, or broadening the
+category test. Low severity (cosmetic grouping only).
+
+#### IDEA · Index.html:6397 · Minor dead code in section 12
+`isDashboardResourceRow_` declares `const category = …` (6399) but only uses
+`name`. `payResource` writes `amountInput.dataset.lastPaidAmount` (6546) which is
+never read back anywhere. Both are harmless leftovers — cleanup candidates.
+
+#### Note · Index.html:6315 · Gold/currency classification correctly excludes non-gold (positive baseline)
+`isGoldItem_` first rejects `\b(platinum|pp|silver|sp|copper|cp)\b` and only then
+matches `\b(gold|gp)\b`, and `isDashboardResourceRow_` only pulls gold + delerium
+out of the inventory groups — so "silver holy symbol" et al. stay visible and
+land in Treasure/Bonus Junk rather than being miscounted as gold or filtered out.
+This is the corrected behavior for the over-broad-currency-regex pitfall; no
+issue in this section.
