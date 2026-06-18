@@ -1,7 +1,7 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
+All 17 CCR runs complete. Code.js sections 1–6 (lines 1–3500+) and Index.html sections 1–13 (all) audited. All findings addressed. Next run: full re-audit pass or targeted re-check of newly deployed code.
 
 ## Sessions
 

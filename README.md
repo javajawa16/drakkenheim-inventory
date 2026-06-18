@@ -130,7 +130,7 @@ Local working repo for the **Wieners of Drakkenheim** D&D campaign inventory web
 - `apiSplitGold` and `apiSellDelerium` include `clientCharacter` in payloads.
 - DM inventory scope shows all items combined; DM gold tab shows grand total; all DM transactions deduct from party pool.
 - Inactive characters excluded from dropdowns and splits.
-- `DEV_ALLOW_UNCONFIGURED_ACCESS: true` in `Code.js` — **remove before production**.
+- `DEV_ALLOW_UNCONFIGURED_ACCESS: false` in `Code.js` — dev flag is off; unconfigured access is denied for all visitors.
 - `Session.getActiveUser().getEmail()` is unreliable for non-deployer users with `executeAs: USER_DEPLOYING` on personal Gmail. localStorage + character-hint is the working identity model.
 
 ### Equipment library (20-column schema)
