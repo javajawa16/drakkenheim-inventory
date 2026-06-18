@@ -1,11 +1,11 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
+Next section: 6. Code.js lines 2901–3500 (batch sell, give, remove)
 
 ## Sessions
 
-### 2026-06-18 — Sections audited: 1, 2, 3, 4
+### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5
 
 #### RISK · Code.js:10 · Dev access gate still open
 `CONFIG.DEV_ALLOW_UNCONFIGURED_ACCESS: true` means `requireAllowedUser_()`
@@ -88,3 +88,25 @@ superseded by Party Notes v2 (`NOTES` sheet, 11-col `PARTY_NOTES_HEADERS`,
 `apiGetNotes`/`apiCreateNote`/…). If the client no longer calls the v1
 endpoints, removing them would cut ~220 lines and eliminate the schema
 confusion noted in section 1. Verify against Index.html before deleting.
+
+#### RISK · Code.js:2875 · `apiUpdateLedgerNote` has no LockService
+Every other write handler in this section (`apiCreateNote`, `apiUpdateNote`,
+`apiArchiveNote`, `apiAddInventory`, `apiAddCustomInventory`,
+`apiQuickAddInventory`, `apiDepleteResource`, `apiReceiveResource`) acquires
+a document lock with `tryLock(10000)` and releases it in `finally`.
+`apiUpdateLedgerNote` does a read-then-write (scan all ledger rows for a
+matching timestamp, then `setValue` on the found row) with **no lock**. A
+concurrent `appendResourceLedger_` or a second note edit can shift/insert
+rows between the read and the write, so the note can land on the wrong row.
+Low frequency (note edits are rare), but it is the one outlier in an
+otherwise consistently-locked section. Wrap the read-modify-write in the
+same lock/finally pattern.
+
+#### IDEA · Code.js:2333 · `apiCreateNote` success-return reads `payload` unguarded
+The success object dereferences `payload.title`/`payload.note`/
+`payload.relatedItemId` directly, unlike the rest of the function which uses
+`payload && payload.x`. If `payload` were ever undefined the build above
+(line 2313) tolerates it, but the return object would throw a TypeError —
+caught by the outer `catch`, so the client just sees a generic error instead
+of the validation result. Harmless in practice (client always sends a
+payload); flagging for consistency.
