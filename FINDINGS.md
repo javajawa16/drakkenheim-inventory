@@ -75,15 +75,12 @@ Added `cacheInventoryRows(inventoryRows, inventoryResourceLedger)` immediately a
 interval never reloads, so the stale-cache cold-reload bug was permanent for the note editor.
 Matches the pattern in `confirmPayWithReason` (6046) and `splitGold` (6110).
 
-#### IDEA · Index.html:8013 · `addInventoryItem` success-but-`!ok` path does not restore the cleared form
-`addInventoryItem` clears the whole add form optimistically (8003 `clearAddForm()`) before the
-call. The `withFailureHandler` (8029) was previously fixed to restore the full
-`payloadSnapshot` + `selectedSnapshot`. But the `withSuccessHandler` branch where the server
-returns `{ ok: false, error }` (8013–8018) — a server-side validation rejection, e.g. invalid
-qty/value — only removes the optimistic row and shows the error; it does **not** restore the
-form. The user's typed input is lost and must be re-entered, inconsistent with the transport-
-failure path. Fix: hoist the snapshot-restore block into a shared helper called from both the
-`!ok` success branch and the failure handler.
+#### ~~IDEA · Index.html:8013 · `addInventoryItem` success-but-`!ok` path does not restore the cleared form~~ FIXED
+The same `payloadSnapshot` / `selectedSnapshot` restore block from `withFailureHandler` is now
+also applied in the `!res.ok` branch: `selectedEquipment`, `fillAddFormFromEquipment`, and all
+individual form fields (`libraryItemId`, `item`, `category`, `rarity`, `qty`, `holder`,
+`valueGp`, `factionRelevance`, `notes`) are restored before `updateAddFlow()`. Server-side
+validation rejections no longer silently clear the add form.
 
 #### Note · Index.html:6002,6070,6538,6605 · Gold/delerium pay + undo optimistic flows are otherwise correct (positive baseline)
 `confirmPayWithReason`, `splitGold`, `payResource`, and `undoResourcePay` each snapshot/track
