@@ -3028,7 +3028,7 @@
     }
 
     function isMobileLayout() {
-      return document.documentElement.classList.contains('is-phone') || window.innerWidth < 700;
+      return document.documentElement.classList.contains('is-phone');
     }
 
     /* ── Swipe-to-delete ─────────────────────────────────────────── */
@@ -3628,7 +3628,7 @@
         <div class="notes-note-row" data-note-id="${escapeHtml(note.noteId)}">
           <button class="notes-edit-action" type="button" onclick="event.stopPropagation(); startEditCampaignNote('${escapeJsString(note.noteId)}')" style="width:${NOTE_ACTION_WIDTH}px;">Edit</button>
           <button class="notes-delete-action" type="button" onclick="event.stopPropagation(); deleteCampaignNote('${escapeJsString(note.noteId)}')" style="width:${NOTE_ACTION_WIDTH}px;">Delete</button>
-          <div class="notes-note notes-note-card ${note._pending ? 'pending' : ''} ${campaignNoteEditingId === note.noteId ? 'editing' : ''}" data-note-id="${escapeHtml(note.noteId)}" ondblclick="event.stopPropagation(); startEditCampaignNote('${escapeJsString(note.noteId)}')">
+          <div class="notes-note notes-note-card ${note._pending ? 'pending' : ''} ${campaignNoteEditingId === note.noteId ? 'editing' : ''}" data-note-id="${escapeHtml(note.noteId)}">
             <div class="notes-note-meta">${escapeHtml(formatShortDateTime(note.updatedAt || note.createdAt))}${note.updatedBy ? ` · ${escapeHtml(note.updatedBy)}` : ''}</div>
             <div class="notes-note-body">${escapeHtml(note.body)}</div>
           </div>
@@ -4737,12 +4737,10 @@
     function loadFallbackCharacterIdentity() {
       google.script.run
         .withSuccessHandler(res => {
-          console.log('[identity] profile response:', res);
           if (res && res.ok && applyIdentity(res)) return;
           if (!myCharacterName) showIdentitySheet();
         })
         .withFailureHandler(() => {
-          console.warn('[identity] profile lookup failed; showing picker');
           myCharacterName = null;
           myGoogleEmail = '';
           isTreasurer = false;
@@ -4778,7 +4776,6 @@
         body.innerHTML = playerGrid + dmButton;
       }
       sheet.classList.add('active');
-      console.log('[identity] showing character picker; characters:', chars.length);
       document.body.classList.add('app-modal-open');
     }
 
@@ -4797,7 +4794,6 @@
     function confirmIdentity(character) {
       if (!character || identityChoiceSaving) return;
       identityChoiceSaving = true;
-      console.log('[identity] character selected:', character);
       const optimisticIdentity = {
         email: '',
         character,
@@ -5450,7 +5446,7 @@
       if (!item) return;
       const title = document.getElementById('giveItemTitle');
       const giveQty = (item === selectedInventory && descRemoveQty > 1) ? descRemoveQty : 0;
-      if (title) title.textContent = `Give ${giveQty > 1 ? giveQty + '× ' : ''}"${escapeHtml(item['Item'] || 'Item')}" To…`;
+      if (title) title.textContent = `Give ${giveQty > 1 ? giveQty + '× ' : ''}"${item['Item'] || 'Item'}" To…`;
       const currentHolder = String(item['Holder'] || '');
       const options = [
         { holder: '', label: 'Party Pool', meta: 'Return to shared inventory' },
@@ -6389,7 +6385,6 @@
 
     function isDashboardResourceRow_(row) {
       const name = String(row['Item'] || '').toLowerCase();
-      const category = String(row['Category'] || '').toLowerCase();
 
       return (
         isDeleriumCrystalRow_(row) ||
@@ -6431,8 +6426,9 @@
 
       return (
         category.includes('wondrous') ||
-        category.includes('accessor')
-      ) && accessoryWords.test(name);
+        category.includes('accessor') ||
+        accessoryWords.test(name)
+      );
     }
 
     function isTreasureItem_(row) {
@@ -6536,7 +6532,6 @@
         button.textContent = 'Recording…';
       }
       if (amountInput) {
-        amountInput.dataset.lastPaidAmount = String(amount);
         amountInput.value = '';
       }
       if (status) status.textContent = 'Recording…';

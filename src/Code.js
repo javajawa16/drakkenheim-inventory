@@ -1357,7 +1357,6 @@ function deleteUserProfileForKey_(userKey) {
 function validateCharacterChoice_(character) {
   const chosen = safeText_(character);
   if (!chosen) throw new Error('Invalid character.');
-  if (/^DM\s+Josh$/i.test(chosen)) return 'DM Josh';
   const ss = getInventorySpreadsheet_();
   const sheet = getSheetByTrimmedName_(ss, CONFIG.CHARACTERS_SHEET);
   if (!sheet || sheet.getLastRow() < 2) throw new Error('No characters found.');
@@ -2332,8 +2331,11 @@ function apiCreateNote(payload) {
     bumpSync_('notes', payload && payload._syncClientId);
     return { ok: true, note: {
       noteId, createdAt: now, updatedAt: now, author, category: cat,
-      title: payload.title || '', note: payload.note || '', tags: payload.tags || '',
-      pinned: !!(payload && payload.pinned), archived: false, relatedItemId: payload.relatedItemId || ''
+      title: String((payload && payload.title) || ''),
+      note: String((payload && payload.note) || ''),
+      tags: String((payload && payload.tags) || ''),
+      pinned: !!(payload && payload.pinned), archived: false,
+      relatedItemId: String((payload && payload.relatedItemId) || '')
     }};
   } catch (e) { return { ok: false, error: e.message }; } finally {
     try { lock.releaseLock(); } catch (_) {}

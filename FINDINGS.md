@@ -33,24 +33,13 @@ Verified the document lock is acquired with `tryLock(10000)` and released in a
 processed highest-row-first so `deleteRow` shifts only already-processed rows.
 No issue — recording as a positive baseline for the section-4 lock comparison.
 
-#### RISK · Code.js:1360 · Hardcoded "DM Josh" bypasses the CHARACTERS-sheet check
-`validateCharacterChoice_` short-circuits with
-`if (/^DM\s+Josh$/i.test(chosen)) return 'DM Josh';` **before** validating
-against the CHARACTERS sheet. Because `resolveIdentityForCharacter_` grants
-`isDM`/`isTreasurer` to any name matching `/^DM/`, any client can call
-`apiSetMyCharacter('DM Josh')` and self-elevate to DM/treasurer, gaining
-split-gold and sell-delerium rights — no sheet entry or email mapping needed.
-The whole identity model is trust-on-client by design for this group, but this
-is a hardcoded backdoor independent of the sheet. Recommend removing the
-short-circuit and requiring DM characters to exist (and be Active) in the
-sheet like every other character.
+#### ~~RISK · Code.js:1360 · Hardcoded "DM Josh" bypasses the CHARACTERS-sheet check~~ FIXED
+Removed the `if (/^DM\s+Josh$/i.test(chosen)) return 'DM Josh';` short-circuit.
+DM characters must now exist and be Active in the CHARACTERS sheet like all others.
 
-#### IDEA · Code.js:1137 · `ensureHeaderRow_` appends missing headers at the end
-When a header is missing from an existing sheet, it is appended at
-`existing.length + 1` rather than inserted at its canonical position. If a
-middle column were ever dropped, subsequent reads keyed by header name still
-work, but column order would diverge from the constant and any positional
-read would be off. Low risk given current usage; flagging for awareness.
+#### Note · Code.js:1137 · `ensureHeaderRow_` appends missing headers at the end
+Known limitation — by-design for append-only schema evolution. All reads are
+header-name keyed so order divergence is harmless in practice. No fix needed.
 
 #### ~~BUG · Code.js:2208 · `apiCreateNote` silently downgrades note categories~~ FIXED
 `PARTY_NOTES_CATEGORIES` and `NOTE_CATEGORIES` (client) now both define the same
@@ -75,14 +64,9 @@ at lines 2501–2513. Both systems serve different UI tabs; neither is removable
 Added `LockService.getDocumentLock()` / `tryLock(10000)` / `finally releaseLock()`
 matching the pattern used by every other write handler in the section.
 
-#### IDEA · Code.js:2333 · `apiCreateNote` success-return reads `payload` unguarded
-The success object dereferences `payload.title`/`payload.note`/
-`payload.relatedItemId` directly, unlike the rest of the function which uses
-`payload && payload.x`. If `payload` were ever undefined the build above
-(line 2313) tolerates it, but the return object would throw a TypeError —
-caught by the outer `catch`, so the client just sees a generic error instead
-of the validation result. Harmless in practice (client always sends a
-payload); flagging for consistency.
+#### ~~IDEA · Code.js:2333 · `apiCreateNote` success-return reads `payload` unguarded~~ FIXED
+Return object now uses `String((payload && payload.x) || '')` consistently
+throughout, matching the defensive pattern used in the row-builder above.
 
 #### ~~IDEA · Code.js:3102 · `apiSellDelerium`/`apiSplitGold` return unsanitized ledger entries~~ FIXED
 All five inline `ledgerEntries.push()` calls now wrapped with
@@ -142,12 +126,9 @@ Replaced `tapHandled` boolean with `lastTapOpenedAt` timestamp (same pattern as
 event ordering since time only moves forward. `pointerdown` no longer resets
 the guard.
 
-#### IDEA · Index.html:3638 · Dead `ondblclick` on campaign-note cards (unreachable on touch)
-`renderCampaignNotes` emits `ondblclick="…startEditCampaignNote(…)"` on each
-`.notes-note-card`. Double-tap/dblclick does not fire on the phone webview this
-app targets, mirroring the README's "Remove dead `ondblclick` on inventory
-cards" TODO. Edit is already reachable via the Edit button and right-swipe, so
-the handler is dead weight. Cleanup candidate.
+#### ~~IDEA · Index.html:3638 · Dead `ondblclick` on campaign-note cards (unreachable on touch)~~ FIXED
+`ondblclick` attribute removed from `.notes-note-card` in `renderCampaignNotes`.
+Edit remains reachable via the Edit swipe-action button.
 
 #### Note · Index.html:3723 · v1 campaign-note swipe-delete fires with no confirmation
 `bindCampaignNoteGestures` calls `deleteCampaignNote(row.dataset.noteId)` the
@@ -156,31 +137,17 @@ confirm step. This matches the existing README TODO ("Swipe-delete has no undo
 — consider inline confirmation"). Not a new finding; recording that the v1
 notes list shares the same no-undo gesture as inventory.
 
-#### IDEA · Index.html:3036 · `isMobileLayout()` repeats the `window.innerWidth < 700` signal
-`isMobileLayout()` returns `is-phone || window.innerWidth < 700`. In the GAS
-webview `innerWidth ≈ 980`, so the `is-phone` class (driven by `pointer:coarse`)
-is the real signal and the width arm is inert on-device — same documented
-single-signal concern noted for `updatePhoneClass`. Consistent-but-redundant;
-flag for tidy-up alongside the section-9 phone-detection note.
+#### ~~IDEA · Index.html:3036 · `isMobileLayout()` repeats the `window.innerWidth < 700` signal~~ FIXED
+`isMobileLayout()` now returns `document.documentElement.classList.contains('is-phone')`
+only, consistent with `updatePhoneClass` and the single `(pointer:coarse)` signal.
 
-#### BUG · Index.html:5460 · `openGiveItemSheet` double-escapes the item name into `textContent`
-The Give-To sheet title is built with
-`title.textContent = \`Give …"${escapeHtml(item['Item'] || 'Item')}" To…\`;`.
-Because the value is assigned via `textContent` (not `innerHTML`), running it
-through `escapeHtml` first double-encodes it: an item named `Assassin's Blade`
-renders literally as `Assassin&#39;s Blade`, and `Sword & Shield` shows as
-`Sword &amp; Shield`. The parallel `openSellItemSheet` (line 5490) correctly
-assigns `item['Item']` to `textContent` with no `escapeHtml`. Fix: drop the
-`escapeHtml(...)` wrapper here and let `textContent` do the escaping. Affects
-any party item whose name contains `& ' " < >` — apostrophes are common.
+#### ~~BUG · Index.html:5460 · `openGiveItemSheet` double-escapes the item name into `textContent`~~ FIXED
+Removed `escapeHtml()` wrapper — `textContent` assignment handles escaping
+natively. Items with `'`, `&`, `<` etc. now display correctly in the Give-To title.
 
-#### IDEA · Index.html:4747 · Debug `console.log`/`console.warn` in the identity flow
-`loadFallbackCharacterIdentity` (4747, 4752), `showIdentitySheet` (4788), and
-`confirmIdentity` (4807) log `[identity] …` lines on every boot, including the
-resolved character name and the raw profile response object. Same class as the
-README's `loadCharacters` logging TODO — minor PII (character/player names) in
-the webview console. Recommend stripping the success-path logs before
-production; keep the failure-path warn if useful.
+#### ~~IDEA · Index.html:4747 · Debug `console.log`/`console.warn` in the identity flow~~ FIXED
+Removed three success-path logs from `loadFallbackCharacterIdentity`,
+`showIdentitySheet`, and `confirmIdentity`. Failure-path handler retained.
 
 #### Note · Index.html:4811 · `confirmIdentity` client-side DM self-grant — cross-ref Code.js:1360
 The optimistic identity built on character selection sets
@@ -199,34 +166,21 @@ other underlying rows keep their old holder. This matches the README's existing
 (5506) which FIFO-drains across all rollup rows, give has no multi-row
 distribution. Recording as confirmation, not a new finding.
 
-#### RISK · Index.html:6301 · Ledger-note edit is keyed only on `Timestamp`
-`updateLedgerNoteFromBottom` locates the in-memory entry with
-`inventoryResourceLedger.find(e => e['Timestamp'] === timestamp)` and the server
-call `apiUpdateLedgerNote({ timestamp, resource, notes })` keys the sheet write
-the same way. Several write paths in section 11 emit *multiple* ledger rows with
-the same ISO timestamp in a single operation (e.g. `sellDelerium`/`apiSellDelerium`
-push one entry per crystal size plus a gold row, and `splitGold` emits a deduct +
-per-member rows). When a treasurer taps one of those rows to edit its note, both
-the local `find` (first match only) and the server's timestamp match can hit the
-wrong row — or every row sharing that millisecond. Recommend keying ledger edits
-on a stable per-row id (the RESOURCE_LEDGER row number or a generated entry id)
-rather than the timestamp. Worth confirming the server-side matcher's behavior in
-section 5/`apiUpdateLedgerNote` against same-timestamp siblings.
+#### RISK · Index.html:6301 · Ledger-note edit is keyed only on `Timestamp` — DEFERRED
+Requires adding a stable `Entry ID` column to `RESOURCE_LEDGER_HEADERS` (schema
+change), generating IDs in every `appendResourceLedger_` call, and threading the
+ID through the client ledger cache and `apiUpdateLedgerNote`. Low urgency —
+same-millisecond collisions only affect batch ops (split-gold, sell-delerium).
+Deferred until a ledger schema revision is planned.
 
-#### IDEA · Index.html:6434 · `isAccessoryItem_` requires BOTH a wondrous/accessory category AND a name keyword
-Accessory grouping only fires when `category` contains `wondrous`/`accessor`
-*and* the name matches the ring/amulet/cloak/etc. word list. A magic accessory
-whose Category is something else (e.g. a custom-added "Ring of X" typed with
-category `Magic Item` or `Ring`, or a library item categorized `Rod`/`Ring`)
-falls through to **Bonus Junk** instead of **Accessories**. Given custom items
-let the user type a free-form category, this likely misfiles some accessories.
-Consider making the name-keyword match sufficient on its own, or broadening the
-category test. Low severity (cosmetic grouping only).
+#### ~~IDEA · Index.html:6434 · `isAccessoryItem_` requires BOTH a wondrous/accessory category AND a name keyword~~ FIXED
+`isAccessoryItem_` now returns true when the name matches the accessory word
+list OR the category includes `wondrous`/`accessor`. Custom "Ring of X" items
+with a free-form category now land in Accessories rather than Bonus Junk.
 
-#### IDEA · Index.html:6397 · Minor dead code in section 12
-`isDashboardResourceRow_` declares `const category = …` (6399) but only uses
-`name`. `payResource` writes `amountInput.dataset.lastPaidAmount` (6546) which is
-never read back anywhere. Both are harmless leftovers — cleanup candidates.
+#### ~~IDEA · Index.html:6397 · Minor dead code in section 12~~ FIXED
+Unused `const category` removed from `isDashboardResourceRow_`.
+Dead `amountInput.dataset.lastPaidAmount` write removed from `payResource`.
 
 #### Note · Index.html:6315 · Gold/currency classification correctly excludes non-gold (positive baseline)
 `isGoldItem_` first rejects `\b(platinum|pp|silver|sp|copper|cp)\b` and only then
