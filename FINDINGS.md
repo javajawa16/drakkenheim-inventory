@@ -1,7 +1,7 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
+Next section: 6. Code.js lines 2901–3500 (batch sell, give, remove)
 
 ## Sessions
 
@@ -36,6 +36,19 @@ handling), which would lose a whole stack — but a full Index.html grep shows t
 ever calls `apiSellInventoryBatch` (5589/5934/6932). The single-item endpoint is dead, so the
 whole-row-delete is not reachable by any user. Recording the trace so a future re-wiring of
 this endpoint doesn't silently reintroduce stack-loss. (Dead code itself is out of audit scope.)
+
+#### Note · Code.js:2301–2900 · Section 5 re-audit — clean
+Party-notes v2 (`apiCreateNote` 2307 / `apiUpdateNote` 2348 / `apiArchiveNote` 2379) and the
+inventory-add family (`apiAddInventory` 2401, `apiAddCustomInventory` 2510, `apiQuickAddInventory`
+2609, `apiDepleteResource` 2750) all follow the same correct shape: auth → `tryLock(10000)` →
+validate → write → `appendResourceLedger_`/`auditWrite_` → `bumpSync_` → return sanitized item +
+sanitized ledger entry, with `finally releaseLock()` reached on every throw/return. Category
+guard (`PARTY_NOTES_CATEGORIES.includes` 2316/2367) downgrades unknown categories to the stored
+value rather than corrupting; `apiUpdateNote` patches only the 6 allowed fields. Confirmed the
+optimistic ledger Timestamp the client receives matches what gets persisted: both
+`normalizeForClient_` (3895) and `apiUpdateLedgerNote.norm()` (2907) format Dates with
+`formatDate(scriptTimeZone,'yyyy-MM-dd HH:mm:ss')` — no timezone skew, so the only residual is
+the previously-DEFERRED same-second collision in batch ledger ops, not re-counted. No new findings.
 
 ### 2026-06-18 (run 5) — Sections audited: 12, 13, 1, 2
 
