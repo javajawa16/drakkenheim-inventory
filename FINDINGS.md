@@ -1,7 +1,7 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 1. Code.js lines 1–500 (config, helpers, validation)
+Next section: 2. Code.js lines 501–1100 (auth, character, inventory read)
 
 ## Sessions
 
@@ -40,6 +40,13 @@ handle. They drive different tabs (Add search vs. Inventory filter) so in
 practice only one is ever pending, but a rapid tab switch mid-debounce could let
 one cancel the other's pending call. Harmless today; flagging in case a future
 change runs both concurrently.
+
+#### Note · Code.js:1–500 · Section 1 re-audit — no new issues
+Re-verified the previously-applied fixes: `DEV_ALLOW_UNCONFIGURED_ACCESS: false`
+(11), `continueCleanEquipmentLibrary` lock with `tryLock(5000)` and `finally
+releaseLock()` (425–583), `CAMPAIGN_NOTES_HEADERS` 5-col schema named correctly
+(135). Config blocks, header constants, menu, setup, and the import batcher are
+all consistent. No new findings.
 
 ### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 
