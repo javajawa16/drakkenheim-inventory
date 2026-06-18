@@ -181,8 +181,6 @@ npm install          # one-time: installs clasp + xlsx
 
 ## Known TODOs
 
-- Remove debug `console.log` lines in `loadCharacters` (`Index.html`)
-- Remove debug `Logger.log` lines in `apiGetCharacters` (`Code.js` ~line 657–682)
 - Set `DEV_ALLOW_UNCONFIGURED_ACCESS: false` and populate `ALLOWED_USERS` Script Property
 - Delete `temp_patch.py` (one-shot patch, no longer needed)
 - Import `equipment_library_5e.xlsx` into `EQUIPMENT_LIBRARY_CLEAN` sheet to activate the full 5e item stat blocks

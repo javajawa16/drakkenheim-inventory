@@ -119,13 +119,9 @@ warning applies to CSS-only variable chains where the property itself contains a
 direction. `testAddInventoryDirect_` and `testGetInventoryDirect_` were
 confirmed dead and removed.
 
-#### IDEA · Index.html:2915 · Debug `console.log`/`console.warn` still in `loadCharacters`
-`loadCharacters` logs `[loadCharacters] API response:`, the populated
-`characterOptions`, and warn/error lines on every identity resolve (lines 2915,
-2917, 2922, 2926). This is one of the README's own Known TODOs ("Remove debug
-`console.log` lines in `loadCharacters`"). `characterOptions` includes player
-names — minor PII leaking into the webview console. Recommend removing the three
-success-path logs; keep the failure-path `console.error` if desired.
+#### ~~IDEA · Index.html:2915 · Debug `console.log`/`console.warn` still in `loadCharacters`~~ FIXED
+Three success-path logs removed (API response, not-ok warn, characterOptions dump).
+Failure-path `console.error` retained. README Known TODO entry removed.
 
 #### IDEA · Index.html:3000 · Phone detection still ORs `(max-width: 699px)` with `(pointer: coarse)`
 `updatePhoneClass()` uses `window.matchMedia('(max-width: 699px), (pointer: coarse)')`.

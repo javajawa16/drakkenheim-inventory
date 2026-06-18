@@ -2912,14 +2912,9 @@
 
     function loadCharacters() {
       google.script.run.withSuccessHandler(res => {
-        console.log('[loadCharacters] API response:', res);
-        if (!res || !res.ok) {
-          console.warn('[loadCharacters] API returned not-ok or null:', res);
-          return;
-        }
+        if (!res || !res.ok) return;
         characterOptions = Array.isArray(res.rows) ? res.rows : [];
         dmCharacterOptions = Array.isArray(res.dmRows) ? res.dmRows : [];
-        console.log('[loadCharacters] Populated characterOptions:', characterOptions);
         populateCharacterSelectors();
         if (document.getElementById('identitySheet').classList.contains('active')) showIdentitySheet();
       }).withFailureHandler(err => {
