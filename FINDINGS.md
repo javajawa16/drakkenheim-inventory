@@ -1,7 +1,7 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 3. Code.js lines 1101–1700 (inventory write — add, edit, delete)
+Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
 
 ## Sessions
 
@@ -56,6 +56,22 @@ no PII `Logger.log` calls on the success path (only the catch error at 804).
 `detectMagicItem_` still returns `'Yes'` for any non-blank rarity (1052) — this is
 a 5e-reasonable heuristic on import data (mundane items have blank rarity), not a
 defect. No new findings.
+
+#### IDEA · Code.js:1565 · "Treasurer access required." is masked as "Request failed." for the client
+`publicValidationError_`'s pass-through whitelist matches `^(Access denied|Admin
+access denied|Invalid|Quantity|Value|…)` but **not** the
+`'Treasurer access required.'` message thrown by `requireTreasurer_` (1424). So a
+non-treasurer who attempts split/sell-delerium receives the generic
+`'Request failed.'` instead of an actionable message — they can't tell they lack
+treasurer rights vs. a real server error. Either add `Treasurer` to the whitelist
+alternation or reuse the existing `Access denied` phrasing for the treasurer gate.
+
+#### Note · Code.js:1101–1700 · Section 3 re-audit — otherwise clean
+`requireTreasurer_`/`getEmailForCharacter_` trust-on-client hint path (1415–1425)
+is the documented identity model (USER_DEPLOYING limitation), not a new bug.
+`ensureHeaderRow_` end-append behavior (1129–1140) remains a by-design,
+header-name-keyed limitation. Validation helpers (`validateId_`, `validateMoney_`,
+`validateQuantity_`) and the client sanitizers are consistent. No other findings.
 
 ### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 
