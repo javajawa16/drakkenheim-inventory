@@ -186,8 +186,6 @@ npm install          # one-time: installs clasp + xlsx
 - Import `equipment_library_5e.xlsx` into `EQUIPMENT_LIBRARY_CLEAN` sheet to activate the full 5e item stat blocks
 - Swipe-delete has no undo — consider inline confirmation (same pattern as 0 gp delerium sell)
 - Gold float rounding: `parseFloat(x.toFixed(2))` at write boundaries in `apiSplitGold`
-- `resize` handler: guard against iOS keyboard events (only close description sheet on height delta > 150 px)
-- Remove dead `ondblclick` on inventory cards (unreachable on mobile)
 - Apps Script version limit — prune old versions at `script.google.com` before next batch of deploys (currently at @300)
 - Existing inventory items added before new equipment library import won't have stat blocks (different hash functions). Options: manual edit of Library Item ID column, or automated name-based backfill.
 - "Give to…" from description sheet moves only the representative row when an item is rolled up from multiple additions — other rows stay in place

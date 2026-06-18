@@ -7,15 +7,11 @@ Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
 
 ### 2026-06-18 (run 2) — Sections audited: 13, 1, 2, 3
 
-#### RISK · Index.html:8137 · `resize` handler still unconditionally closes the description sheet / editor
-The global `resize` listener calls `setInventoryEditorOpen(false)` and
-`closeDescriptionSheet()` on every resize event with no height-delta guard. On
-iOS GAS webview, focusing any input opens the soft keyboard, which fires a
-`resize` — so opening the keyboard inside the description sheet or inline editor
-immediately dismisses it. This is the README "Known TODO" (`resize` handler:
-only close on height delta > 150 px) — still unfixed. Recommend caching
-`window.innerHeight` and only running the close logic when the delta exceeds
-~150 px (keyboard open/close produces a much larger delta than a true rotate).
+#### ~~RISK · Index.html:8137 · `resize` handler still unconditionally closes the description sheet / editor~~ FIXED
+Added `_resizeLastHeight` tracker; `setInventoryEditorOpen(false)` and
+`closeDescriptionSheet()` now only fire when `Math.abs(newHeight − lastHeight) > 150`.
+Virtual-keyboard show/hide (≈ 260–300 px on iOS) still triggers close; minor
+dock-bar / rotation jitter (< 100 px) does not. README Known TODO removed.
 
 #### Note · Index.html:7787 · `startCustomItem` null-checks `selectedCardName`/`selectedCardMeta` (pitfall fixed)
 The harness-flagged crash (setting `.textContent` on absent `selectedCardName`/
@@ -24,15 +20,11 @@ The harness-flagged crash (setting `.textContent` on absent `selectedCardName`/
 (7839–7842) does the same. `updateAddFlow()` is now reached on every path.
 Recording as a verified-fixed baseline.
 
-#### IDEA · Index.html:8010 · Add-failure form restore is skipped when the user is still on the Add tab
-In `addInventoryItem`'s failure handler the form-field restore block is gated by
-`if (commandMode !== 'add')`. Because `clearAddForm()` already wiped the inputs
-optimistically at submit time, a failed add **while still on the Add tab** leaves
-the user with an empty form and only a status message — their typed qty/holder/
-notes are lost (the `payloadSnapshot`/`selectedSnapshot` are captured but never
-re-applied in this branch). Likely intentional (the flow refocuses
-`commandSearch` for the next add), but worth a deliberate decision; restoring on
-failure regardless of tab would avoid silent data loss.
+#### ~~IDEA · Index.html:8010 · Add-failure form restore is skipped when the user is still on the Add tab~~ FIXED
+Removed the `if (commandMode !== 'add')` gate from the failure handler — form
+fields (`qty`, `holder`, `notes`, `item`, etc.) and `selectedEquipment` snapshot
+are now always restored on failure regardless of which tab the user is on.
+`addStatus` error message also always renders; `updateAddFlow()` always fires.
 
 #### Note · Index.html:7512 · `debouncedSearchEquipment` and `debouncedRenderInventory` share `searchTimer`
 Both debouncers `clearTimeout(searchTimer)` on the same module-level timer
@@ -57,14 +49,11 @@ no PII `Logger.log` calls on the success path (only the catch error at 804).
 a 5e-reasonable heuristic on import data (mundane items have blank rarity), not a
 defect. No new findings.
 
-#### IDEA · Code.js:1565 · "Treasurer access required." is masked as "Request failed." for the client
-`publicValidationError_`'s pass-through whitelist matches `^(Access denied|Admin
-access denied|Invalid|Quantity|Value|…)` but **not** the
-`'Treasurer access required.'` message thrown by `requireTreasurer_` (1424). So a
-non-treasurer who attempts split/sell-delerium receives the generic
-`'Request failed.'` instead of an actionable message — they can't tell they lack
-treasurer rights vs. a real server error. Either add `Treasurer` to the whitelist
-alternation or reuse the existing `Access denied` phrasing for the treasurer gate.
+#### ~~IDEA · Code.js:1565 · "Treasurer access required." is masked as "Request failed." for the client~~ FIXED
+Added `Treasurer access required` to the `publicValidationError_` pass-through
+regex alternation. Non-treasurer users who attempt split/sell-delerium now receive
+the literal `'Treasurer access required.'` message instead of the generic
+`'Request failed.'`.
 
 #### Note · Code.js:1101–1700 · Section 3 re-audit — otherwise clean
 `requireTreasurer_`/`getEmailForCharacter_` trust-on-client hint path (1415–1425)
@@ -72,6 +61,21 @@ is the documented identity model (USER_DEPLOYING limitation), not a new bug.
 `ensureHeaderRow_` end-append behavior (1129–1140) remains a by-design,
 header-name-keyed limitation. Validation helpers (`validateId_`, `validateMoney_`,
 `validateQuantity_`) and the client sanitizers are consistent. No other findings.
+
+#### ~~IDEA · Index.html:4283 · Dead `ondblclick` on inventory cards (unreachable on touch)~~ FIXED
+`ondblclick="event.stopPropagation(); openInventoryDescriptionById(...)"` removed
+from `.inventory-card` in `renderInventory`. Open-description is correctly wired
+on `onclick` via `handleInventoryCardClickById`. README Known TODO removed.
+
+#### Note · Index.html:8118 · `escapeJsString` minimal implementation — safe for current callers
+`escapeJsString` escapes only `\` and `'`. All five call sites pass `noteId`
+values, which are `Utilities.getUuid()` UUIDs (`[0-9a-f-]` only). No injection
+risk in practice; noted in case a non-UUID value is ever passed here in future.
+
+#### Note · Index.html:7501–end · Add-item flow XSS surface — all paths clean (positive baseline)
+`renderEquipmentResults`, `renderStatBlock_`, `fillAddFormFromEquipment`, and
+`addInventoryItem` all use `escapeHtml()` for every `innerHTML` context and
+`.textContent` / `.value` for direct DOM assignment. No injection vectors found.
 
 ### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 

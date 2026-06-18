@@ -1563,7 +1563,7 @@ function publicValidationError_(err) {
   const message = safeText_(err && err.message);
 
   if (
-    /^(Access denied|Admin access denied|Invalid|Quantity|Value|Selected library item|Inventory item not found|Item not found|Not a quick-edit|Unsupported|Size)/.test(message) ||
+    /^(Access denied|Admin access denied|Treasurer access required|Invalid|Quantity|Value|Selected library item|Inventory item not found|Item not found|Not a quick-edit|Unsupported|Size)/.test(message) ||
     /too long\.$/.test(message)
   ) {
     return message;

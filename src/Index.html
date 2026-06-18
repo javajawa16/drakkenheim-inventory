@@ -4279,8 +4279,7 @@
           >Delete</button>
           <div class="inventory-card" id="inventory_${index}"${offsetStyle}
                data-representative-id="${representativeIdAttr}"
-               onclick="handleInventoryCardClickById(this.dataset.representativeId)"
-               ondblclick="event.stopPropagation(); openInventoryDescriptionById(this.dataset.representativeId)">
+               onclick="handleInventoryCardClickById(this.dataset.representativeId)">
             <div class="item-title-row">
               <div class="item-title">${qty ? qty + '× ' : ''}${item}</div>
               ${(opts.showMeta && valueGp && Number(valueGp) > 0 && !/scroll/i.test(String(row['Item'] || '')) && String(row['Category'] || '').toLowerCase() !== 'scroll') ? `<span class="item-value-gp">${Number(valueGp)} gp</span>` : ''}
@@ -8007,24 +8006,22 @@
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           if (commandMode === 'inventory') renderInventory();
           setMainStatus(`<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`);
-          if (commandMode !== 'add') {
-            selectedEquipment = selectedSnapshot;
-            if (selectedSnapshot) {
-              fillAddFormFromEquipment(selectedSnapshot, false);
-            }
-            document.getElementById('libraryItemId').value = payloadSnapshot.libraryItemId || '';
-            document.getElementById('quickAddKey').value = quickKey;
-            document.getElementById('item').value = payloadSnapshot.item || '';
-            document.getElementById('category').value = payloadSnapshot.category || '';
-            document.getElementById('rarity').value = payloadSnapshot.rarity || '';
-            document.getElementById('qty').value = payloadSnapshot.qty || 1;
-            document.getElementById('holder').value = payloadSnapshot.holder || '';
-            document.getElementById('valueGp').value = payloadSnapshot.valueGp || '';
-            document.getElementById('factionRelevance').value = payloadSnapshot.factionRelevance || '';
-            document.getElementById('notes').value = payloadSnapshot.notes || '';
-            document.getElementById('addStatus').innerHTML = `<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`;
-            updateAddFlow();
+          selectedEquipment = selectedSnapshot;
+          if (selectedSnapshot) {
+            fillAddFormFromEquipment(selectedSnapshot, false);
           }
+          document.getElementById('libraryItemId').value = payloadSnapshot.libraryItemId || '';
+          document.getElementById('quickAddKey').value = quickKey;
+          document.getElementById('item').value = payloadSnapshot.item || '';
+          document.getElementById('category').value = payloadSnapshot.category || '';
+          document.getElementById('rarity').value = payloadSnapshot.rarity || '';
+          document.getElementById('qty').value = payloadSnapshot.qty || 1;
+          document.getElementById('holder').value = payloadSnapshot.holder || '';
+          document.getElementById('valueGp').value = payloadSnapshot.valueGp || '';
+          document.getElementById('factionRelevance').value = payloadSnapshot.factionRelevance || '';
+          document.getElementById('notes').value = payloadSnapshot.notes || '';
+          document.getElementById('addStatus').innerHTML = `<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`;
+          updateAddFlow();
         });
 
       if (isQuickAdd) {
@@ -8134,10 +8131,16 @@
     });
 
 
+    let _resizeLastHeight = window.innerHeight;
     window.addEventListener('resize', () => {
+      const _newHeight = window.innerHeight;
+      const _heightDelta = Math.abs(_newHeight - _resizeLastHeight);
+      _resizeLastHeight = _newHeight;
       updatePhoneClass();
-      setInventoryEditorOpen(false);
-      closeDescriptionSheet();
+      if (_heightDelta > 150) {
+        setInventoryEditorOpen(false);
+        closeDescriptionSheet();
+      }
       updateAddFlow();
       setCommandMode(commandMode);
       syncModalOpenState();
