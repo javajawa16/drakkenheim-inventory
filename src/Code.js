@@ -3729,6 +3729,11 @@ function apiAdjustInventory(payload) {
       if (size && !DELERIUM_SIZE_VALUES.includes(size)) {
         throw new Error('Size is not allowed.');
       }
+
+      if (size) {
+        rowObj['Item'] = `Delerium ${size.replace(/\b\w/g, c => c.toUpperCase())}`;
+        if (note) rowObj['Notes'] = [note, `Size: ${size}`].join('\n');
+      }
     }
 
     const valueGp = validateMoney_(rowObj['Value GP']);

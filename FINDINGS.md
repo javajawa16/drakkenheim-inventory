@@ -119,12 +119,10 @@ as a payee, and all six write handlers in this section (sell item, sell
 delerium, split gold, send gold, update, delete) acquire and `finally`-release
 a document lock on every path including auth failure. No lock issues found.
 
-#### IDEA · Code.js:3723 · `apiAdjustInventory` validates delerium `size` but never applies it
-For a `delerium crystal` quick-edit item, the handler normalizes `payload.size`
-and throws if it is not in `DELERIUM_SIZE_VALUES`, but then never writes the
-size anywhere — only `Qty` is adjusted on the existing row. The size check is a
-no-op guard. Harmless if the client never expects a size change here, but if a
-caller passes a new size hoping to re-label the row, it silently won't happen.
+#### ~~IDEA · Code.js:3723 · `apiAdjustInventory` validates delerium `size` but never applies it~~ FIXED
+When a valid `size` is provided, `rowObj['Item']` is now relabeled to
+`Delerium <Size>` and `Size: <size>` is appended to the note, matching the
+pattern used by `apiEditInventory`.
 
 #### IDEA · Code.js:3927 · Dead/unused helpers and test functions remain in source
 `findInventoryRowById_` (3927) returns only a row number and appears fully
