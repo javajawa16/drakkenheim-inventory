@@ -2873,8 +2873,11 @@ function apiDepleteResource(payload) {
 }
 
 function apiUpdateLedgerNote(payload) {
+  const lock = LockService.getDocumentLock();
   try {
     requireAllowedUser_();
+    if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
+
     const ts       = safeText_(payload && payload.timestamp).trim();
     const resource = safeText_(payload && payload.resource).trim().toLowerCase();
     const notes    = safeText_(payload && payload.notes).slice(0, 500);
@@ -2914,6 +2917,8 @@ function apiUpdateLedgerNote(payload) {
     return { ok: true };
   } catch (err) {
     return publicApiError_('apiUpdateLedgerNote', err, {});
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
   }
 }
 

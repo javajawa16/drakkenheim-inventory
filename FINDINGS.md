@@ -86,18 +86,9 @@ Audit assumption was wrong. Index.html actively calls all five v1 endpoints
 `apiUpdateCampaignNote`, `apiDeleteCampaignNote`) and has a full composer UI
 at lines 2501–2513. Both systems serve different UI tabs; neither is removable.
 
-#### RISK · Code.js:2875 · `apiUpdateLedgerNote` has no LockService
-Every other write handler in this section (`apiCreateNote`, `apiUpdateNote`,
-`apiArchiveNote`, `apiAddInventory`, `apiAddCustomInventory`,
-`apiQuickAddInventory`, `apiDepleteResource`, `apiReceiveResource`) acquires
-a document lock with `tryLock(10000)` and releases it in `finally`.
-`apiUpdateLedgerNote` does a read-then-write (scan all ledger rows for a
-matching timestamp, then `setValue` on the found row) with **no lock**. A
-concurrent `appendResourceLedger_` or a second note edit can shift/insert
-rows between the read and the write, so the note can land on the wrong row.
-Low frequency (note edits are rare), but it is the one outlier in an
-otherwise consistently-locked section. Wrap the read-modify-write in the
-same lock/finally pattern.
+#### ~~RISK · Code.js:2875 · `apiUpdateLedgerNote` has no LockService~~ FIXED
+Added `LockService.getDocumentLock()` / `tryLock(10000)` / `finally releaseLock()`
+matching the pattern used by every other write handler in the section.
 
 #### IDEA · Code.js:2333 · `apiCreateNote` success-return reads `payload` unguarded
 The success object dereferences `payload.title`/`payload.note`/
