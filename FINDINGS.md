@@ -1,9 +1,45 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 13. Index.html lines 7501–end (add item flow, custom item, form handling)
+Next section: 1. Code.js lines 1–500 (config, helpers, validation)
 
 ## Sessions
+
+### 2026-06-18 (run 2) — Sections audited: 13, 1, 2, 3
+
+#### RISK · Index.html:8137 · `resize` handler still unconditionally closes the description sheet / editor
+The global `resize` listener calls `setInventoryEditorOpen(false)` and
+`closeDescriptionSheet()` on every resize event with no height-delta guard. On
+iOS GAS webview, focusing any input opens the soft keyboard, which fires a
+`resize` — so opening the keyboard inside the description sheet or inline editor
+immediately dismisses it. This is the README "Known TODO" (`resize` handler:
+only close on height delta > 150 px) — still unfixed. Recommend caching
+`window.innerHeight` and only running the close logic when the delta exceeds
+~150 px (keyboard open/close produces a much larger delta than a true rotate).
+
+#### Note · Index.html:7787 · `startCustomItem` null-checks `selectedCardName`/`selectedCardMeta` (pitfall fixed)
+The harness-flagged crash (setting `.textContent` on absent `selectedCardName`/
+`selectedCardMeta`) is no longer present — lines 7804–7807 guard both with
+`if (_cardName)` / `if (_cardMeta)` before assignment, and `customizeSelectedItem`
+(7839–7842) does the same. `updateAddFlow()` is now reached on every path.
+Recording as a verified-fixed baseline.
+
+#### IDEA · Index.html:8010 · Add-failure form restore is skipped when the user is still on the Add tab
+In `addInventoryItem`'s failure handler the form-field restore block is gated by
+`if (commandMode !== 'add')`. Because `clearAddForm()` already wiped the inputs
+optimistically at submit time, a failed add **while still on the Add tab** leaves
+the user with an empty form and only a status message — their typed qty/holder/
+notes are lost (the `payloadSnapshot`/`selectedSnapshot` are captured but never
+re-applied in this branch). Likely intentional (the flow refocuses
+`commandSearch` for the next add), but worth a deliberate decision; restoring on
+failure regardless of tab would avoid silent data loss.
+
+#### Note · Index.html:7512 · `debouncedSearchEquipment` and `debouncedRenderInventory` share `searchTimer`
+Both debouncers `clearTimeout(searchTimer)` on the same module-level timer
+handle. They drive different tabs (Add search vs. Inventory filter) so in
+practice only one is ever pending, but a rapid tab switch mid-debounce could let
+one cancel the other's pending call. Harmless today; flagging in case a future
+change runs both concurrently.
 
 ### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 
