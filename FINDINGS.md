@@ -1,11 +1,11 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 6. Code.js lines 2901–3500 (batch sell, give, remove)
+Next section: 7. Code.js lines 3501–end (sync, audit, utilities)
 
 ## Sessions
 
-### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5
+### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6
 
 #### RISK · Code.js:10 · Dev access gate still open
 `CONFIG.DEV_ALLOW_UNCONFIGURED_ACCESS: true` means `requireAllowedUser_()`
@@ -110,3 +110,20 @@ The success object dereferences `payload.title`/`payload.note`/
 caught by the outer `catch`, so the client just sees a generic error instead
 of the validation result. Harmless in practice (client always sends a
 payload); flagging for consistency.
+
+#### IDEA · Code.js:3102 · `apiSellDelerium`/`apiSplitGold` return unsanitized ledger entries
+`apiReceiveResource` and `apiDepleteResource` build their returned
+`ledgerEntries`/`ledgerEntry` through `sanitizeResourceLedgerForClient_`.
+`apiSellDelerium` (3102, 3124) and `apiSplitGold` (3210, 3237, 3259) instead
+push raw inline objects to the client. Today these inline objects contain
+only display fields (no `userEmail`), so nothing leaks, but the inconsistency
+means a future field added to the raw shape could bypass the sanitizer.
+Relatedly, the `SPLIT_REMAINDER` entry (3259) omits the `Character` field that
+the sibling `SPLIT_DEDUCT`/`SPLIT` entries include, so that one ledger row
+renders without an attributed character on the client.
+
+#### Note · Code.js:3293 · `apiSendGoldToMember` correctly blocks DM as recipient
+Positive baseline: `apiSendGoldToMember` rejects any `/^DM(\s|$)/i` character
+as a payee, and all six write handlers in this section (sell item, sell
+delerium, split gold, send gold, update, delete) acquire and `finally`-release
+a document lock on every path including auth failure. No lock issues found.
