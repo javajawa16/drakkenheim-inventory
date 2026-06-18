@@ -1,11 +1,11 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 11. Index.html lines 4501–6000 (gold/delerium UI, sync)
+Next section: 12. Index.html lines 6001–7500 (inventory groups, description sheet, sell batch)
 
 ## Sessions
 
-### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
 
 #### ~~RISK · Code.js:10 · Dev access gate still open~~ FIXED
 `DEV_ALLOW_UNCONFIGURED_ACCESS` flipped to `false`. `requireAllowedUser_` now
@@ -184,3 +184,39 @@ webview `innerWidth ≈ 980`, so the `is-phone` class (driven by `pointer:coarse
 is the real signal and the width arm is inert on-device — same documented
 single-signal concern noted for `updatePhoneClass`. Consistent-but-redundant;
 flag for tidy-up alongside the section-9 phone-detection note.
+
+#### BUG · Index.html:5460 · `openGiveItemSheet` double-escapes the item name into `textContent`
+The Give-To sheet title is built with
+`title.textContent = \`Give …"${escapeHtml(item['Item'] || 'Item')}" To…\`;`.
+Because the value is assigned via `textContent` (not `innerHTML`), running it
+through `escapeHtml` first double-encodes it: an item named `Assassin's Blade`
+renders literally as `Assassin&#39;s Blade`, and `Sword & Shield` shows as
+`Sword &amp; Shield`. The parallel `openSellItemSheet` (line 5490) correctly
+assigns `item['Item']` to `textContent` with no `escapeHtml`. Fix: drop the
+`escapeHtml(...)` wrapper here and let `textContent` do the escaping. Affects
+any party item whose name contains `& ' " < >` — apostrophes are common.
+
+#### IDEA · Index.html:4747 · Debug `console.log`/`console.warn` in the identity flow
+`loadFallbackCharacterIdentity` (4747, 4752), `showIdentitySheet` (4788), and
+`confirmIdentity` (4807) log `[identity] …` lines on every boot, including the
+resolved character name and the raw profile response object. Same class as the
+README's `loadCharacters` logging TODO — minor PII (character/player names) in
+the webview console. Recommend stripping the success-path logs before
+production; keep the failure-path warn if useful.
+
+#### Note · Index.html:4811 · `confirmIdentity` client-side DM self-grant — cross-ref Code.js:1360
+The optimistic identity built on character selection sets
+`isTreasurer/isDM = /^DM(\s|$)/i.test(character)`, so picking the "DM Josh"
+card grants treasurer/DM locally before the server round-trips. This is the
+client-side face of the already-recorded RISK at Code.js:1360 (hardcoded
+"DM Josh" bypasses the CHARACTERS-sheet check). Consistent with the group's
+trust-on-client model; recording the linkage, no new action beyond the
+server-side fix already proposed.
+
+#### Note · Index.html:5930 · "Give to…" moves only the representative row (known TODO confirmed)
+`giveItemToCharacter` updates the single `item['Inventory ID']`'s holder, even
+when `descRemoveQty > 1` or the item is rolled up from several additions — the
+other underlying rows keep their old holder. This matches the README's existing
+"Give to… moves only the representative row" TODO. Unlike `confirmSellItem`
+(5506) which FIFO-drains across all rollup rows, give has no multi-row
+distribution. Recording as confirmation, not a new finding.
