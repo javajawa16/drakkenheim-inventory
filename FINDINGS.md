@@ -1,9 +1,80 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 12. Index.html lines 6001–7500 (inventory groups, description sheet, sell batch)
+Next section: 3. Code.js lines 1101–1700 (inventory write — add, edit, delete)
 
 ## Sessions
+
+### 2026-06-18 (run 5) — Sections audited: 12, 13, 1, 2
+
+#### BUG · Index.html:7100 · `confirmQuickEdit` has no in-flight guard — double-tap double-applies the delta
+The quick currency/delerium editor's Save handler sets `status.textContent = 'Saving…'`
+but never disables the confirm button and never clears the amount input. `selectedQuickEdit`
+stays populated until `closeQuickEditPanel()` runs in the success handler. So a fast second
+tap during the ~300ms–1s `google.script.run` round-trip re-reads the same amount and fires a
+second `apiAdjustInventory({ delta })`. For `mode === 'add'` / `'remove'` the server applies
+the delta **twice** — e.g. "add 50 gold" tapped twice = +100 gold, or a delerium count off by
+the entered amount. (`mode === 'set'` via `apiSetItemQuantity` is idempotent and unaffected.)
+Compare `payResource` (6538) which guards with `resourcePayInFlight[resource]` and
+`saveInventoryEdits` (7253) which disables `saveInventoryButton`. Fix: add an in-flight flag (or
+disable the confirm button) at the top of `confirmQuickEdit`, cleared in both success and
+failure handlers.
+
+#### BUG · Index.html:6314 · `updateLedgerNoteFromBottom` mutates the in-memory ledger but never re-caches it
+On success it does `entry['Notes'] = newNote` on the `inventoryResourceLedger` entry, then
+`cancelLedgerEdit()` + re-render — but unlike every sibling write handler in the section
+(`confirmPayWithReason` 6046, `splitGold` 6110, `payResource` 6578) it never calls
+`cacheInventoryRows(inventoryRows, inventoryResourceLedger)`. The localStorage cache keeps the
+old note. Because the writer is the local user, the 20s sync poll skips reload
+(`by === syncClientId`), so the stale cache is never refreshed by sync. On a cold page reload
+the ledger row shows the **old** note until some *other* user's write triggers a full sync.
+Server is correct; client cache diverges. Fix: add
+`cacheInventoryRows(inventoryRows, inventoryResourceLedger)` after `entry['Notes'] = newNote`.
+
+#### IDEA · Index.html:8013 · `addInventoryItem` success-but-`!ok` path does not restore the cleared form
+`addInventoryItem` clears the whole add form optimistically (8003 `clearAddForm()`) before the
+call. The `withFailureHandler` (8029) was previously fixed to restore the full
+`payloadSnapshot` + `selectedSnapshot`. But the `withSuccessHandler` branch where the server
+returns `{ ok: false, error }` (8013–8018) — a server-side validation rejection, e.g. invalid
+qty/value — only removes the optimistic row and shows the error; it does **not** restore the
+form. The user's typed input is lost and must be re-entered, inconsistent with the transport-
+failure path. Fix: hoist the snapshot-restore block into a shared helper called from both the
+`!ok` success branch and the failure handler.
+
+#### Note · Index.html:6002,6070,6538,6605 · Gold/delerium pay + undo optimistic flows are otherwise correct (positive baseline)
+`confirmPayWithReason`, `splitGold`, `payResource`, and `undoResourcePay` each snapshot/track
+state correctly: pending ledger entries are stripped by `_pendingId` on both success and
+failure, `resourcePayInFlight` / `_inFlightWrites` are paired up/down on every path, and
+`primeInventoryCacheAfterAdd` + `cacheInventoryRows` re-persist on success. The only rollback
+gap is cosmetic (amount/note inputs are cleared optimistically and not restored on failure,
+shared by all three pay handlers) — re-entry, not data loss. Recording the core traces as clean.
+
+#### Note · Index.html:6870 · `confirmDescRemove` FIFO drain + rollback verified
+Optimistic FIFO removal across all rollup rows, `previousRows` snapshot restored on both
+`!ok` and failure with `cacheInventoryRows` + `renderInventory`, success busts the cache so a
+cold reload refetches server truth. `apiSellInventoryBatch` payload (goldAmount 0) matches the
+"Remove" semantics. No rollback gap.
+
+#### Note · Index.html:7501–end · Section 13 add-item flow re-audit — otherwise clean
+`addInventoryItem` optimistic add + `optId` removal, snapshot restore on transport failure,
+double-submit protection via immediate `clearAddForm()` (second tap hits the empty-name guard),
+and the `selectedEquipment.itemId !== requestedItemId` closure guards in `loadSelectedDescription`
+/ `openInventoryDescription` are all intact. XSS surface (`escapeHtml` on every `innerHTML`,
+`.textContent` for direct assigns) re-verified clean. Only the §13 finding above (8013) stands.
+
+#### Note · Code.js:1–500 · Section 1 re-audit — clean
+Config (`DEV_ALLOW_UNCONFIGURED_ACCESS: false` at 11), header constants, menu/setup, and the
+`continueCleanEquipmentLibrary` import batcher (lock `tryLock(5000)` + `finally releaseLock()`,
+425–583) all consistent with prior fixes. No client-facing optimistic write paths in this
+range. No new findings.
+
+#### Note · Code.js:501–1100 · Section 2 re-audit — clean
+`apiSellInventoryBatch` lock (`tryLock(10000)`, highest-row-first delete, `finally` release on
+all paths incl. auth failure, 667–756) and the read endpoints (`apiGetEquipmentIndex`,
+`apiGetCharacters`, `apiGetMyCharacter`) are unchanged and correct. `apiGetCharacters` catch-only
+`Logger.log` (804) carries no PII. Classification helpers (`categorizeItem_` magic-item-only
+fallback at 1039, `detectMagicItem_` rarity heuristic at 1052) match the documented baseline.
+No new findings.
 
 ### 2026-06-18 (run 4) — Sections audited: 8, 9, 10, 11
 
