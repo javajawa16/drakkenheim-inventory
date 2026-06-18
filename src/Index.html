@@ -2756,6 +2756,7 @@
     let inventoryExpandedGroups = {};
     let expandedResource = '';
     let resourcePayInFlight = {};
+    let quickEditInFlight = false;
     let lastResourceUndo = {};
     let suppressInventoryClickUntil = 0;
     let searchTimer         = null;
@@ -6313,6 +6314,7 @@
           }
           const entry = (inventoryResourceLedger || []).find(e => e['Timestamp'] === timestamp);
           if (entry) entry['Notes'] = newNote;
+          cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           cancelLedgerEdit();
           if (isGold) renderGoldSheetBody();
           else renderDeleriumSheetBody();
@@ -7099,6 +7101,7 @@
 
     function confirmQuickEdit() {
       if (!selectedQuickEdit || !selectedQuickEdit.itemId) return;
+      if (quickEditInFlight) return;
 
       const prefix = quickPrefix();
       const status = getQuickStatusElement();
@@ -7117,8 +7120,10 @@
       }
 
       status.textContent = 'Saving…';
+      quickEditInFlight = true;
 
       const finishSuccess = res => {
+        quickEditInFlight = false;
         if (!res || !res.ok) {
           status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Quick edit failed.')}</span>`;
           return;
@@ -7136,6 +7141,7 @@
       };
 
       const fail = err => {
+        quickEditInFlight = false;
         status.innerHTML = `<span class="error">Quick edit failed: ${escapeHtml(err.message || err)}</span>`;
       };
 

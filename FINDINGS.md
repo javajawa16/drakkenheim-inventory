@@ -64,29 +64,16 @@ writes the merged target, deletes the source, and surfaces a value-mismatch note
 
 ### 2026-06-18 (run 5) — Sections audited: 12, 13, 1, 2
 
-#### BUG · Index.html:7100 · `confirmQuickEdit` has no in-flight guard — double-tap double-applies the delta
-The quick currency/delerium editor's Save handler sets `status.textContent = 'Saving…'`
-but never disables the confirm button and never clears the amount input. `selectedQuickEdit`
-stays populated until `closeQuickEditPanel()` runs in the success handler. So a fast second
-tap during the ~300ms–1s `google.script.run` round-trip re-reads the same amount and fires a
-second `apiAdjustInventory({ delta })`. For `mode === 'add'` / `'remove'` the server applies
-the delta **twice** — e.g. "add 50 gold" tapped twice = +100 gold, or a delerium count off by
-the entered amount. (`mode === 'set'` via `apiSetItemQuantity` is idempotent and unaffected.)
-Compare `payResource` (6538) which guards with `resourcePayInFlight[resource]` and
-`saveInventoryEdits` (7253) which disables `saveInventoryButton`. Fix: add an in-flight flag (or
-disable the confirm button) at the top of `confirmQuickEdit`, cleared in both success and
-failure handlers.
+#### ~~BUG · Index.html:7100 · `confirmQuickEdit` has no in-flight guard — double-tap double-applies the delta~~ FIXED
+Added `let quickEditInFlight = false` module-level flag. `confirmQuickEdit` returns early if
+the flag is set; sets it to `true` before firing the API call; both `finishSuccess` and `fail`
+clear it on all exit paths. Matches the `resourcePayInFlight` pattern used by `payResource`.
 
-#### BUG · Index.html:6314 · `updateLedgerNoteFromBottom` mutates the in-memory ledger but never re-caches it
-On success it does `entry['Notes'] = newNote` on the `inventoryResourceLedger` entry, then
-`cancelLedgerEdit()` + re-render — but unlike every sibling write handler in the section
-(`confirmPayWithReason` 6046, `splitGold` 6110, `payResource` 6578) it never calls
-`cacheInventoryRows(inventoryRows, inventoryResourceLedger)`. The localStorage cache keeps the
-old note. Because the writer is the local user, the 20s sync poll skips reload
-(`by === syncClientId`), so the stale cache is never refreshed by sync. On a cold page reload
-the ledger row shows the **old** note until some *other* user's write triggers a full sync.
-Server is correct; client cache diverges. Fix: add
-`cacheInventoryRows(inventoryRows, inventoryResourceLedger)` after `entry['Notes'] = newNote`.
+#### ~~BUG · Index.html:6314 · `updateLedgerNoteFromBottom` mutates the in-memory ledger but never re-caches it~~ FIXED
+Added `cacheInventoryRows(inventoryRows, inventoryResourceLedger)` immediately after
+`entry['Notes'] = newNote`. The `by === syncClientId` poll-skip means the writer's own 20 s
+interval never reloads, so the stale-cache cold-reload bug was permanent for the note editor.
+Matches the pattern in `confirmPayWithReason` (6046) and `splitGold` (6110).
 
 #### IDEA · Index.html:8013 · `addInventoryItem` success-but-`!ok` path does not restore the cleared form
 `addInventoryItem` clears the whole add form optimistically (8003 `clearAddForm()`) before the
