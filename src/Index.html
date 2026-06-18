@@ -4631,6 +4631,7 @@
             if (res && res.ok && res.note) {
               if (tidx >= 0) notesData[tidx] = res.note;
               lastNotesLoadAt = Date.now();
+              renderNotesList();
             } else {
               if (tidx >= 0) notesData.splice(tidx, 1);
               renderNotesList();
@@ -4785,7 +4786,7 @@
           updateInventoryScopeRow();
           showIdentitySheet();
         })
-        .apiGetMyCharacter();
+        .apiGetMyCharacter(myCharacterName || null);
     }
 
     function showIdentitySheet() {
@@ -6938,6 +6939,7 @@
             setMainStatus(`<span class="error">Remove failed: ${escapeHtml((res && res.error) || 'Unknown error')}</span>`);
           } else {
             bustInventoryCache();
+            loadInventory(true);
           }
         })
         .withFailureHandler(err => {
@@ -8058,6 +8060,8 @@
             document.getElementById('valueGp').value = payloadSnapshot.valueGp || '';
             document.getElementById('factionRelevance').value = payloadSnapshot.factionRelevance || '';
             document.getElementById('notes').value = payloadSnapshot.notes || '';
+            const _scrollRestore = String(payloadSnapshot.item || '').match(/^Scroll of (.+)$/i);
+            if (_scrollRestore) { setScrollMode_(true); document.getElementById('scrollSpellName').value = _scrollRestore[1]; handleScrollSpellInput(); }
             updateAddFlow();
             setMainStatus(`<span class="error">${escapeHtml((res && res.error) || `Failed to add ${itemName}.`)}</span>`);
             return;
@@ -8091,6 +8095,8 @@
           document.getElementById('valueGp').value = payloadSnapshot.valueGp || '';
           document.getElementById('factionRelevance').value = payloadSnapshot.factionRelevance || '';
           document.getElementById('notes').value = payloadSnapshot.notes || '';
+          const _scrollRestoreFail = String(payloadSnapshot.item || '').match(/^Scroll of (.+)$/i);
+          if (_scrollRestoreFail) { setScrollMode_(true); document.getElementById('scrollSpellName').value = _scrollRestoreFail[1]; handleScrollSpellInput(); }
           document.getElementById('addStatus').innerHTML = `<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`;
           updateAddFlow();
         });
@@ -8221,7 +8227,7 @@
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         stopSyncPoll();
-      } else if (syncState.inventory !== '0' || syncPollTimer) {
+      } else if (syncState.inventory.ts !== '0' || syncPollTimer) {
         // App came to foreground — fire an immediate check then restart the interval
         pollSync();
         stopSyncPoll();

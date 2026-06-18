@@ -269,6 +269,7 @@ function setupInventoryTabs() {
     writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.DELERIUM_SHEET), DELERIUM_HEADERS);
     writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.RESOURCE_LEDGER_SHEET), RESOURCE_LEDGER_HEADERS);
     writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.NOTES_SHEET), CAMPAIGN_NOTES_HEADERS);
+    writeHeaderOnly_(getOrCreateSheet_(ss, PARTY_NOTES_SHEET), PARTY_CAMPAIGN_NOTES_HEADERS);
     writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.CHARACTERS_SHEET), CHARACTERS_HEADERS);
     writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.USER_PROFILES_SHEET), USER_PROFILE_HEADERS);
     setupLookupsSheet_(ss);
@@ -278,6 +279,7 @@ function setupInventoryTabs() {
       inventorySheet: CONFIG.INVENTORY_SHEET,
       deleriumSheet: CONFIG.DELERIUM_SHEET,
       notesSheet: CONFIG.NOTES_SHEET,
+      partyNotesSheet: PARTY_NOTES_SHEET,
       charactersSheet: CONFIG.CHARACTERS_SHEET,
       userProfilesSheet: CONFIG.USER_PROFILES_SHEET,
       lookupsSheet: CONFIG.LOOKUPS_SHEET
@@ -294,6 +296,7 @@ function resetAppDataSheets() {
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.DELERIUM_SHEET), DELERIUM_HEADERS);
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.RESOURCE_LEDGER_SHEET), RESOURCE_LEDGER_HEADERS);
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.NOTES_SHEET), CAMPAIGN_NOTES_HEADERS);
+    clearSheetToHeaders_(getOrCreateSheet_(ss, PARTY_NOTES_SHEET), PARTY_CAMPAIGN_NOTES_HEADERS);
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.CHARACTERS_SHEET), CHARACTERS_HEADERS);
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.LOG_SHEET), [
       'Timestamp',
@@ -319,6 +322,7 @@ function resetAppDataSheets() {
         CONFIG.DELERIUM_SHEET,
         CONFIG.RESOURCE_LEDGER_SHEET,
         CONFIG.NOTES_SHEET,
+        PARTY_NOTES_SHEET,
         CONFIG.CHARACTERS_SHEET,
         CONFIG.LOG_SHEET
       ],
@@ -829,6 +833,21 @@ function apiGetMyCharacter(clientCharacterHint) {
     const profile = getUserProfileForKey_(getTemporaryUserKey_());
     if (profile && profile.character) {
       return Object.assign({ ok: true, remembered: true }, resolveIdentityForCharacter_(profile.character));
+    }
+
+    // Temp-key profile absent (first visit, key rotation, or empty key in some webview contexts).
+    // Try email-based resolution first (works when email resolves, e.g. for the deployer).
+    const emailIdentity = resolveIdentityForEmail_(getActiveUserEmail_());
+    if (emailIdentity.character) {
+      return Object.assign({ ok: true, remembered: false }, emailIdentity);
+    }
+
+    // Fall back to client-provided cached character hint (passed from localStorage on ≤24 h returns).
+    if (clientCharacterHint) {
+      const hintIdentity = resolveIdentityForCharacter_(clientCharacterHint);
+      if (hintIdentity.character) {
+        return Object.assign({ ok: true, remembered: false }, hintIdentity);
+      }
     }
 
     return { ok: true, email: '', character: null, isTreasurer: false, isDM: false, remembered: false };
@@ -1493,7 +1512,11 @@ function requireAllowedUser_() {
     throw new Error('Access denied. App is not configured.');
   }
 
-  if (effectiveAllowed.length && !effectiveAllowed.includes(email)) {
+  if (!effectiveAllowed.length) {
+    throw new Error('Access denied. App is not configured.');
+  }
+
+  if (!effectiveAllowed.includes(email)) {
     throw new Error('Access denied.');
   }
 
@@ -3405,7 +3428,7 @@ function apiUpdateInventory(payload) {
 
     const existingObj = found.rowObj;
 
-    const qty = validateQuantity_(payload && payload.qty === undefined ? existingObj['Qty'] : payload.qty);
+    const qty = validateQuantity_(payload && payload.qty === undefined ? existingObj['Qty'] : payload.qty, { min: 1 });
     const valueGp = validateMoney_(payload && payload.valueGp === undefined ? existingObj['Value GP'] : payload.valueGp);
     const totalValue = valueGp === '' ? '' : qty * valueGp;
 
@@ -3413,11 +3436,11 @@ function apiUpdateInventory(payload) {
       ...existingObj,
       'Inventory ID': inventoryId,
       'Qty': qty,
-      'Holder': validateText_(payload && payload.holder, 'Holder', 80),
+      'Holder': validateText_(payload && payload.holder === undefined ? existingObj['Holder'] : payload.holder, 'Holder', 80),
       'Value GP': valueGp,
       'Total Value GP': totalValue,
-      'Faction Relevance': validateText_(payload && payload.factionRelevance, 'Faction relevance', 180),
-      'Notes': validateText_(payload && payload.notes, 'Notes', 1200)
+      'Faction Relevance': validateText_(payload && payload.factionRelevance === undefined ? existingObj['Faction Relevance'] : payload.factionRelevance, 'Faction relevance', 180),
+      'Notes': validateText_(payload && payload.notes === undefined ? existingObj['Notes'] : payload.notes, 'Notes', 1200)
     };
 
     writeInventoryRow_(sheet, headers, found.rowNumber, rowObj);
