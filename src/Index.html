@@ -6957,7 +6957,11 @@
       const name = String(row && row['Item'] || '').toLowerCase();
       const category = String(row && row['Category'] || '').toLowerCase();
 
-      if (/\b(gold|gp|platinum|pp|silver|sp|copper|cp)\b/.test(name) || category === 'currency') {
+      if (/\b(platinum|pp|silver|sp|copper|cp)\b/.test(name)) {
+        return '';
+      }
+
+      if (/\b(gold|gp)\b/.test(name) || category === 'currency') {
         return 'currency';
       }
 
@@ -7133,8 +7137,12 @@
           updateInventoryRowFromServer(res.item);
         }
 
+        if (res.ledgerEntry) {
+          inventoryResourceLedger = [res.ledgerEntry, ...(inventoryResourceLedger || [])].slice(0, 60);
+        }
+
         bustInventoryCache();
-        cacheInventoryRows(inventoryRows);
+        cacheInventoryRows(inventoryRows, inventoryResourceLedger);
         renderInventory();
         status.innerHTML = `<span class="success">${escapeHtml(res.message || 'Saved.')}</span>`;
         closeQuickEditPanel();

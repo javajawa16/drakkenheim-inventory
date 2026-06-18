@@ -3852,12 +3852,34 @@ function apiSetItemQuantity(payload) {
       return { ok: false, error: 'Inventory item not found.' };
     }
 
+    const quickType = classifyQuickEdit_(found.rowObj);
     const oldQty = Number(found.rowObj['Qty'] || 0);
     const rowObj = Object.assign({}, found.rowObj, { 'Qty': qty });
     const valueGp = validateMoney_(rowObj['Value GP']);
     rowObj['Total Value GP'] = valueGp === '' ? '' : qty * valueGp;
 
     writeInventoryRow_(sheet, headers, found.rowNumber, rowObj);
+
+    let ledgerEntry = null;
+    if ((quickType === 'currency' || quickType === 'delerium crystal') && qty !== oldQty) {
+      const isGold = quickType === 'currency';
+      const delta = qty - oldQty;
+      const ledgerTs = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+      ledgerEntry = {
+        userEmail,
+        action: 'ADJUST',
+        resource: isGold ? 'gold' : 'delerium',
+        subtype: isGold ? 'gold' : (normalizeDeleriumSize_(rowObj['Item']) || 'crystal'),
+        qty: delta,
+        valueGp: isGold ? validateMoney_(rowObj['Value GP']) : '',
+        inventoryId: rowObj['Inventory ID'],
+        item: rowObj['Item'],
+        notes: note || '',
+        character: safeText_(payload && payload.clientCharacter)
+      };
+      appendResourceLedger_(ledgerEntry);
+      ledgerEntry._ts = ledgerTs;
+    }
 
     auditWrite_({
       userEmail,
@@ -3872,7 +3894,23 @@ function apiSetItemQuantity(payload) {
     });
 
     bumpSync_('inventory', payload && payload._syncClientId);
-    return { ok: true, message: 'Quantity updated.', item: sanitizeInventoryForClient_(rowObj) };
+    return {
+      ok: true,
+      message: 'Quantity updated.',
+      item: sanitizeInventoryForClient_(rowObj),
+      ledgerEntry: ledgerEntry ? sanitizeResourceLedgerForClient_({
+        'Timestamp': ledgerEntry._ts,
+        'Action': ledgerEntry.action,
+        'Resource': ledgerEntry.resource,
+        'Subtype': ledgerEntry.subtype,
+        'Qty': ledgerEntry.qty,
+        'Value GP': ledgerEntry.valueGp,
+        'Inventory ID': ledgerEntry.inventoryId,
+        'Item': ledgerEntry.item,
+        'Notes': ledgerEntry.notes,
+        'Character': ledgerEntry.character
+      }) : null
+    };
   } catch (err) {
     auditWrite_({
       userEmail,

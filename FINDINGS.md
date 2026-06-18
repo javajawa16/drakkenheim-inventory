@@ -7,49 +7,24 @@ Next section: 8. Index.html lines 1–1500 (HTML structure, CSS)
 
 ### 2026-06-18 (run 7) — Sections audited: 7
 
-#### BUG · Index.html:7132 · Quick-adjust discards the server's ADJUST ledger entry
-Story: **Quick-adjust currency/delerium** (add/remove branch). The run-3 server fix made
-`apiAdjustInventory` (Code.js:3797) append an `ADJUST` row to `RESOURCE_LEDGER` and return the
-sanitized `ledgerEntry` to the client *"so the ledger list updates immediately without waiting
-for the next full sync."* But the client never honors it: `confirmQuickEdit`'s `finishSuccess`
-(Index.html:7125–7141) only calls `updateInventoryRowFromServer(res.item)` and never prepends
-`res.ledgerEntry` to `inventoryResourceLedger`. So after a gold/delerium quick add/remove, the
-new ADJUST entry does **not** appear in the Gold/Delerium tab ledger history. Worse, because the
-20 s poll skips reload when `by === syncClientId` (the writer already "has" the data), the writer
-never cold-reloads from their own write — the ledger entry stays invisible to them indefinitely
-until another user writes or a manual refresh. Same class as the run-5 `updateLedgerNoteFromBottom`
-fix (mutated ledger never re-cached); here the entry is handed to the client and thrown away.
-Fix: in `finishSuccess`, when `res.ledgerEntry`, do
-`inventoryResourceLedger = [res.ledgerEntry, ...inventoryResourceLedger].slice(0, 60)` before
-`cacheInventoryRows(inventoryRows, inventoryResourceLedger)` and `renderInventory()`, mirroring
-`receiveDelerium`/`sellDelerium` (5150/5261).
+#### ~~BUG · Index.html:7132 · Quick-adjust discards the server's ADJUST ledger entry~~ FIXED
+`finishSuccess` in `confirmQuickEdit` now prepends `res.ledgerEntry` to `inventoryResourceLedger`
+(sliced to 60) when present, then passes both arrays to `cacheInventoryRows`. The ADJUST entry
+now appears immediately in the Gold/Delerium tab ledger after a quick add/remove, matching the
+`receiveDelerium`/`sellDelerium` pattern.
 
-#### BUG · Index.html:7148 · "Set total" quick-adjust on gold/delerium writes no ledger entry at all
-Story: **Quick-adjust currency/delerium** ("set" branch). The mode dropdown offers add / remove /
-**set total** for every quick-edit item, including currency and delerium (Index.html:2457–2460,
-2099–2102). When `mode === 'set'`, `confirmQuickEdit` routes to `apiSetItemQuantity`
-(Code.js:3830), which only writes the inventory row + an `INVENTORY_LOG` audit row — it never
-calls `appendResourceLedger_`. So setting a gold or delerium *total* via the quick-edit sheet
-changes the balance with **zero** RESOURCE_LEDGER history, not even after a reload, while add/remove
-on the same card produce `ADJUST` entries. The Gold/Delerium tab ledger therefore has a permanent
-gap for set-mode adjustments — silent and inconsistent. Fix: either route currency/delerium set-mode
-through a ledger-writing endpoint (compute delta server-side and call the `apiAdjustInventory`
-ledger path), or have `apiSetItemQuantity` append an `ADJUST` (delta = qty − oldQty) entry when
-`classifyQuickEdit_` returns `currency`/`delerium crystal`.
+#### ~~BUG · Index.html:7148 · "Set total" quick-adjust on gold/delerium writes no ledger entry at all~~ FIXED
+`apiSetItemQuantity` now calls `classifyQuickEdit_` on the row, and when the item is currency or
+delerium crystal and `qty !== oldQty`, appends an `ADJUST` ledger entry (delta = qty − oldQty)
+via `appendResourceLedger_` and returns the sanitized entry to the client. `confirmQuickEdit`'s
+`finishSuccess` (fix above) then prepends it to the ledger. Set-mode gold/delerium adjustments now
+produce the same RESOURCE_LEDGER history as add/remove mode.
 
-#### IDEA · Index.html:6960 · Client/server disagree on whether platinum/silver/copper is quick-editable
-Story: **Quick-adjust currency/delerium** (open step). Client `getQuickEditType` (6960) classifies
-any name matching `\b(gold|gp|platinum|pp|silver|sp|copper|cp)\b` or `category === 'currency'` as
-`'currency'`, so tapping a platinum/silver/copper coin stack opens the quick-edit sheet. But the
-run-3 server fix made `classifyQuickEdit_` (Code.js:1772, reached via `apiGetCurrencyQuickEdit`
-3678) return `''` for platinum/silver/copper. Net effect: `openQuickEditPanel` opens the sheet,
-`apiGetCurrencyQuickEdit` comes back `ok:false`, and the success handler (7020–7025) immediately
-closes the quick sheet and pops the full inventory editor with "Not a quick-edit item." — a visible
-flash-and-swap on every tap of a non-gold coin stack, and those stacks silently lose the stepper +
-ledger entry that gold gets. The run-3 fix targeted *adjective* uses ("Silver Holy Symbol"), but it
-also catches legitimate platinum/silver/copper currency. Suggest aligning the two: either let the
-server quick-edit real coin currency (so the client doesn't flash), or have the client not classify
-non-gold coins as `'currency'` so it opens the full editor directly with no flash.
+#### ~~IDEA · Index.html:6960 · Client/server disagree on whether platinum/silver/copper is quick-editable~~ FIXED
+`getQuickEditType` now applies the same two-guard pattern as `classifyQuickEdit_` and `isGoldItem_`:
+platinum/pp/silver/sp/copper/cp names return `''` first, then gold/gp/category-currency return
+`'currency'`. Non-gold coin stacks now route directly to the full inventory editor with no
+flash-and-swap.
 
 #### Note · Code.js:3501–end / Index.html:3466,6646,7430 · Combine + delete + swipe-remove stories re-traced clean
 Traced **Combine duplicate**, **Delete inventory item**, and the swipe remove-one/delete paths.
