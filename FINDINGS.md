@@ -1,11 +1,11 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 7. Code.js lines 3501–end (sync, audit, utilities)
+Next section: 8. Index.html lines 1–1500 (HTML structure, CSS)
 
 ## Sessions
 
-### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6
+### 2026-06-18 — Sections audited: 1, 2, 3, 4, 5, 6, 7
 
 #### RISK · Code.js:10 · Dev access gate still open
 `CONFIG.DEV_ALLOW_UNCONFIGURED_ACCESS: true` means `requireAllowedUser_()`
@@ -127,3 +127,19 @@ Positive baseline: `apiSendGoldToMember` rejects any `/^DM(\s|$)/i` character
 as a payee, and all six write handlers in this section (sell item, sell
 delerium, split gold, send gold, update, delete) acquire and `finally`-release
 a document lock on every path including auth failure. No lock issues found.
+
+#### IDEA · Code.js:3723 · `apiAdjustInventory` validates delerium `size` but never applies it
+For a `delerium crystal` quick-edit item, the handler normalizes `payload.size`
+and throws if it is not in `DELERIUM_SIZE_VALUES`, but then never writes the
+size anywhere — only `Qty` is adjusted on the existing row. The size check is a
+no-op guard. Harmless if the client never expects a size change here, but if a
+caller passes a new size hoping to re-label the row, it silently won't happen.
+
+#### IDEA · Code.js:3927 · Dead/unused helpers and test functions remain in source
+`findInventoryRowById_` (3927) returns only a row number and appears fully
+superseded by `getInventoryRowObjectById_`, which every current caller uses.
+`testAddInventoryDirect_` (3940) and `testGetInventoryDirect_` (3956) are
+editor-run test harnesses left in the production file; `testAddInventoryDirect_`
+would attempt a real `apiAddInventory` with `libraryItemId: 'TEST_ITEM'` (which
+fails safely since that library item does not exist). Cleanup candidates — verify
+`findInventoryRowById_` has no remaining callers, then remove.
