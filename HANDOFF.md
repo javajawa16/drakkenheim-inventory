@@ -383,34 +383,130 @@
 
 ---
 
+---
+
+## Session Summary (2026-06-18 — audit findings, no new deploy)
+
+### CCR audit routine
+
+A scheduled Claude Code remote agent (`trig_019oafGWb1PDxJHZPbcpVkeR`, every 5 hours, `claude-opus-4-8`) runs a user-story-driven audit of the codebase section by section, writing findings to `FINDINGS.md` and pushing commits. The agent traces happy paths, failure paths, navigate-away, and cross-cutting scenarios (collaborative sync interference, DM scope, treasurer gating). Findings across 17 runs were all applied in this session.
+
+### Poll-clobber class of bugs (runs 10–12)
+
+The 20-second `pollSync` loop calls `loadInventory(true)` on another user's write, which unconditionally replaces `inventoryRows`. If a local write is optimistically in-flight at that moment, the new server set (which predates the in-flight write) reverts the optimistic mutation and the UI gets stuck showing stale state until some future unrelated write.
+
+**Fix applied everywhere:**
+- `pollSync` (4350): defers `loadInventory(true)` when `_inFlightWrites > 0` and leaves `syncState.ts` un-advanced so the next tick retries.
+- `confirmDescRemove`, `deleteSelectedInventory`, `receiveDelerium`, `sellDelerium` — all now bracket their API calls with `_inFlightWrites++`/`--`, matching the existing pattern in `confirmSellItem`/`giveItemToCharacter`/`undoResourcePay`.
+- `confirmDescRemove` success path also adds `loadInventory(true)` (matching `confirmSellItem`) to reconcile any server-side qty clamp from a concurrent stack reduction.
+
+### Gold/delerium ledger gaps (runs 3, 7)
+
+`apiAdjustInventory` (add/remove quick-edit) and `apiSetItemQuantity` (set-total quick-edit) never called `appendResourceLedger_` for currency or delerium items. The optimistic ledger entry returned by the server was also being discarded in `confirmQuickEdit`'s success handler.
+
+**Fix:** Both server handlers now classify the row with `classifyQuickEdit_`, write an `ADJUST` ledger entry when the item is currency or delerium and qty changed, and return it via `sanitizeResourceLedgerForClient_`. `confirmQuickEdit`'s `finishSuccess` handler now prepends `res.ledgerEntry` to `inventoryResourceLedger`. Also: `sellDelerium`'s `_pending` entry was being built after `cacheInventoryRows`/`renderDeleriumSheetBody` (so it never showed during the in-flight window); moved to before the cache/render calls, matching `receiveDelerium`.
+
+### DM-scope cross-holder rollup (run 12)
+
+`rollupInventoryRows` merges rows by `name|category|rarity` (ignoring holder) and sets `Holder = 'Multiple'` for cross-holder stacks. But `selectedInventory` is always a raw single-holder row, so `repHolder` was never `'Multiple'` — the `isMultiple` branch in `getDescRemoveTotalQty_`, `confirmDescRemove`, and `confirmSellItem` was completely dead. In DM scope, a "5× Potion" card (3 held by A, 2 by B) showed a description sheet capped at 3 and could never drain B's units.
+
+**Fix:** `isMultiple` is now derived by computing `holders = new Set(allForKey.map(r => r['Holder']))` and checking `holders.size > 1`. All three functions share this pattern. The description title (`openInventoryDescription`) already called `getDescRemoveTotalQty_()` for its prefix, so it automatically shows the correct cross-holder total once the function is fixed.
+
+### Give item erases Notes and Faction Relevance (run 16)
+
+`apiUpdateInventory` had undefined guards for `Qty` and `Value GP` (`payload.x === undefined ? existingObj[x] : validate(payload.x)`) but not for `Holder`, `Faction Relevance`, or `Notes`. The Give flow sends only `{ inventoryId, holder }`, so both Notes and Faction Relevance were written as `''` on every give — permanent data loss until the next full edit.
+
+**Fix:** All three fields now use the same undefined guard. `validateQuantity_` also got `{ min: 1 }` to match the Add handlers and prevent zombie 0-qty rows from the edit form.
+
+### Create note stuck "Saving…" (run 17)
+
+`saveNoteForm` (create branch): on `apiCreateNote` returning ok, it updated `notesData[tidx] = res.note` but never called `renderNotesList()`. The card stayed dimmed with the "Saving…" badge indefinitely until an unrelated note action triggered a render. The edit/pin/archive paths all called `renderNotesList()`; the create success path didn't.
+
+**Fix:** Added `renderNotesList()` after the `notesData[tidx] = res.note` assignment in the create-success ok branch.
+
+### visibilitychange guard comparison bug (run 13)
+
+```js
+} else if (syncState.inventory !== '0' || syncPollTimer) {
+```
+`syncState.inventory` is an object `{ts, by}`, so `!== '0'` is always true (object vs. string), making the guard dead. This caused `pollSync()` to fire on every foreground return even before identity was resolved, with `syncClientId === ''` so any other user's write would trigger a full `loadInventory(true)` behind the still-visible identity overlay.
+
+**Fix:** Changed to `syncState.inventory.ts !== '0'`.
+
+### combineSheet invisible on every device (run 9)
+
+The `@media (min-width: 700px)` block sets `.mobile-sheet { display: none !important }` and then re-enables specific sheet IDs via `.active { display: block !important }`. `#combineSheet` was the only overlay not in that whitelist — and since the iOS GAS webview renders at ~980px CSS width, the "desktop" media query always fires on real devices. Net effect: the Combine duplicate flow was entirely unreachable, and triggering it locked body scroll behind an invisible modal.
+
+**Fix:** Added `#combineSheet.active { display: block !important; }` to the whitelist.
+
+### Auth and security (runs 1, 14, 15, 16)
+
+- `DEV_ALLOW_UNCONFIGURED_ACCESS`: set to `false` — live.
+- `requireAllowedUser_`: when `effectiveAllowed` is empty and the DEV flag is false, now throws "App is not configured" for authenticated users too (previously fell through to `return email`).
+- `apiGetMyCharacter`: previously ignored `clientCharacterHint` and never called email-based resolution. Now falls back to `resolveIdentityForEmail_(getActiveUserEmail_())` then `resolveIdentityForCharacter_(clientCharacterHint)` when the temp-key profile is absent. Client passes `myCharacterName` as the hint. This restores treasurer identity after temp-key rotation without requiring re-pick.
+- Party Notes v2 error handling: `apiGetNotes`/`apiCreateNote`/`apiUpdateNote`/`apiArchiveNote` catch blocks now route through `publicApiError_` (previously leaked raw `e.message` to client).
+- "Treasurer access required." added to `publicValidationError_` whitelist so treasurer-gated rejections surface verbatim.
+- PII `Logger.log` calls removed from `apiGetCharacters` success path.
+- Hardcoded `"DM Josh"` short-circuit in `validateCharacterChoice_` removed — DM characters now require CHARACTERS sheet entry like anyone else.
+
+### Admin tooling (run 14)
+
+`setupInventoryTabs` and `resetAppDataSheets` never referenced `PARTY_NOTES_SHEET` (`NOTES`). The live Party Notes feature creates it lazily, but "reset app data" was silently preserving stale party notes while clearing everything else. Both admin functions now include `PARTY_NOTES_SHEET` / `PARTY_CAMPAIGN_NOTES_HEADERS`.
+
+### Other fixes (runs 2, 5, 8, 11, 13, 17)
+
+- **Resize handler**: only closes description/editor on height delta > 150 px (guards iOS virtual keyboard events).
+- **`ondblclick`** removed from inventory cards and campaign-note cards (unreachable on touch; runs 1 and 2).
+- **`isMobileLayout()`**: now returns `classList.contains('is-phone')` only; `(max-width: 699px)` arm removed from `updatePhoneClass()`.
+- **`--card-bg` CSS variable**: defined as `#212f4b` (same as `--panel-strong`) — three usages were referencing an undefined token.
+- **Party Notes v2 write failures**: `saveNoteForm`, `deleteNoteFromForm`, `toggleNotePin` now call `setMainStatus()` with an error message instead of silently reverting.
+- **`confirmCombineInventoryItem`**: double-tap guard — `pendingCombineChoice` nulled before the API call, restored on error.
+- **`updateLedgerNoteFromBottom`**: re-caches after note edit (the `by === syncClientId` poll-skip means the writer's own poll never reloads, so the un-cached ledger change was permanent).
+- **`isAccessoryItem_`**: now returns true when name matches OR category contains `wondrous`/`accessor`, so custom rings/cloaks with free-form categories land in Accessories.
+- **`.notes-list` WKWebView clip**: `align-content: end` on a grid scroll container clips overflowed content above `scrollTop: 0` on older iOS WKWebView. Replaced with `display: flex; flex-direction: column` + `::before { flex: 1 }` spacer.
+- **`sellDelerium` `_pending` ledger entry**: was built after `cacheInventoryRows`/`renderDeleriumSheetBody`, so the "Selling…" entry never appeared during the in-flight window. Now built before, matching `receiveDelerium`.
+- **`receiveDelerium` failure path**: now calls `renderInventory()` (the only optimistic write path that didn't repaint the main list on rollback).
+- **`classifyQuickEdit_` / `getQuickEditType`**: both now use the same two-guard pattern (platinum/silver/copper excluded first, then gold/gp matched). Fixes the flash-and-swap on silver/platinum/copper inventory cards.
+- **Scroll spell restore on add-failure**: both the `!res.ok` and transport-fail branches now re-parse the spell name from `payloadSnapshot.item` and repopulate `#scrollSpellName`.
+- **`apiSellInventoryBatch` combine value-mismatch**: source and target Value GP now compared; on mismatch the merge proceeds but the success message notes "values differed — kept X gp/unit from target."
+- **`apiCombineInventoryItems`** lock: was missing `LockService`; now consistent with all other write handlers.
+- **`apiUpdateLedgerNote`** lock: same pattern applied.
+- **`continueCleanEquipmentLibrary`** lock: `tryLock(5000)` added; concurrent import runs no longer corrupt the cursor.
+- **`categorizeItem_`**: over-broad fallback (`|| rarity`) removed; now only triggers on `text.includes('magic item')`.
+- **Dead code removed**: `testAddInventoryDirect_`, `testGetInventoryDirect_`, unused `const category` in `isDashboardResourceRow_`, stale `amountInput.dataset.lastPaidAmount` write in `payResource`.
+- **Debug logs removed**: `console.log`/`warn` from `loadCharacters` and `loadFallbackCharacterIdentity`/`showIdentitySheet`/`confirmIdentity`; `Logger.log` from `apiGetCharacters` success path.
+- **`CAMPAIGN_NOTES_HEADERS`** renamed from `NOTES_HEADERS` throughout `Code.js` and `Reset.js` (was shadowing the Party Notes schema variable name).
+- **`apiQuickAddInventory` ledger entry**: Notes + Character fields now included in the sanitized return, matching `apiDepleteResource`/`apiReceiveResource`.
+- **`apiSellDelerium`/`apiSplitGold`** ledger entries: all five inline `ledgerEntries.push()` calls now wrapped with `sanitizeResourceLedgerForClient_`; `SPLIT_REMAINDER` entry got its missing `Character` field.
+
+### Current deploy state
+
+No new deploy since `@306`. All changes above are local source only — `clasp push` + `clasp deploy-webapp` required before the next session.
+
+---
+
 ## Outstanding / Next Tasks
 
-1. **Import equipment library** — upload `equipment_library_5e.xlsx` to Google Drive, open as Sheets, paste rows 2–5837 into `EQUIPMENT_LIBRARY_CLEAN` at row 2. This activates full stat blocks for all 5,836 items.
+1. **Deploy to Apps Script** — run `.\scripts\clasp-push.ps1` then `.\scripts\clasp-deploy-webapp.ps1 "audit fix batch"`. Many sessions of changes since `@306` are local only. Prune old versions at `script.google.com` first if near the 200-version limit.
 
-2. **Clean up debug logs** — `loadCharacters` in `Index.html` still has `console.log` lines. `apiGetCharacters` in `Code.js` (~line 657–682) still has `Logger.log` lines.
+2. **Import equipment library** — upload `equipment_library_5e.xlsx` to Google Drive, open as Sheets, paste rows 2–5837 into `EQUIPMENT_LIBRARY_CLEAN` at row 2. This activates full stat blocks for all 5,836 items.
 
-3. **Restore access controls** — `DEV_ALLOW_UNCONFIGURED_ACCESS: true` in `Code.js`. Set to `false` and populate `ALLOWED_USERS` Script Property once all players confirmed working.
+3. **Delete `temp_patch.py`** — one-shot file, no longer needed.
 
-4. **Delete `temp_patch.py`** — one-shot file, no longer needed.
+4. **Swipe-delete confirmation** — single swipe + tap permanently deletes with no undo. Consider inline confirm (same pattern as 0 gp delerium sell). Edit form delete now has a multi-qty guard; swipe-delete does not.
 
-5. **Apps Script version limit** — at @300 now. Prune old versions at `script.google.com` → project → History before the next batch of deploys hits the 200-version limit again.
+5. **Gold float rounding** — add `parseFloat(x.toFixed(2))` at write boundaries in `apiSplitGold`.
 
-6. **Swipe-delete confirmation** — single swipe + tap permanently deletes with no undo. Consider inline confirm (same pattern as 0 gp delerium sell). Edit form "Delete Item" now has a multi-qty guard, but swipe-delete does not.
+6. **Existing inventory stat block backfill** — items added before new library import have IDs from `makeStableItemId_()` (Code.js hash). New library items use `makeId()` (parse_compendium.js hash). IDs don't match so existing items get no stat block. Options: manual edit of Library Item ID in spreadsheet, or automated name-based backfill function.
 
-7. **Gold float rounding** — add `parseFloat(x.toFixed(2))` at write boundaries in `apiSplitGold`.
+7. **Party Notes — next steps**:
+   - Currently treasurer-only (Corvane) for beta. Open to all players when ready.
+   - Item detail integration: "+ Add Item Note" button on `#descriptionSheet`; show related notes inline (`relatedItemId` field and hidden form input already in place server-side and in the form).
+   - Note detail/full-view sheet (expand beyond 3-line body preview on tap).
+   - Old `CAMPAIGN_NOTES_FEED` v1 functions still in Code.js — remove once confirmed no longer used.
 
-8. **Deferred navigation improvements**:
-   - `resize` handler: only close description sheet on height delta > 150 px (guards against iOS keyboard)
-   - Remove dead `ondblclick` on inventory cards (unreachable on mobile)
+8. **Collaborative sync — known edge case**: if two players write within the same ~20s poll window, the second writer may not see the first writer's change until the next poll cycle. Acceptable for a turn-based D&D session.
 
-9. **Existing inventory stat block backfill** — items added before new library import have IDs from `makeStableItemId_()` (Code.js hash). New library items use `makeId()` (parse_compendium.js hash). IDs don't match so existing items get no stat block. Options: manual edit of Library Item ID in spreadsheet, or automated name-based backfill function.
+9. **"Give to…" rollup limitation** — from the description sheet, "Give to…" only reassigns the representative row's holder (one underlying row). When an item is rolled up from multiple additions, only one unit moves. Workaround: use the item edit form for each addition, or add a bulk-give API.
 
-10. **Party Notes — next steps**:
-    - Currently treasurer-only (Corvane) for beta. Open to all players when ready.
-    - Item detail integration: "+ Add Item Note" button on `#descriptionSheet`; show related notes inline (server `relatedItemId` field and hidden form input already in place)
-    - Note detail/full-view sheet (expand beyond 3-line body preview on tap)
-    - Old `CAMPAIGN_NOTES_FEED` functions still in Code.js — remove once confirmed no longer used
-
-11. **Collaborative sync — known edge case**: if two players write within the same ~20s poll window, the second writer may not see the first writer's change until the next poll cycle. Acceptable for a turn-based D&D session.
-
-12. **"Give to…" rollup limitation** — from the description sheet, "Give to…" only reassigns the representative row's holder (one underlying row). When an item is rolled up from multiple additions, only one unit moves. Workaround: use the item edit form for each addition, or add a bulk-give API.
+10. **Ledger entry ID deferred** — `apiUpdateLedgerNote` keys on Timestamp (first 19 chars). Same-millisecond collisions in batch ops (split-gold, sell-delerium) could match the wrong row. Requires adding a stable `Entry ID` column to `RESOURCE_LEDGER_HEADERS` and threading it through every `appendResourceLedger_` call and the client cache. Low urgency — batch ops each write to distinct seconds in practice.

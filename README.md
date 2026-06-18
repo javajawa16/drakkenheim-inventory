@@ -181,12 +181,12 @@ npm install          # one-time: installs clasp + xlsx
 
 ## Known TODOs
 
-- Set `DEV_ALLOW_UNCONFIGURED_ACCESS: false` and populate `ALLOWED_USERS` Script Property
+- **Deploy pending** — multiple sessions of fixes have accumulated since `@306`. Run `.\scripts\clasp-push.ps1` then `.\scripts\clasp-deploy-webapp.ps1 "audit fix batch"` before the next session.
 - Delete `temp_patch.py` (one-shot patch, no longer needed)
 - Import `equipment_library_5e.xlsx` into `EQUIPMENT_LIBRARY_CLEAN` sheet to activate the full 5e item stat blocks
 - Swipe-delete has no undo — consider inline confirmation (same pattern as 0 gp delerium sell)
 - Gold float rounding: `parseFloat(x.toFixed(2))` at write boundaries in `apiSplitGold`
-- Apps Script version limit — prune old versions at `script.google.com` before next batch of deploys (currently at @300)
+- Apps Script version limit — prune old versions at `script.google.com` before the next deploy batch (was at @306 before audit fixes; versions not yet pushed)
 - Existing inventory items added before new equipment library import won't have stat blocks (different hash functions). Options: manual edit of Library Item ID column, or automated name-based backfill.
 - "Give to…" from description sheet moves only the representative row when an item is rolled up from multiple additions — other rows stay in place
 
