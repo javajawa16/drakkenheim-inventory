@@ -1,9 +1,23 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 1. Code.js lines 1–500 (config, helpers, validation)
+Next section: 2. Code.js lines 501–1100 (auth, character, inventory read)
 
 ## Sessions
+
+### 2026-06-18 (run 14) — Sections audited: 1
+
+#### Note · Code.js:53 · Clean trace — "Add library item (quick-add)" path through config
+**Stories traced: Add library item (quick-add variant), Add custom item, Receive/Sell crystals (size validation), plus cross-cutting auth/failure for all stories.** Section 1 is config + admin + app entry; almost no catalog story executes code here at runtime, but several read this section's constants:
+- `QUICK_ADD_ITEMS` (53) → `apiGetQuickAddItems` (872) emits `quickKey`/`terms`/`valueGp` to the client; on Add the client returns `quickKey`, resolved server-side by `getQuickAddDefinition_` (1790). Key is lowercased on both emit and resolve, so case can't desync; an unknown key throws `Unsupported quick-add item.`, which is whitelisted by `publicValidationError_` (1566) and surfaces verbatim. `valueGp:''` for gemstone/art/trade/scroll flows safely to `Number(x)||0` at sell time. Happy path, server-failure path (returns `{ok:false, items:[]}` → search just loses quick-add rows, recoverable), and navigate-away are all clean — these are stateless reads, no in-flight write state to strand.
+- Auth gate `requireAllowedUser_` (1475) wraps every story's server call; all thrown gate messages (`Access denied.`, `Treasurer access required.`, `Quantity…`, `Value…`, `…too long.`, `Unsupported…`) match the `publicValidationError_` whitelist, so per-step failure feedback is informative rather than masked to "Request failed." Directly-returned strings ("Server busy…", "No items selected.") bypass the whitelist and reach the user verbatim. `doGet` (247) serves the template unauthenticated by design (URL is the security boundary).
+- Confirmed the two notes schemas defined here are **both live and use separate sheets**: 5-col `CAMPAIGN_NOTES_HEADERS` (271) → `CAMPAIGN_NOTES_FEED`, driven by the legacy `apiGetCampaignNotes`/`apiAddCampaignNote`/… (still called from Index.html:3578/3850/3852/3882); 11-col `PARTY_CAMPAIGN_NOTES_HEADERS` (2225) → `NOTES`, driven by the Party Notes tab (`apiGetNotes`/`apiCreateNote`/…). No schema collision in setup despite the shared "notes" naming.
+
+#### RISK · Code.js:288 · `resetAppDataSheets` / `setupInventoryTabs` never touch the live Party Notes `NOTES` sheet
+**Story affected: Create/Edit/Archive note (data lifecycle).** `setupInventoryTabs` (263) and `resetAppDataSheets` (288) initialize/clear the *legacy* `CAMPAIGN_NOTES_FEED` (5-col) but neither references `PARTY_NOTES_SHEET = 'NOTES'` (2232), which is the sheet the live Party Notes feature actually reads and writes. The live sheet is created lazily by `ensurePartyNotesSheet_` (2234) on first note access. Consequences: (a) the documented "reset app data" admin action wipes every other campaign sheet but leaves all Party Notes intact, so a "fresh start" silently retains stale party notes; (b) the documented setup tooling never provisions the live notes sheet, and what it *does* provision (`CAMPAIGN_NOTES_FEED`) is the legacy schema. Suggested fix: add `getOrCreateSheet_`/`clearSheetToHeaders_` for `PARTY_NOTES_SHEET` with `PARTY_CAMPAIGN_NOTES_HEADERS` to both `setupInventoryTabs` and `resetAppDataSheets`, and decide whether the legacy 5-col campaign-notes sheet/API should still be initialized at all.
+
+#### RISK · Code.js:1483 · Unconfigured-access deny only fires for empty-email visitors; `DEV_ALLOW_UNCONFIGURED_ACCESS:false` does not block authenticated users
+**Cross-cutting (auth) surfaced while tracing the section-1 API gates.** When the app is unconfigured (`ALLOWED_USERS` unset *and* `PLAYER_CHARACTER_MAP` empty, so `effectiveAllowed.length === 0`): with the DEV flag now `false` (11), a visitor whose `Session.getActiveUser().getEmail()` resolves to a non-empty value falls through 1483 (DEV false), 1491 (`!email` false), and 1496 (`effectiveAllowed.length` 0 → condition false) to `return email` at 1500 — i.e. **allowed**. Only empty-email visitors are denied (1493). The flag's name and README imply unconfigured access should be closed when the flag is false. Mitigated in practice: with `executeAs: USER_DEPLOYING` on personal Gmail only the deployer resolves a non-empty email, and production is configured (`@306`, map set → `effectiveAllowed` non-empty → 1496 enforces the allowlist), so this path is unreachable today. Latent risk if the map is ever cleared. Suggested fix: gate the unconfigured fall-through on the DEV flag explicitly rather than relying on email emptiness.
 
 ### 2026-06-18 (run 13) — Sections audited: 13
 
