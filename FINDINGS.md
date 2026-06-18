@@ -100,14 +100,6 @@ When a valid `size` is provided, `rowObj['Item']` is now relabeled to
 `Delerium <Size>` and `Size: <size>` is appended to the note, matching the
 pattern used by `apiEditInventory`.
 
-#### IDEA · Code.js:3927 · Dead/unused helpers and test functions remain in source
-`findInventoryRowById_` (3927) returns only a row number and appears fully
-superseded by `getInventoryRowObjectById_`, which every current caller uses.
-`testAddInventoryDirect_` (3940) and `testGetInventoryDirect_` (3956) are
-editor-run test harnesses left in the production file; `testAddInventoryDirect_`
-would attempt a real `apiAddInventory` with `libraryItemId: 'TEST_ITEM'` (which
-fails safely since that library item does not exist). Cleanup candidates — verify
-`findInventoryRowById_` has no remaining callers, then remove.
 
 #### ~~BUG · Index.html:1461 · `var(--card-bg)` used with no fallback — `--card-bg` is never defined~~ FIXED
 Added `--card-bg: #212f4b` (same as `--panel-strong`) to the `:root` token block.
