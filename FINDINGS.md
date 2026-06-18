@@ -1,9 +1,63 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 9. Index.html lines 1501–3000 (CSS continued, early JS)
+Next section: 10. Index.html lines 3001–4500 (inventory render, search)
 
 ## Sessions
+
+### 2026-06-18 (run 9) — Sections audited: 9
+
+#### BUG · Index.html:1516 · `combineSheet` is invisible on every device — Combine duplicate story is dead, plus a phantom scroll-lock
+**Story traced: Combine duplicate (duplicate detected after add → combine sheet → Confirm).** The
+desktop media query `@media (min-width: 700px)` sets `.mobile-sheet { display: none !important }`
+(1516) and then re-enables only a hardcoded whitelist of sheet ids via
+`#X.active { display: block !important }` (1517–1526). `#combineSheet` is the **only** `.mobile-sheet`
+in the HTML (2560) that is neither in that whitelist nor has a desktop-editor equivalent (`inventorySheet`
+and `quickEditSheet` are deliberately omitted because `desktopInventoryEditor` / `desktopQuickEditor`
+replace them — combine has no such replacement). The base rule `.mobile-sheet.active { display: block }`
+(1240) carries no `!important`, so the `!important` desktop override wins for **all** viewports ≥700px.
+The catch: the iOS GAS webview renders at ~980px CSS width (documented in README CSS notes), so this
+"desktop" query is always active on the actual target phones, and no `html.is-phone` rule re-enables
+`.mobile-sheet` display. Net effect on every real device:
+
+1. `addInventoryItem` success handler detects a duplicate and calls `showCombineChoice` (8053–8054 →
+   3419). It adds `.active` to `#combineSheet` and calls `syncModalOpenState()`.
+2. The sheet stays `display:none !important` → the combine suggestion **never appears**. The Combine
+   duplicate user story cannot be completed by any user.
+3. `syncModalOpenState()` (3398) sees a `.mobile-sheet.active` exists and sets `body.app-modal-open`
+   (`overflow:hidden`, 110) → **page scroll locks behind an invisible modal**. The only handlers that
+   clear `.active` (`keepDuplicateInventoryItem` 3436, `confirmCombineInventoryItem` 3442) are wired to
+   buttons *inside* the invisible sheet, so they are unreachable by tap. `setCommandMode`/tab switches
+   don't clear `combineSheet`, so the scroll-lock persists until a full page reload.
+
+Fix: add `#combineSheet.active { display: block !important; }` to the whitelist at 1517–1526 (and
+mirror any phone-specific block if one is later added). Two-line change; restores the entire Combine
+duplicate flow and removes the stuck scroll-lock.
+
+#### Note · Index.html:5469,5944,7257,2894 · Give-from-quick-edit and holder-dropdown repopulation traced clean
+**Stories traced: Give item to character (quick-edit entry point), Edit inventory item (holder dropdown),
+Add library item (holder dropdown).** The quick-edit sheet exposes a "Give to…" button (2484); verified
+it works: `openGiveItemSheet` (5469) falls back to `selectedQuickEdit` when `selectedInventory` is null,
+and `giveItemToCharacter` (5944) captures `item` into a local before `closeInventoryPanels(false)` (7257)
+nulls `selectedQuickEdit` and closes *both* the quick-edit and inventory editors via `setQuickEditorOpen
+(false)` — so the quick sheet does not get orphaned open. The optimistic `apiUpdateInventory` write pairs
+`_inFlightWrites` up/down on success and failure and reverts `Holder` on both error paths. Status-element
+precedence (`sheetEditStatusMessage || editStatusMessage || quickSheetStatus`, 5960) always resolves to
+the always-present hidden inventory-edit status, but every give path closes all sheets immediately, so
+the message is never surfaced anyway (row-pulse `.saving` is the real feedback) — cosmetic, not a defect.
+`populateCharacterSelectors` (2894) repopulates `holder`/`editHolder`/`sheetEditHolder` on every
+`loadCharacters` (2914) return, preserving the current `el.value` and synthesizing an `(existing)` option
+when the held character is no longer active — so an in-flight edit started before the roster resolves
+keeps its holder. No findings in these paths.
+
+#### Note · Index.html:1233–2037, 2040–2741, 2743–2992 · Section 9 CSS / sheet markup / early-JS helpers otherwise clean
+Re-verified the remainder of the range carries no other write paths. The mobile-sheet display whitelist
+(1517–1526) is correct for every id *except* combineSheet (above). Cache helpers (`cacheInventoryRows`
+2926 `_inFlightWrites` guard, `primeInventoryCacheAfterAdd` 2937, equipment cache 2964/2981) and
+`updatePhoneClass` (2995) match the run-4 baseline. The static sheet markup for all overlays
+(inventory/description/quickEdit/notes/noteForm/combine/gold/delerium/sell/sellBatch/give/payReason/
+identity/dice) is structurally intact with the correct `.mobile-sheet` class and close handlers; module
+state declarations (2745–2849) are consistent with their consumers.
 
 ### 2026-06-18 (run 8) — Sections audited: 8
 
