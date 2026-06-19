@@ -479,13 +479,40 @@ The `@media (min-width: 700px)` block sets `.mobile-sheet { display: none !impor
 - **`apiQuickAddInventory` ledger entry**: Notes + Character fields now included in the sanitized return, matching `apiDepleteResource`/`apiReceiveResource`.
 - **`apiSellDelerium`/`apiSplitGold`** ledger entries: all five inline `ledgerEntries.push()` calls now wrapped with `sanitizeResourceLedgerForClient_`; `SPLIT_REMAINDER` entry got its missing `Character` field.
 
-### Current deploy state (`@307–@311`, 2026-06-19)
+### Current deploy state (`@307–@312`, 2026-06-19)
 
 | Version | What it contains |
 |---|---|
 | `@307–@309` | Audit fix batch: runs 1-21 (CSS/sheet-visibility bugs, combineSheet, auth hardening, ledger gaps, poll-clobber class, delerium send/receive, notes subsystem) |
 | `@310` | Audit fix batch: runs 22-26 (pendingForeignReload, _inFlightWrites gaps, notes in-flight guard, delerium quick-add size, inventory edit save guard, Undo Last Pay wiring) |
 | `@311` | Audit fix batch: runs 27-37 — all open BUG findings closed (see session summary below) |
+| `@312` | Fix BUG 5510 + BUG 6154 from CCR audit run 37 re-audit (see session summary below) |
+
+---
+
+## Session Summary (2026-06-19 — audit run 37 re-audit, deploy @312)
+
+### CCR audit new findings from origin/audit-findings
+
+The audit agent re-ran section 11 (Index.html lines 4501–6000, gold/delerium UI) and pushed new findings to the `audit-findings` branch. Two new BUGs were confirmed real and fixed:
+
+### `goldSheetMutated` synchronous fix (BUG 5510)
+
+`receivedGold`, `confirmPayWithReason`, and `splitGold` all set `goldSheetMutated = true` only inside their success handlers. `closeGoldSheet` checks `if (goldSheetMutated) renderInventory()`. If the user closes the sheet before the round-trip returns, the flag is still `false` → dashboard `Gold = X gp` total stays stale until the user manually triggers a re-render (the writer's own sync-skip also prevents the poll from correcting it).
+
+Additionally, `receivedGold` and `confirmPayWithReason` never called `renderInventory()` in their success handlers, so the dashboard wasn't refreshed even when the sheet stayed open.
+
+Fix: set `goldSheetMutated = true` synchronously right after the optimistic render in all three functions; added `renderInventory()` to `receivedGold` and `confirmPayWithReason` success handlers.
+
+### Pay→Purchase Undo never armed (BUG 6154)
+
+`confirmPayWithReason`'s `onSuccess` only set `lastResourceUndo['gold']` when `isTreasurer && res.poolDeduct`. A Purchase routes to `apiDepleteResource` which returns `res.item` but no `res.poolDeduct` → undo token never set → "↩ Undo Last Pay" button never appears for the most common pay type. Also: success handlers only called `renderGoldSheetBody()`, not `renderGoldSheetButtons()`, so even member-pays (where undo was set) didn't show the button until scope toggle or sheet reopen.
+
+Fix: extended undo-token gate to also handle `!isMember && res.item`; added `renderGoldSheetButtons()` call in `onSuccess` after setting the token.
+
+### New open RISK (RISK 5427)
+
+In DM character scope, `renderGoldSheetButtons` renders Got Paid / Pay / Split unconditionally. `goldSheetScope` equals the DM's character name in that scope, so tapping Got Paid silently creates a gold row attributed to the DM character (not the party pool). Not a data-loss bug (the row shows in grand-total view) but misattributed and invisible to the party-pool view. Added to open RISK list.
 
 ---
 
@@ -605,6 +632,7 @@ Fix:
    - RISK 6029: sell-batch 1.5 s auto-close timer has no generation counter — can close a re-opened sheet
    - RISK 6435: ledger note-edit falls back to Timestamp for same-second multi-row ops (ambiguous)
    - RISK Code.js:135: two note backends coexist without documentation (CAMPAIGN_NOTES_FEED vs NOTES)
+   - RISK 5427: DM gold scope shows write buttons (Got Paid/Pay/Split) — DM tapping them creates gold attributed to DM character name instead of party pool
 
 8. **"Give to…" rollup limitation** — moves only the representative row. Needs a dedicated server-side multi-row move endpoint for full FIFO give.
 
@@ -612,4 +640,4 @@ Fix:
 
 10. **Audit cursor** — currently at section 12: `Index.html lines 6001–7500` (inventory groups, description sheet, sell batch). New findings will appear at the top of `FINDINGS.md`.
 
-11. **Version limit** — currently at `@311`; prune old versions at `script.google.com` when approaching 200.
+11. **Version limit** — currently at `@312`; prune old versions at `script.google.com` when approaching 200.
