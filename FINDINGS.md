@@ -47,7 +47,7 @@ execution-trace + state-machine on each write path):
   restored on both failure branches, sheet kept open for retry, `_inFlightWrites`
   paired. Clean.
 
-#### BUG · Index.html:7774 · `searchEquipment` ⇄ `loadEquipmentIndex` infinite mutual recursion during a cold (uncached) library load
+#### ~~BUG · Index.html:7774 · `searchEquipment` ⇄ `loadEquipmentIndex` infinite mutual recursion during a cold (uncached) library load~~ FIXED
 Story: **Add library item**, the *search* step, under failure/timing. When the
 equipment index has not yet loaded but a fetch is already in flight
 (`equipmentIndexLoaded === false && equipmentIndexLoading === true`), typing in
