@@ -1,9 +1,105 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 1. Code.js lines 1–500 (config, helpers, validation)
+Next section: 2. Code.js lines 501–1100 (auth, character, inventory read)
 
 ## Sessions
+
+### 2026-06-19 (run 27) — Sections audited: 1
+
+Section 1 = Code.js lines 1–500 (config, helpers, validation). This range holds
+the CONFIG object, the sheet-header constants, `QUICK_ADD_ITEMS`,
+`DELERIUM_SIZE_VALUES`, `APPROVED_INVENTORY_CATEGORIES`, the admin menu
+(`onOpen`), the web-app entry (`doGet`/`include_`), and the admin-only
+setup/import tooling (`setupInventoryTabs`, `resetAppDataSheets`,
+`setupLookupsSheet_`, `resetCleanEquipmentLibrary`, `continueCleanEquipmentLibrary`).
+The validation/helper *functions* the section title alludes to (`safeText_`,
+`validateText_`, `validateMoney_`, `normalizeInventoryCategory_`,
+`requireAllowedUser_`, etc.) are all defined past line 500, so no user-facing
+write path executes inside 1–500. The story-surface here is the **constants and
+maps** that the catalog write paths consume; each story below was traced from
+its client tap through to the server code that reads a section-1 constant, then
+back, to confirm the config is internally consistent and mirrored correctly on
+the client.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, with
+execution-trace + state-machine on the consuming write path):
+
+- **Add library item (quick-add)** — client mirror at `Index.html:2855-2861`
+  sends `quickKey` → server `getQuickAddDefinition_` (1813) → `QUICK_ADD_ITEMS`
+  (53) → `apiQuickAddInventory` (2632).
+- **Add custom item** — category dropdown sourced from
+  `APPROVED_INVENTORY_CATEGORIES` (30) via `apiGetInventoryCategories` (885) →
+  `apiAddCustomInventory` (2533) → `normalizeInventoryCategory_` (993).
+- **Quick-adjust currency / delerium** — `getQuickEditType` (Index.html:7094)
+  classifies the existing row; server validates sizes against
+  `DELERIUM_SIZE_VALUES` (43) in `apiAdjustInventory`/quick-add paths
+  (2664, 2791, 3775).
+- **Create note** — touches the section-1 `CAMPAIGN_NOTES_HEADERS` constant
+  (135); traced to disambiguate the two coexisting note backends (below).
+
+#### RISK · Code.js:135 · Two parallel note backends share no schema; only one is documented
+`CAMPAIGN_NOTES_HEADERS` (5 columns: Note ID · Created At · Updated At ·
+Updated By · Body) backs the **legacy** "campaign notes" feature on the
+`CAMPAIGN_NOTES_FEED` sheet (`CONFIG.NOTES_SHEET`, line 22), consumed by
+`apiGetCampaignNotes`/`apiAddCampaignNote`/`apiUpdateCampaignNote`/
+`apiDeleteCampaignNote` (Code.js 1994–2191) and live in the client at
+`Index.html:3407/3589/3861/3893`. Separately, `PARTY_CAMPAIGN_NOTES_HEADERS`
+(11 columns, defined at 2248) backs the **current** Party Notes feature on the
+`NOTES` sheet (`PARTY_NOTES_SHEET`, 2255), consumed by
+`apiGetNotes`/`apiCreateNote`/`apiUpdateNote`/`apiArchiveNote` (2282–2436) and
+live in the client at `Index.html:4452/4649/4686/4605`. Both backends are wired
+and reachable; the README's "Party Notes" section documents only the 11-column
+schema and never mentions the 5-column legacy store. No behavioral bug today —
+each API set is internally consistent and writes to its own sheet — but the
+silent coexistence is a real maintenance hazard: a future edit to "the notes
+sheet" can easily target the wrong store, and the Create-note story's
+single-Body legacy form (`apiAddCampaignNote({body})`) drops every field the
+Party Notes form collects (title/category/tags/pinned). Recommend documenting
+the split (or retiring the legacy feature) and renaming one constant so the two
+are not confused at a glance.
+
+#### RISK · Code.js:290 · `resetAppDataSheets` wipes the CHARACTERS roster (and Email column), breaking identity for every player
+`resetAppDataSheets` (290) calls
+`clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.CHARACTERS_SHEET), CHARACTERS_HEADERS)`
+at line 300 — it clears the roster, including the `Email` column that
+`apiGetMyCharacter`/`getEmailForCharacter_` depend on for identity resolution.
+The README "Reset Script" section advertises that reset "preserves CHARACTERS
+and equipment library sheets," but that promise belongs to `Reset.js`'s
+`resetCampaignData()`; this *separate* `resetAppDataSheets` does the opposite.
+It is not exposed in the `onOpen` menu (only callable from the Apps Script
+editor), so blast radius is limited to an admin who runs the wrong function —
+but the consequence is severe (all players fall back to the identity overlay
+and lose character→email scoping until the roster is re-entered). Recommend
+dropping CHARACTERS from the cleared list here, or renaming the function to make
+its destructiveness explicit.
+
+#### Note · Code.js:53 · Quick-add config parity (client ↔ server) is clean; delerium/currency quick-add is intentionally absent
+Verified that the 7 `QUICK_ADD_ITEMS` server entries (53–61) match the client
+mirror at `Index.html:2855-2861` on `quickKey`, `name`, `category`, `rarity`,
+and `valueGp` (health 50 / greater-health 150 / rations 0.5 / others blank), so
+the **Add library item (quick-add)** optimistic row renders the same values the
+server persists. `getQuickAddDefinition_` (1813) only ever returns one of these
+7, none of which carry `editType` `'currency'` or `'delerium crystal'`; the
+client likewise exposes no delerium/currency quick-ADD tile (those editTypes
+come from `getQuickEditType` on an existing row, i.e. the quick-*adjust* flow).
+The `editType === 'currency' || 'delerium crystal'` ledger branch inside
+`apiQuickAddInventory` (2700–2714) is therefore unreachable defensive code, not
+a live path — no behavioral issue, recorded here only to close the trace and
+explain why the run-26 "delerium quick-add size" fix has no remaining server
+consequence.
+
+#### Note · Code.js:993 · Custom-item category validation closes cleanly over the approved set
+`normalizeInventoryCategory_` (993) returns `map[normalized] || value || 'Other'`.
+All 10 `APPROVED_INVENTORY_CATEGORIES` values lowercase to keys present in the
+map (`armor / shield`, `weapon`, `potion`, `scroll`, `wondrous item`,
+`ammunition`, `tool / gear`, `currency`, `delerium`, `other`), so the **Add
+custom item** story — whose dropdown is populated *from* that approved list —
+always round-trips its category unchanged. (Worth noting for later sections: an
+*unmapped* category passes through verbatim rather than collapsing to `Other`,
+so library imports or future callers that supply a non-approved category would
+store it raw; harmless for the catalog stories because client-side inventory
+grouping is name-heuristic-driven, not server-category-driven.)
 
 ### 2026-06-19 (run 26) — Sections audited: 13
 
