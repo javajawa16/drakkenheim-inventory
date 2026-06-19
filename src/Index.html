@@ -5440,14 +5440,21 @@
         return;
       }
       const showSplit = isTreasurer && (goldSheetScope === 'party' || isDMUser);
+      const showUndo  = isTreasurer && lastResourceUndo['gold'];
       container.innerHTML = `
         <div style="display:flex;gap:10px;margin-top:14px;">
           <button class="success" style="flex:1;" type="button" onclick="receivedGold()">Got Paid</button>
           <button class="danger"  style="flex:1;" type="button" onclick="openPayReasonSheet()">Pay</button>
         </div>
         ${showSplit ? `<button class="secondary" style="width:100%;margin-top:8px;" type="button" onclick="splitGold()">Split Evenly</button>` : ''}
+        ${showUndo  ? `<button class="secondary" style="width:100%;margin-top:8px;" type="button" onclick="undoGoldPay()">↩ Undo Last Pay</button>` : ''}
         <button class="secondary" style="width:100%;margin-top:8px;" type="button" onclick="closeGoldSheet()">Done</button>
       `;
+    }
+
+    function undoGoldPay() {
+      undoResourcePay('gold');
+      renderGoldSheetButtons();
     }
 
     function receivedGold() {
@@ -6143,6 +6150,9 @@
         if (res.item) primeInventoryCacheAfterAdd(res.item);
         if (res.ledgerEntry) {
           inventoryResourceLedger = [res.ledgerEntry, ...inventoryResourceLedger].slice(0, 60);
+        }
+        if (isTreasurer && res.poolDeduct) {
+          lastResourceUndo['gold'] = { item: res.poolDeduct, ledgerEntry: res.ledgerEntry };
         }
         cacheInventoryRows(inventoryRows, inventoryResourceLedger);
         goldSheetMutated = true;
@@ -6934,6 +6944,7 @@
               applyItemToDescSheet_(item);
             })
             .withFailureHandler(() => {
+              if (!selectedInventory || selectedInventory['Inventory ID'] !== capturedId) return;
               itemCache[libraryItemId] = null;
               descStatus.textContent = '';
             })
@@ -7400,8 +7411,10 @@
       button.disabled = true;
       status.textContent = 'Saving…';
 
+      _inFlightWrites++;
       google.script.run
         .withSuccessHandler(res => {
+          _inFlightWrites--;
           button.disabled = false;
           if (!res || !res.ok) {
             status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Save failed.')}</span>`;
@@ -7413,6 +7426,7 @@
           renderInventory();
         })
         .withFailureHandler(err => {
+          _inFlightWrites--;
           button.disabled = false;
           status.innerHTML = `<span class="error">Save failed: ${escapeHtml(err.message || err)}</span>`;
         })
@@ -8114,6 +8128,9 @@
       };
       const isQuickAdd = Boolean(quickKey);
       const isCustomAdd = isCustomItem(selectedEquipment);
+      // Capture size before clearAddForm() strips the active class from #quickAddSizeField
+      const capturedSize = isQuickAdd && document.getElementById('quickAddSizeField').classList.contains('active')
+        ? document.getElementById('quickAddSize').value : '';
       const payloadSnapshot = { ...payload };
       const selectedSnapshot = selectedEquipment ? { ...selectedEquipment } : null;
 
@@ -8167,6 +8184,7 @@
             document.getElementById('valueGp').value = payloadSnapshot.valueGp || '';
             document.getElementById('factionRelevance').value = payloadSnapshot.factionRelevance || '';
             document.getElementById('notes').value = payloadSnapshot.notes || '';
+            if (capturedSize) { const _sz = document.getElementById('quickAddSize'); if (_sz) _sz.value = capturedSize; }
             const _scrollRestore = String(payloadSnapshot.item || '').match(/^Scroll of (.+)$/i);
             if (_scrollRestore) { setScrollMode_(true); document.getElementById('scrollSpellName').value = _scrollRestore[1]; handleScrollSpellInput(); }
             updateAddFlow();
@@ -8203,6 +8221,7 @@
           document.getElementById('valueGp').value = payloadSnapshot.valueGp || '';
           document.getElementById('factionRelevance').value = payloadSnapshot.factionRelevance || '';
           document.getElementById('notes').value = payloadSnapshot.notes || '';
+          if (capturedSize) { const _sz = document.getElementById('quickAddSize'); if (_sz) _sz.value = capturedSize; }
           const _scrollRestoreFail = String(payloadSnapshot.item || '').match(/^Scroll of (.+)$/i);
           if (_scrollRestoreFail) { setScrollMode_(true); document.getElementById('scrollSpellName').value = _scrollRestoreFail[1]; handleScrollSpellInput(); }
           document.getElementById('addStatus').innerHTML = `<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`;
@@ -8218,9 +8237,7 @@
           valueGp: payload.valueGp,
           factionRelevance: payload.factionRelevance,
           notes: payload.notes,
-          size: document.getElementById('quickAddSizeField').classList.contains('active')
-            ? document.getElementById('quickAddSize').value
-            : '',
+          size: capturedSize,
           clientCharacter: myCharacterName || '',
           _syncClientId: syncClientId
         });
