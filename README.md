@@ -5,7 +5,7 @@ Local working repo for the **Wieners of Drakkenheim** D&D campaign inventory web
 - **Spreadsheet**: `1DRs3BhuiAdojDBonns42b8FRPEBLNdjH2z8AUfW5U0o`
 - **Apps Script project**: `1yXM9QmYIftBAuMunK-ehpebnXqv4qzGHgsJt_-rznRrjPvRN0ANuJxxt`
 - **Web app deployment ID**: `AKfycbx3D0qyi20ijwdCc7sFNnwfFqcAASNASfUaQD5fcA3PFujB9wAyXeaKDT3yqhfhUAN8`
-- **Current version**: `@306`
+- **Current version**: `@311`
 
 ## Layout
 
@@ -181,7 +181,6 @@ npm install          # one-time: installs clasp + xlsx
 
 ## Known TODOs
 
-- **Deploy pending** — multiple sessions of fixes have accumulated since `@306`. Run `.\scripts\clasp-push.ps1` then `.\scripts\clasp-deploy-webapp.ps1 "audit fix batch"` before the next session.
 - Delete `temp_patch.py` (one-shot patch, no longer needed)
 - Import `equipment_library_5e.xlsx` into `EQUIPMENT_LIBRARY_CLEAN` sheet to activate the full 5e item stat blocks
 - Swipe-delete has no undo — consider inline confirmation (same pattern as 0 gp delerium sell)
