@@ -55,7 +55,7 @@ execution-trace + state-machine on every write path):
   `apiCombineInventoryItems`. Non-optimistic ("Combining…"); failure restores
   `pendingCombineChoice` for retry.
 
-#### BUG · Index.html:6297 · Failed Undo Last Pay is silent and leaves gold sheet inconsistent
+#### ~~BUG · Index.html:6297 · Failed Undo Last Pay is silent and leaves gold sheet inconsistent~~ FIXED
 Story: **Undo last pay**, failure-at-step. `undoResourcePay` optimistically
 removes the deduct inventory row + ledger entry, clears `lastResourceUndo`, and
 calls `apiDeleteInventory`. If the server delete fails, `rollback()` (6297)
@@ -182,7 +182,7 @@ execution-trace + state-machine on every write path reached):
   exactly matches the server's combine constraint (3360-3366), so a suggested
   combine never gets rejected for a key mismatch.
 
-#### BUG · Index.html:6427 · Edit/edit-delete only mutate the representative row of a multi-row rollup
+#### ~~BUG · Index.html:6427 · Edit/edit-delete only mutate the representative row of a multi-row rollup~~ FIXED
 Story: **Edit inventory item** (and edit-form **Delete**). Cards are rendered
 from `rollupInventoryRows` (6164), which visually merges every raw row sharing
 `Item|Category|Rarity` into one card with the summed Qty. Combining duplicates

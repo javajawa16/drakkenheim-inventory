@@ -6302,6 +6302,10 @@
         cacheInventoryRows(inventoryRows, inventoryResourceLedger);
         lastResourceUndo[resource] = undo;
         renderInventory();
+        renderGoldSheetBody();
+        renderGoldSheetButtons();
+        const statusEl = document.getElementById('goldSheetStatus');
+        if (statusEl) statusEl.innerHTML = '<span class="error">Undo failed — payment was not reversed.</span>';
       }
 
       google.script.run
@@ -6438,6 +6442,20 @@
       }
 
       syncInventoryEditorFieldsFromRow(row);
+
+      const rollupCount = inventoryRows.filter(r => getInventoryRollupKey(r) === getInventoryRollupKey(row)).length;
+      if (rollupCount > 1) {
+        const hint = `${rollupCount} separate additions — use the description sheet to adjust quantity or remove.`;
+        ['editQty', 'sheetEditQty'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.readOnly = true;
+        });
+        ['editStatusMessage', 'sheetEditStatusMessage'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.innerHTML = `<span class="error" style="font-size:.85em">${hint}</span>`;
+        });
+      }
+
       setInventoryEditorOpen(true);
 
       if (!isMobileLayout()) {
@@ -7077,13 +7095,18 @@
 
       // Safety gate: require an extra confirm tap before wiping a multi-qty row.
       if (!shouldDecrement && currentQty > 1 && !opts.deleteConfirmed) {
+        const rollupCount = existingRow ? inventoryRows.filter(r => getInventoryRollupKey(r) === getInventoryRollupKey(existingRow)).length : 1;
         if (status) {
-          status.innerHTML = `<span class="error">Removes all ${currentQty}×.</span>`;
+          if (rollupCount > 1) {
+            status.innerHTML = `<span class="error">Removes 1 of ${rollupCount} additions (${currentQty}×). Use description sheet to remove all.</span>`;
+          } else {
+            status.innerHTML = `<span class="error">Removes all ${currentQty}×.</span>`;
+          }
           const confirmBtn = document.createElement('button');
           confirmBtn.type = 'button';
           confirmBtn.className = 'danger';
           confirmBtn.style.cssText = 'display:block;width:100%;margin-top:6px;';
-          confirmBtn.textContent = 'Confirm delete all';
+          confirmBtn.textContent = rollupCount > 1 ? 'Confirm delete this addition' : 'Confirm delete all';
           const capturedId = inventoryId;
           confirmBtn.addEventListener('click', () => deleteSelectedInventory(capturedId, { deleteConfirmed: true }));
           status.appendChild(confirmBtn);
