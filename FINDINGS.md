@@ -1,9 +1,84 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 2. Code.js lines 501–1100 (auth, character, inventory read)
+Next section: 3. Code.js lines 1101–1700 (inventory write — add, edit, delete)
 
 ## Sessions
+
+### 2026-06-19 (run 28) — Sections audited: 2
+
+Section 2 = Code.js lines 501–1100 (auth, character, inventory read). The titled
+"inventory read" (`apiGetInventory`) actually lives at 1958 (section 4); the read
+APIs physically in this range are `apiSearchEquipment` (595, dead — client uses
+`apiGetEquipmentIndex` at 7682 only), `apiGetEquipmentIndex` (632),
+`apiGetEquipmentItem`/`apiGetItemDetails` (655/878), `apiGetCharacters` (762),
+`apiGetMyCharacter`/`apiSetMyCharacter`/`apiForgetMyCharacter` (830/859/868),
+`apiGetCategories`/`apiGetQuickAddItems` (882/891). The one write path in-range is
+`apiSellInventoryBatch` (671). Identity helpers `resolveIdentityForCharacter_`
+(1282), `getUserProfileForKey_` (1307), `saveUserProfile_` (1331) read outside
+the range.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, with
+execution-trace + state-machine on each write/read path):
+
+- **View item details** — tap card → `openDescriptionSheet` (Index.html:6905) →
+  `apiGetEquipmentItem` (655) → `getEquipmentItemById_` (1745). Found the BUG
+  below (failure poisons `itemCache`) and the RISK below (blank body on failure).
+- **Add library item (search → select → preview)** — `apiGetEquipmentIndex` (632)
+  loads the in-memory index once; client filters locally; select fires
+  `apiGetEquipmentItem` (8099). Failure path here is clean (does NOT cache null —
+  see BUG contrast).
+- **Sell item / Sell Items batch** — `apiSellInventoryBatch` (671). Re-traced:
+  validates `goldAmount`/`note`/`character` (681–683) BEFORE any mutation, resolves
+  all rows up front, sorts highest-row-first so `deleteRow` shifting only touches
+  already-processed rows, `tryLock(10000)` with `finally` release on every path.
+  Gold append re-reads headers post-delete. Clean — no new finding (prior clamp +
+  lock findings already FIXED/confirmed at lines 304, 746, 869, 927).
+- **Give item to character** — dropdown sourced from `apiGetCharacters` (762);
+  `loadCharacters` (2927) failure handler degrades to "Party / shared" only
+  (already noted, line 205). DM rows split into `dmRows`; non-DM `rows` feed the
+  give/holder selectors — intended.
+- **Identity (first open + remembered)** — `apiGetMyCharacter` (830): temp-key
+  profile → email → client hint, in that order; `resolveIdentityForCharacter_`
+  computes treasurer from `getAdminEmails_().includes(email)` or DM prefix.
+  `getUserProfileForKey_` writes `Last Seen` inside a read (already noted, 652).
+  No new finding.
+
+#### BUG · Index.html:6948 · Description-sheet detail failure caches `null`, poisoning `itemCache` and blocking retry for the session
+Story: **View item details**, failure-at-step (the `apiGetEquipmentItem` round-trip).
+The failure handler does `itemCache[libraryItemId] = null` (6948). The gate at 6931
+treats any *defined* value (including `null`) as "known", so a single transient
+network failure permanently routes every future open of that item to
+`applyItemToDescSheet_(null)` → "No description available." with the stat block
+hidden, for the rest of the session, even after the network recovers — the server
+is never retried. Worse, `itemCache` is shared with the **Add library item**
+preview (8063): a poisoned `null` makes 8064 skip the `Object.assign` and show
+"Description loaded." over a stat-block-less form, silently hiding the real library
+data there too. The Add path proves the intended contract: its handlers cache
+`res.item` only on success (8087) and never cache on failure (8093–8098). The
+description sheet should match — only the **success** handler legitimately caches
+(including `null` for a genuine not-found at 6942–6943, which correctly avoids
+re-fetching a truly missing item). Fix: drop the `itemCache[libraryItemId] = null`
+write from the failure handler at 6948 so the next open retries; keep the
+`capturedId` guard.
+
+#### RISK · Index.html:6936 · Detail-fetch failure with no user notes leaves the description body blank instead of a fallback message
+Story: **View item details**, failure-at-step. Pre-fetch, `descText` is set to
+`userNotes || ''` (6936). On failure the handler only clears `descStatus` (6949)
+and never repaints `descText`, so an item with no notes shows a completely blank
+sheet body — no "No description available.", no error. The success-with-null path
+(item not found) shows "No description available." via `mergeDescAndNotes_('', '')`
+(6918). Inconsistent feedback for two outcomes the user can't distinguish. Fix:
+in the failure handler set `descText.textContent = userNotes || 'No description
+available.'` (and, if combined with the BUG fix, optionally leave a retry-on-next-open
+path). Cosmetic-but-confusing, hence RISK.
+
+#### Note · Code.js:671 · `apiSellInventoryBatch` write ordering re-confirmed clean (Sell item / Sell batch)
+Validation precedes mutation; rows resolved before any delete; highest-row-first
+ordering makes `deleteRow` index-shift safe; lock acquired with `tryLock(10000)`
+and released in `finally` on success, error, and busy paths. Gold row + ledger +
+audit + `bumpSync_` all fire only after successful drains. No data-loss or
+partial-rollback gap found in this section's pass.
 
 ### 2026-06-19 (run 27) — Sections audited: 1
 
