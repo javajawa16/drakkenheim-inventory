@@ -1,9 +1,34 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 13. Index.html lines 7501–end (add item flow, custom item, form handling)
+Next section: 1. Code.js lines 1–500 (config, helpers, validation)
 
 ## Sessions
+
+### 2026-06-19 (run 26) — Sections audited: 13
+
+Section 13 = Index.html 7501–end (add item flow, custom item, form handling), the last section before the cursor wraps to 1. Stories traced through this range, each happy → failure-at-step → navigate-away → friction with execution-trace + state-machine on every write path:
+
+- **Add library item** (`searchEquipment` 7681 → `selectEquipmentResult` 7772 → `loadSelectedDescription` 8042 → `addInventoryItem` 8088 → combine via `findDuplicateInventoryCandidate`/`showCombineChoice`)
+- **Add custom item** (`startCustomItem` 7951 / `customizeSelectedItem` 7979 → `addInventoryItem` → `apiAddCustomInventory`)
+- **Add library item (quick-add / delerium size variant)** (`fillAddFormFromEquipment` 7792 delerium branch → `addInventoryItem` → `apiQuickAddInventory`)
+- **Swipe delete / remove-one tail** (`apiAdjustInventory` / `apiDeleteInventory` optimistic block 7505–7565, already covered in run 24/25 but re-verified here for rollback symmetry)
+- Cross-cutting **sync interference**, **tab-switch in-flight**, and **iOS background/foreground** (`visibilitychange` 8335) where they intersect the add write path.
+
+#### BUG · Index.html:8221 · Delerium quick-add always sends `size: ''` — `clearAddForm()` runs before the runner reads the active-class
+Story: **Add library item** (quick-add path, delerium crystal variant). In `addInventoryItem`, `clearAddForm()` is called at line 8143 — synchronously, before the server runner is dispatched. `clearAddForm` removes the active class from `#quickAddSizeField` (line 8262). The `apiQuickAddInventory` call is then built at 8212–8226 and reads the size like this:
+```
+size: document.getElementById('quickAddSizeField').classList.contains('active')
+  ? document.getElementById('quickAddSize').value
+  : '',
+```
+By the time this line executes, the active class has already been stripped, so the ternary always evaluates to `''`. The server (`apiQuickAddInventory`, Code.js:2662) uses `payload.size` to build the item name (`Delerium Geode` → falls back to a generic name when blank, Code.js:2668-2669), the ledger `subtype` (2705), and the "Size: …" note (2674). Net effect: a user who opens Add Item, selects a delerium crystal quick-add, picks a size from the dropdown, and taps Add gets a generic crystal (server falls back to `quick.size || 'crystal'`) — their size selection is silently dropped on every add. Fix: capture the size into a local variable *before* `clearAddForm()` (e.g. read it alongside `quickKey` at the top of `addInventoryItem`), and pass that captured value into `apiQuickAddInventory`. The same root cause means the failure-restore path can't recover the size either (see RISK below).
+
+#### RISK · Index.html:8158 · Add-failure restore re-derives quick-add size from the item *name*, losing a user's dropdown override
+Story: **Add library item** (quick-add delerium), failure-at-step. When the add fails, both the `!res.ok` branch (8158) and the failure handler (8192) restore the form via `fillAddFormFromEquipment(selectedSnapshot, false)`. For a delerium quick-add that helper re-derives the size purely from the item *name* (7852-7861), so it reactivates the size field but resets the dropdown to the name-implied default. If the user had changed the dropdown to a different size before submitting, that choice is gone after a failed add — they must re-pick before retrying. Lower severity than the BUG above only because the BUG already prevents the size from reaching the server at all; once the BUG is fixed by snapshotting the size, the restore path should restore that same snapshot rather than re-deriving from the name.
+
+#### Note · Index.html:8088 · Add-item rollback, in-flight balance, and double-tap guard are clean
+`addInventoryItem` was traced end-to-end for the **Add library item** and **Add custom item** stories. Confirmed clean: the optimistic row (`_opt_` id, 8121-8138) is removed in all three terminal branches (success-ok 8154, success-not-ok 8154, failure 8188); `_inFlightWrites` is incremented once (8149) and decremented on every path (8152 / 8187), so the in-flight counter cannot leak from this flow; both failure branches fully restore `selectedEquipment` and every form field from `payloadSnapshot`/`selectedSnapshot` (incl. scroll spell reconstruction 8170/8206), so the user can retry without reloading. Double-tap on Add is guarded structurally: `clearAddForm()` (8143) empties `#item` before the round-trip resolves, so a second tap hits the empty-name guard at 8093 and aborts rather than double-posting. Combine suggestion (`findDuplicateInventoryCandidate`/`showCombineChoice`, 8183-8184) correctly fires only on the success-ok branch after the real server row is primed. Navigate-away during the round-trip is safe: the optimistic row already lives in `inventoryRows` + cache, and the success handler renders unconditionally (8181) so the confirmed row appears on return.
 
 ### 2026-06-19 (run 25) — Sections audited: 12
 
