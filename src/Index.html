@@ -4592,14 +4592,14 @@
           _notesActionInFlight.delete(noteId);
           _inFlightNoteWrites--;
           if (!res || !res.ok) {
-            if (backup !== null && idx >= 0) { notesData.splice(idx, 0, backup); renderNotesList(); }
+            if (backup !== null && !notesData.some(n => n.noteId === backup.noteId)) { notesData.unshift(backup); renderNotesList(); }
             setMainStatus(`<span class="error">Delete failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
           }
         })
         .withFailureHandler(() => {
           _notesActionInFlight.delete(noteId);
           _inFlightNoteWrites--;
-          if (backup !== null) { notesData.splice(idx >= 0 ? idx : notesData.length, 0, backup); renderNotesList(); }
+          if (backup !== null && !notesData.some(n => n.noteId === backup.noteId)) { notesData.unshift(backup); renderNotesList(); }
           setMainStatus('<span class="error">Delete failed — please try again.</span>');
         })
         .apiArchiveNote({ noteId, _syncClientId: syncClientId });
@@ -4634,7 +4634,8 @@
             _inFlightNoteWrites--;
             notesSaving = false;
             if (!res || !res.ok) {
-              if (backup && idx >= 0) notesData[idx] = backup;
+              const ri = notesData.findIndex(x => x.noteId === notesFormNoteId);
+              if (backup && ri >= 0) notesData[ri] = backup;
               renderNotesList();
               setMainStatus(`<span class="error">Save failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
             }
@@ -4642,12 +4643,14 @@
           .withFailureHandler(() => {
             _inFlightNoteWrites--;
             notesSaving = false;
-            if (backup && idx >= 0) notesData[idx] = backup;
+            const ri = notesData.findIndex(x => x.noteId === notesFormNoteId);
+            if (backup && ri >= 0) notesData[ri] = backup;
             renderNotesList();
             setMainStatus('<span class="error">Save failed — please try again.</span>');
           })
           .apiUpdateNote({ noteId: notesFormNoteId, patch: { Category: category, Title: title, Note: note, Tags: tags, Pinned: pinned, 'Related Item ID': relatedItemId }, _syncClientId: syncClientId });
       } else {
+        const savedContent = { title, category, note, tags, pinned, relatedItemId };
         const tempId = 'NOTE_TEMP_' + Date.now();
         const optimistic = { noteId: tempId, title, category, note, tags, pinned,
           relatedItemId, author: myCharacterName || '', createdAt: now, updatedAt: now, archived: false };
@@ -4656,6 +4659,18 @@
         closeNoteForm();
         renderNotesList();
         _inFlightNoteWrites++;
+
+        function restoreNoteForm_() {
+          notesData = notesData.filter(x => x.noteId !== tempId);
+          renderNotesList();
+          openNoteForm('add', null, savedContent.relatedItemId);
+          document.getElementById('noteFormTitle').value    = savedContent.title;
+          document.getElementById('noteFormCategory').value = savedContent.category;
+          document.getElementById('noteFormBody').value     = savedContent.note;
+          document.getElementById('noteFormTags').value     = savedContent.tags;
+          document.getElementById('noteFormPinned').checked = savedContent.pinned;
+        }
+
         google.script.run
           .withSuccessHandler(res => {
             _inFlightNoteWrites--;
@@ -4671,17 +4686,17 @@
               lastNotesLoadAt = Date.now();
               renderNotesList();
             } else {
-              if (tidx >= 0) notesData.splice(tidx, 1);
-              renderNotesList();
-              setMainStatus(`<span class="error">Save failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
+              restoreNoteForm_();
+              const s = document.getElementById('noteFormStatus');
+              if (s) s.innerHTML = `<span class="error">Save failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`;
             }
           })
           .withFailureHandler(() => {
             _inFlightNoteWrites--;
             notesSaving = false;
-            notesData = notesData.filter(x => x.noteId !== tempId);
-            renderNotesList();
-            setMainStatus('<span class="error">Save failed — please try again.</span>');
+            restoreNoteForm_();
+            const s = document.getElementById('noteFormStatus');
+            if (s) s.innerHTML = '<span class="error">Save failed — please try again.</span>';
           })
           .apiCreateNote({ title, category, note, tags, pinned, relatedItemId, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
       }
@@ -4701,7 +4716,7 @@
           _notesActionInFlight.delete(noteId);
           _inFlightNoteWrites--;
           if (!res || !res.ok) {
-            if (backup) notesData.splice(idx, 0, backup);
+            if (backup && !notesData.some(n => n.noteId === backup.noteId)) notesData.unshift(backup);
             renderNotesList();
             alert('Archive failed: ' + escapeHtml((res && res.error) || 'Unknown error'));
           }
@@ -4709,7 +4724,7 @@
         .withFailureHandler(() => {
           _notesActionInFlight.delete(noteId);
           _inFlightNoteWrites--;
-          if (backup) notesData.splice(idx, 0, backup);
+          if (backup && !notesData.some(n => n.noteId === backup.noteId)) notesData.unshift(backup);
           renderNotesList();
           alert('Archive failed — please try again.');
         })
@@ -6011,20 +6026,7 @@
           }
           status.innerHTML = `<span class="success">${escapeHtml(res.message || 'Sold!')}</span>`;
 
-          // Optimistic: remove/decrement sold rows immediately
-          const soldIds = {};
-          items.forEach(i => { soldIds[i.inventoryId] = i.qtyToSell; });
-          const updatedRows = [];
-          inventoryRows.forEach(r => {
-            const sell = soldIds[r['Inventory ID']];
-            if (!sell) { updatedRows.push(r); return; }
-            const newQty = toNumber(r['Qty'] || 1) - sell;
-            if (newQty > 0) updatedRows.push({ ...r, 'Qty': newQty });
-          });
-          inventoryRows = updatedRows;
           if (res.goldItem) primeInventoryCacheAfterAdd(res.goldItem);
-          cacheInventoryRows(inventoryRows, inventoryResourceLedger);
-          renderInventory();
           loadInventory(true);
           window.setTimeout(() => closeSellBatchSheet(), 1500);
         })
@@ -6192,6 +6194,8 @@
         return;
       }
       const note = (noteInput && noteInput.value) || '';
+      const savedAmount = amountInput ? amountInput.value : '';
+      const savedNote   = noteInput   ? noteInput.value   : '';
       const pendingId = '_pending_' + Date.now();
       const pendingEntry = {
         '_pending': true, '_pendingId': pendingId,
@@ -6213,6 +6217,8 @@
           _inFlightWrites--;
           inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
           if (!res || !res.ok) {
+            if (amountInput) amountInput.value = savedAmount;
+            if (noteInput)   noteInput.value   = savedNote;
             if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Failed.')}</span>`;
             renderGoldSheetBody();
             return;
@@ -6232,6 +6238,8 @@
         .withFailureHandler(err => {
           _inFlightWrites--;
           inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
+          if (amountInput) amountInput.value = savedAmount;
+          if (noteInput)   noteInput.value   = savedNote;
           if (status) status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
           renderGoldSheetBody();
         })
@@ -6945,7 +6953,8 @@
             })
             .withFailureHandler(() => {
               if (!selectedInventory || selectedInventory['Inventory ID'] !== capturedId) return;
-              itemCache[libraryItemId] = null;
+              // Don't cache null — let the next open retry the fetch
+              descText.textContent = userNotes || 'No description available.';
               descStatus.textContent = '';
             })
             .apiGetEquipmentItem(libraryItemId);
@@ -7420,10 +7429,10 @@
             status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Save failed.')}</span>`;
             return;
           }
-          status.innerHTML = `<span class="success">${escapeHtml(res.message || 'Saved.')}</span>`;
           updateInventoryRowLocally(payload);
           cacheInventoryRows(inventoryRows);
           renderInventory();
+          closeInventoryPanels(false);
         })
         .withFailureHandler(err => {
           _inFlightWrites--;

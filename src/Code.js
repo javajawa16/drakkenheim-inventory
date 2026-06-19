@@ -297,7 +297,6 @@ function resetAppDataSheets() {
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.RESOURCE_LEDGER_SHEET), RESOURCE_LEDGER_HEADERS);
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.NOTES_SHEET), CAMPAIGN_NOTES_HEADERS);
     clearSheetToHeaders_(getOrCreateSheet_(ss, PARTY_NOTES_SHEET), PARTY_CAMPAIGN_NOTES_HEADERS);
-    clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.CHARACTERS_SHEET), CHARACTERS_HEADERS);
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.LOG_SHEET), [
       'Timestamp',
       'Level',
@@ -323,7 +322,6 @@ function resetAppDataSheets() {
         CONFIG.RESOURCE_LEDGER_SHEET,
         CONFIG.NOTES_SHEET,
         PARTY_NOTES_SHEET,
-        CONFIG.CHARACTERS_SHEET,
         CONFIG.LOG_SHEET
       ],
       preservedSheets: [
@@ -2464,8 +2462,8 @@ function apiAddInventory(payload) {
       'Inventory ID': makeInventoryId_(),
       'Item': validateText_(payload && payload.item ? payload.item : libraryItem.name, 'Item name', 200),
       'Library Item ID': libraryItemId,
-      'Category': normalizeInventoryCategory_(libraryItem.category),
-      'Rarity': safeText_(libraryItem.rarity),
+      'Category': normalizeInventoryCategory_(payload && payload.category !== undefined ? payload.category : libraryItem.category),
+      'Rarity': safeText_(payload && payload.rarity !== undefined ? payload.rarity : libraryItem.rarity),
       'Qty': qty,
       'Holder': validateText_(payload && payload.holder, 'Holder', 80),
       'Shared?': '',
@@ -3440,6 +3438,9 @@ function apiUpdateInventory(payload) {
     const rowObj = {
       ...existingObj,
       'Inventory ID': inventoryId,
+      'Item': validateText_(payload && payload.item === undefined ? existingObj['Item'] : payload.item, 'Item name', 200),
+      'Category': normalizeInventoryCategory_(payload && payload.category === undefined ? existingObj['Category'] : payload.category),
+      'Rarity': validateText_(payload && payload.rarity === undefined ? existingObj['Rarity'] : payload.rarity, 'Rarity', 60),
       'Qty': qty,
       'Holder': validateText_(payload && payload.holder === undefined ? existingObj['Holder'] : payload.holder, 'Holder', 80),
       'Value GP': valueGp,

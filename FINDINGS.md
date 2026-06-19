@@ -284,7 +284,7 @@ its own title. Fix: have Give FIFO-split `descRemoveQty` across rollup rows like
 row), or — if partial give is out of scope — drop the `descRemoveQty` from the title and
 reset the stepper so the UI doesn't promise a quantity it discards.
 
-#### RISK · Index.html:6948 · A transient description fetch failure poisons `itemCache` for the whole session
+#### ~~RISK · Index.html:6948 · A transient description fetch failure poisons `itemCache` for the whole session~~ FIXED
 Story **View item details**, failure-at-step. On first open of an item with a
 `Library Item ID`, `openDescriptionSheet` fires `apiGetEquipmentItem`. The
 `withFailureHandler` (6946) sets `itemCache[libraryItemId] = null` and clears the status
@@ -544,7 +544,7 @@ orphaned credit row. (The dashboard `payResource` path is fine because
 the credit and the deduction (store both IDs, or send a dedicated reversal API), or
 suppress the Undo affordance for member-routed pays.
 
-#### BUG · Index.html:6205 · Failed Split Evenly loses the typed amount and note
+#### ~~BUG · Index.html:6205 · Failed Split Evenly loses the typed amount and note~~ FIXED
 Story **Split gold evenly**, step "server returns !ok or failure". `splitGold` clears
 `goldSheetAmount` and `goldSheetNote` optimistically (6205–6206) but neither the
 success-`!ok` branch (6215–6218) nor the `withFailureHandler` (6232–6236) restores
@@ -599,7 +599,7 @@ execution-trace + state-machine on each write path):
   `apiQuickAddInventory` / `apiDepleteResource`, which call the silent-failure
   `appendResourceLedger_` (RISK below).
 
-#### BUG · Index.html:4650 · Failed note create loses all typed content
+#### ~~BUG · Index.html:4650 · Failed note create loses all typed content~~ FIXED
 Story **Create note**, step "Save → server returns !ok or failure". `saveNoteForm`
 (create branch) builds the optimistic card, then `closeNoteForm()` + `renderNotesList()`
 and fires `apiCreateNote`. On failure it only removes the temp card (`splice(tidx,1)` /
@@ -613,7 +613,7 @@ five form values before `closeNoteForm()`, and on create failure re-open the she
 pre-filled (or keep the sheet open with an inline `noteFormStatus` error until the
 server confirms, mirroring the add-item pattern).
 
-#### RISK · Index.html:4628 · Edit/Archive/Delete note rollback uses a stale array index
+#### ~~RISK · Index.html:4628 · Edit/Archive/Delete note rollback uses a stale array index~~ FIXED
 Stories **Edit note** / **Archive note** (+ `deleteNoteFromForm`). Each captures a
 position index `idx = notesData.findIndex(...)` and, on failure, restores via
 `notesData[idx] = backup` (saveNoteForm edit, 4637/4645) or
@@ -754,7 +754,7 @@ history (and, combined with the BUG above, the orphaned credit row also reappear
 Locally the undo looks clean; a reload exposes the divergence. Consider having the
 undo reverse the ledger entries too, or post a compensating REVERSAL entry.
 
-#### IDEA · Index.html:6028 · Sell-batch does an optimistic update then immediately full-reloads
+#### ~~IDEA · Index.html:6028 · Sell-batch does an optimistic update then immediately full-reloads~~ FIXED
 
 Story: **Sell item / Sell batch**, friction. `confirmSellBatch`'s success handler
 optimistically rebuilds `inventoryRows` (decrement/remove sold rows, prime gold
@@ -817,7 +817,7 @@ execution-trace + state-machine on each write path):
   `cacheInventoryRows` at 6059 runs after `_inFlightWrites++` so it no-ops, but the
   success handler re-caches — harmless).
 
-#### BUG · Code.js:3408 · apiUpdateInventory silently drops Item / Category / Rarity edits
+#### ~~BUG · Code.js:3408 · apiUpdateInventory silently drops Item / Category / Rarity edits~~ FIXED
 **Story: Edit inventory item, at the Save step.** The edit form (desktop `editItem`/
 `editCategory`/`editRarity` at Index.html:2150/2174/2178; mobile `sheetEdit*` at
 2357/2381/2385) exposes Item, Category, and Rarity as plain editable `<input>`s.
@@ -845,7 +845,7 @@ defaulting to existing when undefined, e.g.
 (If renaming/recategorizing is intentionally disallowed, make the inputs readOnly
 instead so the client stops promising a change it can't keep.)
 
-#### RISK · Code.js:2424 · apiAddInventory discards user-edited Category / Rarity on library adds
+#### ~~RISK · Code.js:2424 · apiAddInventory discards user-edited Category / Rarity on library adds~~ FIXED
 Same root cause, lower blast radius. In the Add Item form the `category`/`rarity`
 inputs (Index.html:2297/2301) stay editable after a library item is selected
 (`fillAddFormFromEquipment` at 7806 fills them but does not set readOnly). The
@@ -859,7 +859,7 @@ the edit case (revert is immediate, not delayed), but the user's input is still
 silently dropped. Either honor the payload values for library adds or make those
 inputs readOnly in library mode.
 
-#### IDEA · Index.html:7401 · Edit save leaves the editor open; inconsistent with give/delete
+#### ~~IDEA · Index.html:7401 · Edit save leaves the editor open; inconsistent with give/delete~~ FIXED
 After a successful `saveInventoryEdits`, the success handler shows "Saved." but
 does not close the editor panel (`closeInventoryPanels` is never called), so the
 user must manually dismiss it. The adjacent write flows — `giveItemToCharacter`
@@ -915,7 +915,7 @@ execution-trace + state-machine on each write/read path):
   `getUserProfileForKey_` writes `Last Seen` inside a read (already noted, 652).
   No new finding.
 
-#### BUG · Index.html:6948 · Description-sheet detail failure caches `null`, poisoning `itemCache` and blocking retry for the session
+#### ~~BUG · Index.html:6948 · Description-sheet detail failure caches `null`, poisoning `itemCache` and blocking retry for the session~~ FIXED
 Story: **View item details**, failure-at-step (the `apiGetEquipmentItem` round-trip).
 The failure handler does `itemCache[libraryItemId] = null` (6948). The gate at 6931
 treats any *defined* value (including `null`) as "known", so a single transient
@@ -933,7 +933,7 @@ re-fetching a truly missing item). Fix: drop the `itemCache[libraryItemId] = nul
 write from the failure handler at 6948 so the next open retries; keep the
 `capturedId` guard.
 
-#### RISK · Index.html:6936 · Detail-fetch failure with no user notes leaves the description body blank instead of a fallback message
+#### ~~RISK · Index.html:6936 · Detail-fetch failure with no user notes leaves the description body blank instead of a fallback message~~ FIXED
 Story: **View item details**, failure-at-step. Pre-fetch, `descText` is set to
 `userNotes || ''` (6936). On failure the handler only clears `descStatus` (6949)
 and never repaints `descText`, so an item with no notes shows a completely blank
@@ -1005,7 +1005,7 @@ Party Notes form collects (title/category/tags/pinned). Recommend documenting
 the split (or retiring the legacy feature) and renaming one constant so the two
 are not confused at a glance.
 
-#### RISK · Code.js:290 · `resetAppDataSheets` wipes the CHARACTERS roster (and Email column), breaking identity for every player
+#### ~~RISK · Code.js:290 · `resetAppDataSheets` wipes the CHARACTERS roster (and Email column), breaking identity for every player~~ FIXED
 `resetAppDataSheets` (290) calls
 `clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.CHARACTERS_SHEET), CHARACTERS_HEADERS)`
 at line 300 — it clears the roster, including the `Email` column that
