@@ -2910,9 +2910,10 @@ function apiUpdateLedgerNote(payload) {
 
     const ts       = safeText_(payload && payload.timestamp).trim();
     const resource = safeText_(payload && payload.resource).trim().toLowerCase();
+    const entryId  = safeText_(payload && payload.entryId).trim();
     const notes    = safeText_(payload && payload.notes).slice(0, 500);
 
-    if (!ts) return { ok: false, error: 'Timestamp required.' };
+    if (!ts && !entryId) return { ok: false, error: 'Timestamp required.' };
 
     const ss      = getInventorySpreadsheet_();
     const sheet   = getRequiredSheet_(ss, CONFIG.RESOURCE_LEDGER_SHEET);
@@ -2923,6 +2924,7 @@ function apiUpdateLedgerNote(payload) {
     const headers  = values[0].map(String);
     const tsCol    = headers.indexOf('Timestamp');
     const resCol   = headers.indexOf('Resource');
+    const idCol    = headers.indexOf('Inventory ID');
     const notesCol = headers.indexOf('Notes');
 
     if (tsCol === -1 || notesCol === -1) return { ok: false, error: 'Sheet schema mismatch.' };
@@ -2934,7 +2936,11 @@ function apiUpdateLedgerNote(payload) {
     };
     let rowIdx = -1;
     for (let i = 1; i < values.length; i++) {
-      if (norm(values[i][tsCol]) === norm(ts) &&
+      if (entryId && idCol !== -1 && String(values[i][idCol]) === entryId) {
+        rowIdx = i;
+        break;
+      }
+      if (!entryId && norm(values[i][tsCol]) === norm(ts) &&
           (!resource || String(values[i][resCol]).toLowerCase() === resource)) {
         rowIdx = i;
         break;
@@ -3059,14 +3065,8 @@ function apiSellInventoryItem(payload) {
     const itemName = safeText_(found.rowObj['Item']);
     const holder   = safeText_(found.rowObj['Holder']);
 
-    sheet.deleteRow(found.rowNumber);
-
-    auditWrite_({ userEmail, action: 'SELL_ITEM', itemId: inventoryId,
-      itemName, note: note || `Sold for ${goldAmount} gp`, status: 'SUCCESS' });
-
     let goldItem = null;
     if (goldAmount > 0) {
-      const updatedHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
       const sellNote = note || `Sold ${itemName}`;
       const gRow = {
         'Inventory ID': makeInventoryId_(), 'Item': 'Gold', 'Library Item ID': '',
@@ -3076,13 +3076,18 @@ function apiSellInventoryItem(payload) {
         'Total Value GP': goldAmount, 'Status': '', 'Faction Relevance': '', 'Risk': '',
         'Notes': sellNote, 'Date Added': new Date()
       };
-      sheet.appendRow(updatedHeaders.map(h => gRow[h] !== undefined ? gRow[h] : ''));
+      sheet.appendRow(headers.map(h => gRow[h] !== undefined ? gRow[h] : ''));
       appendResourceLedger_({ userEmail, action: 'ADD', resource: 'gold', subtype: 'gold',
         qty: goldAmount, valueGp: 1, inventoryId: gRow['Inventory ID'],
         item: `Gold (sold ${itemName})`, notes: sellNote,
         character: safeText_(payload && payload.clientCharacter) });
       goldItem = sanitizeInventoryForClient_(gRow);
     }
+
+    sheet.deleteRow(found.rowNumber);
+
+    auditWrite_({ userEmail, action: 'SELL_ITEM', itemId: inventoryId,
+      itemName, note: note || `Sold for ${goldAmount} gp`, status: 'SUCCESS' });
 
     bumpSync_('inventory', payload && payload._syncClientId);
     return { ok: true, message: `Sold "${itemName}" for ${goldAmount} gp.`, goldItem };
@@ -3633,8 +3638,9 @@ function apiCombineInventoryItems(payload) {
       merged['Notes'] = `${targetNotes}\n\n${sourceNotes}`;
     }
 
-    writeInventoryRow_(sheet, headers, target.rowNumber, merged);
     sheet.deleteRow(source.rowNumber);
+    const adjustedTargetRow = target.rowNumber > source.rowNumber ? target.rowNumber - 1 : target.rowNumber;
+    writeInventoryRow_(sheet, headers, adjustedTargetRow, merged);
 
     auditWrite_({
       userEmail,

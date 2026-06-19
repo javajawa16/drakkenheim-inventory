@@ -5441,8 +5441,10 @@
         inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
       };
 
+      _inFlightWrites++;
       google.script.run
         .withSuccessHandler(res => {
+          _inFlightWrites--;
           removePending();
           if (!res || !res.ok) {
             if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Failed.')}</span>`;
@@ -5458,6 +5460,7 @@
           renderGoldSheetBody();
         })
         .withFailureHandler(err => {
+          _inFlightWrites--;
           removePending();
           if (status) status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
           renderGoldSheetBody();
@@ -6077,6 +6080,7 @@
       };
 
       const onSuccess = res => {
+        _inFlightWrites--;
         removePending();
         if (!res || !res.ok) {
           restoreInputs();
@@ -6094,6 +6098,7 @@
         renderGoldSheetBody();
       };
       const onFail = err => {
+        _inFlightWrites--;
         removePending();
         restoreInputs();
         if (status) status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
@@ -6101,6 +6106,7 @@
       };
 
       const isPartyScope = goldSheetScope === 'party';
+      _inFlightWrites++;
       if (isMember) {
         // fromHolder: empty = deduct from party pool; character name = deduct from their personal gold
         google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFail)
@@ -6140,8 +6146,10 @@
       if (status) status.textContent = '';
       renderGoldSheetBody();
 
+      _inFlightWrites++;
       google.script.run
         .withSuccessHandler(res => {
+          _inFlightWrites--;
           inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
           if (!res || !res.ok) {
             if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Failed.')}</span>`;
@@ -6161,6 +6169,7 @@
           renderInventory();
         })
         .withFailureHandler(err => {
+          _inFlightWrites--;
           inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
           if (status) status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
           renderGoldSheetBody();
@@ -6275,6 +6284,7 @@
             return `
               <div class="resource-ledger-row${pending ? '' : ' editable'}"
                    data-timestamp="${escapeHtml(entry['Timestamp'] || '')}"
+                   data-entry-id="${escapeHtml(entry['Inventory ID'] || '')}"
                    data-resource="${escapeHtml(resource)}"
                    data-note="${escapeHtml(note)}"
                    data-amount="${escapeHtml(String(Math.abs(qty)))}"
@@ -6300,6 +6310,7 @@
       const resource = row.dataset.resource || 'gold';
       ledgerEditTarget = {
         timestamp: row.dataset.timestamp,
+        entryId:   row.dataset.entryId   || '',
         resource,
         note:   row.dataset.note   || '',
         amount: row.dataset.amount || ''
@@ -6338,7 +6349,7 @@
 
     function updateLedgerNoteFromBottom() {
       if (!ledgerEditTarget) return;
-      const { timestamp, resource } = ledgerEditTarget;
+      const { timestamp, entryId, resource } = ledgerEditTarget;
       const isGold    = resource === 'gold';
       const noteInput = document.getElementById(isGold ? 'goldSheetNote' : 'deleriumSheetNote');
       const statusEl  = document.getElementById(isGold ? 'goldSheetStatus' : 'deleriumSheetStatus');
@@ -6350,15 +6361,18 @@
       const updateBtn = btnsEl ? btnsEl.querySelector('.success') : null;
       if (updateBtn) updateBtn.textContent = 'Saving…';
 
+      _inFlightWrites++;
       google.script.run
         .withSuccessHandler(res => {
+          _inFlightWrites--;
           btns.forEach(b => b.disabled = false);
           if (!res || !res.ok) {
             if (statusEl) statusEl.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Failed.')}</span>`;
             if (updateBtn) updateBtn.textContent = 'Update Note';
             return;
           }
-          const entry = (inventoryResourceLedger || []).find(e => e['Timestamp'] === timestamp);
+          const entry = (inventoryResourceLedger || []).find(e =>
+            entryId ? e['Inventory ID'] === entryId : e['Timestamp'] === timestamp);
           if (entry) entry['Notes'] = newNote;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           cancelLedgerEdit();
@@ -6366,11 +6380,12 @@
           else renderDeleriumSheetBody();
         })
         .withFailureHandler(() => {
+          _inFlightWrites--;
           btns.forEach(b => b.disabled = false);
           if (statusEl) statusEl.innerHTML = `<span class="error">Failed.</span>`;
           if (updateBtn) updateBtn.textContent = 'Update Note';
         })
-        .apiUpdateLedgerNote({ timestamp, resource, notes: newNote, _syncClientId: syncClientId });
+        .apiUpdateLedgerNote({ timestamp, entryId, resource, notes: newNote, _syncClientId: syncClientId });
     }
 
     function isGoldItem_(row) {
