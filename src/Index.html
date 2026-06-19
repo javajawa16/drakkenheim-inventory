@@ -2781,8 +2781,11 @@
     let sellBatchOpenGroups   = {}; // group key → boolean
     let sellBatchAllRows      = []; // cache of all sellable rows
     let sellBatchRollups      = []; // rolled-up items (same name+holder combined)
-    let _inFlightWrites       = 0;
-    let _inFlightNoteWrites   = 0;
+    let _inFlightWrites           = 0;
+    let _inFlightNoteWrites       = 0;
+    let pendingForeignReload      = false;
+    let pendingForeignNoteReload  = false;
+    const _notesActionInFlight    = new Set();
     let deleriumSellQtys    = {};
     let deleriumOriginalQtys = {};
     let deleriumReceiveQtys  = {};
@@ -3454,8 +3457,10 @@
       const choice = { ...pendingCombineChoice };
       pendingCombineChoice = null;
       document.getElementById('combineStatus').textContent = 'Combining…';
+      _inFlightWrites++;
       google.script.run
         .withSuccessHandler(res => {
+          _inFlightWrites--;
           if (!res || !res.ok || !res.item) {
             pendingCombineChoice = choice;
             document.getElementById('combineStatus').innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Combine failed.')}</span>`;
@@ -3470,6 +3475,7 @@
           keepDuplicateInventoryItem();
         })
         .withFailureHandler(err => {
+          _inFlightWrites--;
           pendingCombineChoice = choice;
           document.getElementById('combineStatus').innerHTML = `<span class="error">Combine failed: ${escapeHtml(err.message || err)}</span>`;
         })
@@ -4123,6 +4129,7 @@
             return;
           }
 
+          if (_inFlightWrites > 0) { markInventoryReady(); return; }
           const newRows = res.rows || [];
           const newLedger = Array.isArray(res.resourceLedger) ? res.resourceLedger : [];
           inventoryRows = newRows;
@@ -4353,18 +4360,24 @@
           if (!res || !res.ok) return;
           if (res.inventory.ts !== syncState.inventory.ts) {
             if (res.inventory.by !== syncClientId && _inFlightWrites > 0) {
-              // another user's write while a local write is in flight — defer reload to next tick
+              pendingForeignReload = true;
             } else {
               syncState.inventory = res.inventory;
-              if (res.inventory.by !== syncClientId) loadInventory(true);
+              if (res.inventory.by !== syncClientId || pendingForeignReload) {
+                pendingForeignReload = false;
+                loadInventory(true);
+              }
             }
           }
           if (res.notes.ts !== syncState.notes.ts) {
             if (res.notes.by !== syncClientId && _inFlightNoteWrites > 0) {
-              // another user's note write while a local note write is in flight — defer reload to next tick
+              pendingForeignNoteReload = true;
             } else {
               syncState.notes = res.notes;
-              if (res.notes.by !== syncClientId) loadNotes(true);
+              if (res.notes.by !== syncClientId || pendingForeignNoteReload) {
+                pendingForeignNoteReload = false;
+                loadNotes(true);
+              }
             }
           }
         })
@@ -4566,20 +4579,26 @@
 
     function deleteNoteFromForm() {
       const noteId = notesFormNoteId;
-      if (!noteId) return;
+      if (!noteId || _notesActionInFlight.has(noteId)) return;
       closeNoteForm();
       const idx    = notesData.findIndex(n => n.noteId === noteId);
       const backup = idx >= 0 ? notesData[idx] : null;
       if (idx >= 0) notesData.splice(idx, 1);
       renderNotesList();
+      _notesActionInFlight.add(noteId);
+      _inFlightNoteWrites++;
       google.script.run
         .withSuccessHandler(res => {
+          _notesActionInFlight.delete(noteId);
+          _inFlightNoteWrites--;
           if (!res || !res.ok) {
             if (backup !== null && idx >= 0) { notesData.splice(idx, 0, backup); renderNotesList(); }
             setMainStatus(`<span class="error">Delete failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
           }
         })
         .withFailureHandler(() => {
+          _notesActionInFlight.delete(noteId);
+          _inFlightNoteWrites--;
           if (backup !== null) { notesData.splice(idx >= 0 ? idx : notesData.length, 0, backup); renderNotesList(); }
           setMainStatus('<span class="error">Delete failed — please try again.</span>');
         })
@@ -4669,14 +4688,17 @@
     }
 
     function archiveNote(noteId) {
+      if (_notesActionInFlight.has(noteId)) return;
       if (!confirm('Archive this note? It will be hidden but not deleted.')) return;
       const idx = notesData.findIndex(n => n.noteId === noteId);
       const backup = idx >= 0 ? notesData[idx] : null;
       if (idx >= 0) notesData.splice(idx, 1);
       renderNotesList();
+      _notesActionInFlight.add(noteId);
       _inFlightNoteWrites++;
       google.script.run
         .withSuccessHandler(res => {
+          _notesActionInFlight.delete(noteId);
           _inFlightNoteWrites--;
           if (!res || !res.ok) {
             if (backup) notesData.splice(idx, 0, backup);
@@ -4685,6 +4707,7 @@
           }
         })
         .withFailureHandler(() => {
+          _notesActionInFlight.delete(noteId);
           _inFlightNoteWrites--;
           if (backup) notesData.splice(idx, 0, backup);
           renderNotesList();
@@ -4694,14 +4717,17 @@
     }
 
     function toggleNotePin(noteId) {
+      if (_notesActionInFlight.has(noteId)) return;
       const n = notesData.find(x => x.noteId === noteId);
       if (!n) return;
       const newPinned = !n.pinned;
       n.pinned = newPinned;
       renderNotesList();
+      _notesActionInFlight.add(noteId);
       _inFlightNoteWrites++;
       google.script.run
         .withSuccessHandler(res => {
+          _notesActionInFlight.delete(noteId);
           _inFlightNoteWrites--;
           if (!res || !res.ok) {
             n.pinned = !newPinned;
@@ -4710,6 +4736,7 @@
           }
         })
         .withFailureHandler(() => {
+          _notesActionInFlight.delete(noteId);
           _inFlightNoteWrites--;
           n.pinned = !newPinned;
           renderNotesList();
@@ -5164,6 +5191,7 @@
       }, ...inventoryResourceLedger].slice(0, 60);
 
       deleriumSheetMutated = true;
+      const savedRecNote = noteInput ? noteInput.value : '';
       if (noteInput) noteInput.value = '';
       if (status) status.textContent = 'Saving…';
       refreshDeleriumStateFromInventory_();
@@ -5180,6 +5208,7 @@
             inventoryRows = previousRows;
             inventoryResourceLedger = previousLedger;
             refreshDeleriumStateFromInventory_();
+            if (noteInput) noteInput.value = savedRecNote;
             if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Failed.')}</span>`;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
             renderDeleriumSheetBody();
@@ -5202,6 +5231,7 @@
           inventoryRows = previousRows;
           inventoryResourceLedger = previousLedger;
           refreshDeleriumStateFromInventory_();
+          if (noteInput) noteInput.value = savedRecNote;
           if (status) status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderDeleriumSheetBody();
@@ -5273,6 +5303,8 @@
       }, ...inventoryResourceLedger].slice(0, 60);
 
       cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+      const savedSellGold = goldInput ? goldInput.value : '';
+      const savedSellNote = noteInput ? noteInput.value : '';
       if (goldInput) goldInput.value = '';
       if (noteInput) noteInput.value = '';
       if (status) status.textContent = 'Selling…';
@@ -5290,6 +5322,8 @@
             inventoryRows = previousRows;
             inventoryResourceLedger = previousLedger;
             refreshDeleriumStateFromInventory_();
+            if (goldInput) goldInput.value = savedSellGold;
+            if (noteInput) noteInput.value = savedSellNote;
             if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Failed.')}</span>`;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
             renderDeleriumSheetBody();
@@ -5317,6 +5351,8 @@
           inventoryResourceLedger = previousLedger;
           inventoryRows = previousRows;
           refreshDeleriumStateFromInventory_();
+          if (goldInput) goldInput.value = savedSellGold;
+          if (noteInput) noteInput.value = savedSellNote;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           if (status) status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
           renderDeleriumSheetBody();
@@ -5436,6 +5472,8 @@
         'Character': myCharacterName || ''
       }, ...inventoryResourceLedger].slice(0, 60);
 
+      const savedGoldAmount = amountInput ? amountInput.value : '';
+      const savedGoldNote   = noteInput   ? noteInput.value   : '';
       if (amountInput) amountInput.value = '';
       if (noteInput)   noteInput.value   = '';
       if (status)      status.textContent = '';
@@ -5451,6 +5489,8 @@
           _inFlightWrites--;
           removePending();
           if (!res || !res.ok) {
+            if (amountInput) amountInput.value = savedGoldAmount;
+            if (noteInput)   noteInput.value   = savedGoldNote;
             if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Failed.')}</span>`;
             renderGoldSheetBody();
             return;
@@ -5466,6 +5506,8 @@
         .withFailureHandler(err => {
           _inFlightWrites--;
           removePending();
+          if (amountInput) amountInput.value = savedGoldAmount;
+          if (noteInput)   noteInput.value   = savedGoldNote;
           if (status) status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
           renderGoldSheetBody();
         })
@@ -5621,6 +5663,7 @@
             inventoryRows = previousRows;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
             renderInventory();
+            setMainStatus('<span class="error">Sell failed — try again.</span>');
             return;
           }
           if (res.goldItem) primeInventoryCacheAfterAdd(res.goldItem);
@@ -5633,6 +5676,7 @@
           inventoryRows = previousRows;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
+          setMainStatus('<span class="error">Sell failed — try again.</span>');
         })
         .apiSellInventoryBatch({ items, goldAmount, note, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
     }
@@ -5949,8 +5993,10 @@
       status.textContent = 'Selling…';
       document.getElementById('sellBatchConfirmBtn').disabled = true;
 
+      _inFlightWrites++;
       google.script.run
         .withSuccessHandler(res => {
+          _inFlightWrites--;
           if (!res || !res.ok) {
             status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Sell failed.')}</span>`;
             document.getElementById('sellBatchConfirmBtn').disabled = false;
@@ -5976,6 +6022,7 @@
           window.setTimeout(() => closeSellBatchSheet(), 1500);
         })
         .withFailureHandler(err => {
+          _inFlightWrites--;
           status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || String(err))}</span>`;
           document.getElementById('sellBatchConfirmBtn').disabled = false;
         })
