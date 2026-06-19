@@ -404,7 +404,7 @@ therefore creates a "DM-held" gold row instead of the party pool — misattribut
 to the party-pool treasurer view (though not lost). Fix: in DM character scope either hide the
 write buttons or force `holder`/`fromHolder` to `''` (party pool) for DM gold writes.
 
-#### RISK · Index.html:4810 · Party Notes tab is revealed to every user, contradicting the documented treasurer-only beta gate
+#### ~~RISK · Index.html:4810 · Party Notes tab is revealed to every user, contradicting the documented treasurer-only beta gate~~ RESOLVED (intentional — notes tab released to all players)
 `applyIdentity` unconditionally un-hides the notes tab — `notesTabEl.style.display = ''`
 plus the 3-column nav (4810–4812) — with **no `isTreasurer` check**, and `setCommandMode`
 (3206–3221) doesn't gate it either. README §Party Notes states the tab is "currently

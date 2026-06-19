@@ -632,7 +632,6 @@ Fix:
 5. **Existing inventory stat block backfill** — items added before library import have non-matching IDs. Options: manual edit of Library Item ID column, or name-based backfill.
 
 6. **Party Notes — next steps**:
-   - Tab is now visible to all users (beta gate removed). Confirm this is intentional or restore `isTreasurer` gate in `applyIdentity` + `setCommandMode`.
    - Item detail integration: "+ Add Item Note" on `#descriptionSheet`; `relatedItemId` field and hidden form input already plumbed.
    - Note detail/full-view sheet (expand beyond 3-line body preview).
    - Remove legacy `CAMPAIGN_NOTES_FEED` v1 functions when confirmed unused.
@@ -642,7 +641,6 @@ Fix:
    - RISK 7093: client/server delerium quick-edit type classification diverges for custom names — align classifiers
    - RISK 6741: Undo Last Pay removes inventory rows but leaves RESOURCE_LEDGER entries; history shows the payment until next reload
    - RISK 1853: `appendResourceLedger_` swallows errors silently — ledger write failure invisible to client
-   - RISK 4810: Party Notes tab gating — `applyIdentity` shows it to everyone; README says beta-only; confirm intent
    - RISK 6435: ledger note-edit falls back to Timestamp for same-second multi-row ops — needs stable per-entry ID
    - RISK 135: two note backends coexist (CAMPAIGN_NOTES_FEED v1 + NOTES v2) — retire v1 when confirmed unused
 
