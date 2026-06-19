@@ -1,9 +1,108 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 3. Code.js lines 1101–1700 (inventory write — add, edit, delete)
+Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
 
 ## Sessions
+
+### 2026-06-19 (run 29) — Sections audited: 3
+
+Section 3 = Code.js lines 1101–1700 ("inventory write — add, edit, delete").
+The literal range is mostly helpers/validation/identity (`getInventorySpreadsheet_`,
+`validate*_`, `requireAllowedUser_`, `getCharacterForEmail_`, etc.). The actual
+inventory-write APIs live outside the range and were traced where they sit:
+`apiAddInventory` (2424), `apiAddCustomInventory` (2533), `apiUpdateInventory`
+(3408), `apiDeleteInventory` (3496), `apiCombineInventoryItems` (3565). Client
+handlers: `addInventoryItem` (Index.html:8102), `saveInventoryEdits` (7401),
+`deleteSelectedInventory` (7489), `giveItemToCharacter` (6045),
+`confirmCombineInventoryItem` (3455).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, with
+execution-trace + state-machine on each write path):
+
+- **Edit inventory item** (swipe → Edit → change fields → Save) — found the BUG
+  below: server `apiUpdateInventory` ignores Item/Category/Rarity from the payload
+  while the client optimistically writes them to local state + cache → delayed
+  silent revert. Qty/Holder/Value/Faction/Notes paths are clean (validated, then
+  `writeInventoryRow_`, lock released in `finally`).
+- **Add library item / Add custom item** — `addInventoryItem` builds an optimistic
+  `_opt_` row, caches it, increments `_inFlightWrites`, calls `apiAddInventory` /
+  `apiAddCustomInventory` / `apiQuickAddInventory`. Success removes opt row +
+  `primeInventoryCacheAfterAdd`; both failure branches decrement the flag, strip
+  the opt row, and restore every form field (incl. scroll spell + quick-add size).
+  Found the RISK below (library add discards user-edited Category/Rarity). Custom
+  add honors category/rarity (2562-2563) — clean.
+- **Delete inventory item / swipe decrement** — `deleteSelectedInventory` snapshots
+  `previousRows`, optimistically removes/decrements, both handlers restore
+  `previousRows` on failure. Multi-qty delete requires a second "Confirm delete
+  all" tap. Clean.
+- **Combine duplicate** — `confirmCombineInventoryItem` copies `pendingCombineChoice`,
+  nulls it, restores it on failure (retry works without reload). Client rollupKey
+  (item|category|rarity, 6609) matches server's combine equality check (3596-3601)
+  — consistent. Clean.
+- **Give item to character** — `giveItemToCharacter` optimistic holder swap, both
+  handlers revert `item['Holder']`/row on failure. Clean (note: the
+  `cacheInventoryRows` at 6059 runs after `_inFlightWrites++` so it no-ops, but the
+  success handler re-caches — harmless).
+
+#### BUG · Code.js:3408 · apiUpdateInventory silently drops Item / Category / Rarity edits
+**Story: Edit inventory item, at the Save step.** The edit form (desktop `editItem`/
+`editCategory`/`editRarity` at Index.html:2150/2174/2178; mobile `sheetEdit*` at
+2357/2381/2385) exposes Item, Category, and Rarity as plain editable `<input>`s.
+`getInventoryEditorValues()` (Index.html:7358) puts all three in the payload, and
+the optimistic `updateInventoryRowLocally()` (7436) writes them into the in-memory
+row **and** into the localStorage cache (`cacheInventoryRows` at 7425). But
+`apiUpdateInventory` builds its row as `{...existingObj, 'Inventory ID', 'Qty',
+'Holder', 'Value GP', 'Total Value GP', 'Faction Relevance', 'Notes'}` (3440-3449)
+and **never reads `payload.item`, `payload.category`, or `payload.rarity`** — those
+fields are taken from `existingObj` (the old sheet values) via the spread.
+
+Result: a user who renames an item or re-categorizes it (e.g. moves it from
+Treasure → Potions) taps Save, sees optimistic success ("Updated …") and the row
+move groups immediately. The sheet keeps the OLD values. On the next full reload or
+collaborative sync — `loadInventory(true)` fired by the 20 s poll on any other
+user's write — `inventoryRows` is replaced with server data and the name/category/
+rarity silently revert. This is delayed data loss (the cache also holds the wrong
+value, so even a same-user reload shows new→old flip). No error is ever surfaced.
+
+Fix: in `apiUpdateInventory`, read and validate the three fields like the others,
+defaulting to existing when undefined, e.g.
+`'Item': validateText_(payload && payload.item === undefined ? existingObj['Item'] : payload.item, 'Item name', 200)`,
+`'Category': normalizeInventoryCategory_(payload && payload.category === undefined ? existingObj['Category'] : payload.category)`,
+`'Rarity': validateText_(payload && payload.rarity === undefined ? existingObj['Rarity'] : payload.rarity, 'Rarity', 60)`.
+(If renaming/recategorizing is intentionally disallowed, make the inputs readOnly
+instead so the client stops promising a change it can't keep.)
+
+#### RISK · Code.js:2424 · apiAddInventory discards user-edited Category / Rarity on library adds
+Same root cause, lower blast radius. In the Add Item form the `category`/`rarity`
+inputs (Index.html:2297/2301) stay editable after a library item is selected
+(`fillAddFormFromEquipment` at 7806 fills them but does not set readOnly). The
+optimistic row uses `payload.category`/`payload.rarity` (8145-8146), but
+`apiAddInventory` derives Category from `libraryItem.category` (2467) and Rarity
+from `libraryItem.rarity` (2468) and ignores the payload values (only
+`payload.item` is honored, for the name, at 2465). So a category/rarity edit the
+user makes before tapping Add flashes in the optimistic row, then snaps back when
+`primeInventoryCacheAfterAdd(res.item)` swaps in the server row. Less harmful than
+the edit case (revert is immediate, not delayed), but the user's input is still
+silently dropped. Either honor the payload values for library adds or make those
+inputs readOnly in library mode.
+
+#### IDEA · Index.html:7401 · Edit save leaves the editor open; inconsistent with give/delete
+After a successful `saveInventoryEdits`, the success handler shows "Saved." but
+does not close the editor panel (`closeInventoryPanels` is never called), so the
+user must manually dismiss it. The adjacent write flows — `giveItemToCharacter`
+(6068) and `deleteSelectedInventory` (7542) — close panels immediately on the
+optimistic path. The Edit flow feels heavier for no reason; consider closing the
+editor on success (the inventory list already reflects the change optimistically).
+
+#### Note · Code.js:3496 · Delete / Combine / Give server paths clean
+`apiDeleteInventory`, `apiCombineInventoryItems`, and the holder-only
+`apiUpdateInventory` path all validate IDs up front, resolve rows via
+`getInventoryRowObjectById_`, mutate once, and release the document lock in a
+`finally` on every path (success, validation throw, lock-timeout early return).
+Combine correctly adjusts the target row number after deleting the (possibly
+lower-indexed) source row (3642). Stories traced: Delete inventory item, Combine
+duplicate, Give item to character — no defects in these three.
 
 ### 2026-06-19 (run 28) — Sections audited: 2
 
