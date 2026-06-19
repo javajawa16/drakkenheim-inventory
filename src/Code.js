@@ -236,11 +236,18 @@ function runHealthCheck() {
  *******************************************************/
 
 function doGet(e) {
-  return HtmlService
-    .createTemplateFromFile('Index')
-    .evaluate()
-    .setTitle('Drakkenheim Inventory')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  try {
+    return HtmlService
+      .createTemplateFromFile('Index')
+      .evaluate()
+      .setTitle('Drakkenheim Inventory')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  } catch (err) {
+    Logger.log('doGet failed: ' + err.message);
+    return HtmlService
+      .createHtmlOutput('<p style="font-family:sans-serif;padding:2em">Inventory is temporarily unavailable — please reload in a moment.</p>')
+      .setTitle('Drakkenheim Inventory');
+  }
 }
 
 function include_(filename) {

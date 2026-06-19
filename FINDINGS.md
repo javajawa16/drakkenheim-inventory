@@ -42,7 +42,7 @@ execution-trace + state-machine where a write path is reached):
   (732–738); confirmed the gRow keys all 18 headers exactly. (The endpoint body lives
   at 669–758, section-2 territory; not re-audited here.)
 
-#### RISK · Code.js:247 · `doGet` has no error isolation — any template/include failure takes the whole app down for every story
+#### ~~RISK · Code.js:247 · `doGet` has no error isolation — any template/include failure takes the whole app down for every story~~ FIXED
 Cross-cutting: **page load** for every catalog story. `doGet` builds the page with
 `HtmlService.createTemplateFromFile('Index').evaluate()` and `Index.html:6` contains
 one server scriptlet `<?!= include_('Wallpaper'); ?>` → `include_` (255) does
