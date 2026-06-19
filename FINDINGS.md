@@ -1,9 +1,104 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 2. Code.js lines 501–1100 (auth, character, inventory read)
+Next section: 3. Code.js lines 1101–1700 (inventory write — add, edit, delete)
 
 ## Sessions
+
+### 2026-06-19 (run 41) — Sections audited: 2
+
+Section 2 = Code.js lines 501–1100 (auth, character, inventory read). The named
+range holds the equipment readers (`apiSearchEquipment` 587, `apiGetEquipmentIndex`
+624, `apiGetEquipmentItem` 647), `apiSellInventoryBatch` (663 — a *write* path
+that lives here and backs three client flows), the character/identity APIs
+(`apiGetCharacters` 754, `apiGetMyCharacter` 822, `apiSetMyCharacter` 851,
+`apiForgetMyCharacter` 860), and the quick-add/category readers. I traced each
+through its supporting helpers (`requireAllowedUser_` 1486, `requireTreasurer_`
+1426, `resolveIdentityForCharacter_` 1274, `validateCharacterChoice_` 1368,
+`getEmailForCharacter_` 1441, `apiGetInventory` 1938) and its client callers.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every write path reached):
+
+- **Identity / first open** — `loadMyIdentity` (4326) → `apiGetMyCharacter`
+  (822) → `applyIdentity` (4287); selection via `confirmIdentity` (4390) →
+  `apiSetMyCharacter` (851) → `validateCharacterChoice_` (1368). Double-tap
+  guarded by `identityChoiceSaving`; optimistic apply survives a failed save
+  (localStorage already written, hint re-resolves next load). See RISK below
+  (hint path skips the active-character check that the save path enforces).
+- **Sell item / Remove item (description sheet)** — `confirmSellItem` (5159)
+  and `confirmDescRemove` (6563) → `apiSellInventoryBatch` (663). Both guard
+  re-entry with `descActionInFlight`, snapshot `previousRows`, update
+  optimistically, and revert on `!ok`/failure. `_inFlightWrites` defers the
+  20 s poll's foreign reload (`pollSync` 3848 → `pendingForeignReload`), and
+  `loadInventory` bails at 3623 when a newer write is in flight — optimistic
+  state survives navigate-away. Clean.
+- **Sell Items batch (treasurer)** — `confirmSellBatch` (5522) →
+  `apiSellInventoryBatch` (663). Sheet-local status + disabled button instead
+  of optimistic row removal; 1.5 s auto-close uses `sellBatchGeneration`. See
+  RISK below (server endpoint is not treasurer-gated).
+- **View item details / description sheet load** — `apiGetEquipmentItem` (647)
+  with `capturedId` guard (6508/6514) so a stale fetch for a since-closed item
+  is ignored; failure leaves cache un-poisoned (null not cached). Clean.
+- **Add library item: search** — backed by `apiGetEquipmentIndex` (624) loaded
+  once and filtered in-memory (`loadEquipmentIndex` 7162); `apiSearchEquipment`
+  (587) has no client caller. Cache-paint + background-refresh degrades to
+  "showing cached library" on failure; no stuck spinner.
+- **Give item to character / holder dropdowns** — `apiGetCharacters` (754)
+  feeds `populateCharacterSelectors`; `giveItemToCharacter` (5578) traced
+  (optimistic holder swap + revert) — server write is in section 6, deferred.
+
+#### RISK · Code.js:838 · `apiGetMyCharacter` trusts the client hint without the active-character check
+When the temp-key profile and email both fail to resolve, the handler falls
+back to `resolveIdentityForCharacter_(clientCharacterHint)` (839). That helper
+(1274) does no validation — it `safeText_`'s the name, reverse-looks-up an
+email, and derives `isDM`/`isTreasurer` purely from the string. The *write*
+path `apiSetMyCharacter` → `validateCharacterChoice_` (1368) explicitly rejects
+names that aren't present-and-active in CHARACTERS, but the read path does not.
+Consequence: a player whose character is later deactivated (or renamed) keeps a
+fully-working identity from their stale `localStorage` hint indefinitely —
+contradicting the stated "inactive characters excluded" invariant. Story:
+*Identity / returning visit*. Severity low (the hint originated from a once-valid
+confirm, and treasurer **writes** still re-gate via `requireTreasurer_`), but the
+identity the UI shows/uses is not revalidated against the roster. Suggested fix:
+have `apiGetMyCharacter` run the hint through the same active-character check
+(`validateCharacterChoice_`-style) before accepting it, returning `character:null`
+when the hinted character is no longer active.
+
+#### RISK · Code.js:663 · `apiSellInventoryBatch` has no treasurer gate; "Sell Items (treasurer)" is UI-only
+The endpoint calls `requireAllowedUser_()` (667) but never `requireTreasurer_`.
+The sibling party-pool mutators do gate: `apiSplitGold` and `apiSellDelerium`
+both call `requireTreasurer_(clientCharacter)`. The "Sell Items" batch button is
+only rendered for `isTreasurer` (renderInventory 3839), so the treasurer
+restriction on *bulk* selling the whole party pool lives entirely on the client.
+Any allowed user can replay an `apiSellInventoryBatch` payload (or set
+`isTreasurer` in their own client) to liquidate every party-held item. The
+per-item Sell/Remove paths intentionally share this endpoint and are open to all
+users, so a blanket treasurer gate would over-restrict — but the batch flow is
+documented and UI-presented as treasurer-only without server enforcement. Story:
+*Sell Items batch*. Suggested fix: pass a `batch: true` (or item-count
+threshold) flag from `confirmSellBatch` and require treasurer when set, or split
+the batch flow into its own treasurer-gated endpoint.
+
+#### Note · Code.js:663 · `apiSellInventoryBatch` FIFO row-shift + lock handling is correct (positive baseline)
+Stories *Sell item*, *Remove item*, *Sell Items batch* traced through this
+endpoint. Two things done right and worth recording so a future refactor
+doesn't regress them: (1) all rows are resolved to `{rowNumber,…}` *before* any
+mutation, then processed `sort((a,b) => b.rowNumber - a.rowNumber)` descending,
+so a `deleteRow` only shifts already-processed higher rows — partial-sell qty
+writes and deletes stay aligned. (2) `tryLock(10000)` failure returns *without*
+entering the `finally` release (lock was never held), and the `finally`'s
+`releaseLock` is wrapped in `try/catch`, so no path double-releases or leaks the
+document lock — including the auth-failure throw from `requireAllowedUser_`.
+
+#### Note · Code.js:822 / Index.html:4390 · Identity state machine survives failure + navigate-away (clean trace)
+Story *Identity / first open + selection* traced end-to-end. `confirmIdentity`
+(4390) blocks double-tap via `identityChoiceSaving`, writes `localStorage` and
+applies the optimistic identity before the round-trip, and on `apiSetMyCharacter`
+failure surfaces an error while *keeping* the working local identity (no lockout,
+no reload needed). `applyIdentity` returning `false` for a null-character server
+response leaves any already-applied cached identity intact and only shows the
+picker when `!myCharacterName`. No stuck in-flight flag, no lost selection.
 
 ### 2026-06-19 (run 40) — Sections audited: 1
 
