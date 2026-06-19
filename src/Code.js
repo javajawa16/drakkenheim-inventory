@@ -3326,6 +3326,44 @@ function apiDeleteInventory(payload) {
   }
 }
 
+function apiUndoMemberSend(payload) {
+  const lock = LockService.getDocumentLock();
+  let userEmail = '';
+  const deductId = payload && payload.deductId;
+  const creditId = payload && payload.creditId;
+
+  try {
+    userEmail = requireAllowedUser_();
+    requireTreasurer_(payload && payload.clientCharacter);
+
+    if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
+
+    const ss = getInventorySpreadsheet_();
+    const sheet = getRequiredSheet_(ss, CONFIG.INVENTORY_SHEET);
+    ensureInventoryHeaders_(sheet);
+
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+
+    const deductFound = getInventoryRowObjectById_(sheet, headers, validateId_(deductId, 'deduct ID'));
+    const creditFound = getInventoryRowObjectById_(sheet, headers, validateId_(creditId, 'credit ID'));
+
+    // Delete in descending row order so earlier deletes don't shift later row numbers
+    const toDelete = [deductFound, creditFound].filter(Boolean).sort((a, b) => b.rowNumber - a.rowNumber);
+    toDelete.forEach(found => sheet.deleteRow(found.rowNumber));
+
+    if (deductFound) deleteResourceLedgerRowsForInventory_(ss, deductId);
+    if (creditFound) deleteResourceLedgerRowsForInventory_(ss, creditId);
+
+    bumpSync_('inventory', payload && payload._syncClientId);
+    return { ok: true, message: 'Member send reversed.' };
+  } catch (err) {
+    log_('ERROR', 'apiUndoMemberSend failed', { deductId, creditId, error: err.message });
+    return { ok: false, error: publicValidationError_(err) };
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
+}
+
 function apiCombineInventoryItems(payload) {
   const lock = LockService.getDocumentLock();
   let userEmail = '';

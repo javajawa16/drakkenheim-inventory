@@ -2401,10 +2401,10 @@
       </div>
 
       <div class="mobile-sheet-actions">
-        <button class="primary"  onclick="saveInventoryEdits()">Save Changes</button>
+        <button id="mobileInventorySaveButton" class="primary"  onclick="saveInventoryEdits()">Save Changes</button>
         <button class="secondary" onclick="openGiveItemSheet()">Give to…</button>
         <button class="secondary" onclick="openSelectedInventoryDescription()">Open Description</button>
-        <button class="danger"   onclick="deleteSelectedInventory()">Delete Item</button>
+        <button id="mobileInventoryDeleteButton" class="danger"   onclick="deleteSelectedInventory()">Delete Item</button>
       </div>
 
     </div>
@@ -4426,6 +4426,7 @@
       if (!sheet) return;
       goldSheetMutated = false;
       goldSheetScope = 'party';
+      if (ledgerEditTarget && ledgerEditTarget.resource !== 'gold') ledgerEditTarget = null;
       renderGoldSheetBody();
       renderGoldSheetButtons();
       sheet.classList.add('active');
@@ -4964,7 +4965,7 @@
     function renderGoldSheetButtons() {
       const container = document.getElementById('goldSheetButtons');
       if (!container) return;
-      if (ledgerEditTarget) {
+      if (ledgerEditTarget && ledgerEditTarget.resource === 'gold') {
         container.innerHTML = `
           <div style="font-size:13px;opacity:.55;padding:6px 0 2px;text-align:center;">
             Editing note for ${escapeHtml(formatShortDate(ledgerEditTarget.timestamp))} · ${escapeHtml(ledgerEditTarget.amount)} gp
@@ -6308,37 +6309,29 @@
         if (statusEl) statusEl.innerHTML = '<span class="error">Undo failed — payment was not reversed.</span>';
       }
 
-      google.script.run
-        .withSuccessHandler(res => {
-          if (!res || !res.ok) { rollback(); return; }
-          if (!creditId) {
-            // Purchase path: single deduct row, done
+      if (creditId) {
+        // Member-send path: delete both rows atomically
+        google.script.run
+          .withSuccessHandler(res => {
+            resourcePayInFlight[resource] = false;
+            _inFlightWrites--;
+            if (!res || !res.ok) { rollback(); return; }
+            cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+          })
+          .withFailureHandler(rollback)
+          .apiUndoMemberSend({ deductId, creditId, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
+      } else {
+        // Purchase path: single deduct row
+        google.script.run
+          .withSuccessHandler(res => {
+            if (!res || !res.ok) { rollback(); return; }
             resourcePayInFlight[resource] = false;
             _inFlightWrites--;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
-            return;
-          }
-          // Member-send path: also delete the recipient credit row
-          google.script.run
-            .withSuccessHandler(res2 => {
-              resourcePayInFlight[resource] = false;
-              _inFlightWrites--;
-              if (!res2 || !res2.ok) {
-                // Deduct deleted, credit persists — reload server truth
-                loadInventory(true);
-              } else {
-                cacheInventoryRows(inventoryRows, inventoryResourceLedger);
-              }
-            })
-            .withFailureHandler(() => {
-              resourcePayInFlight[resource] = false;
-              _inFlightWrites--;
-              loadInventory(true);
-            })
-            .apiDeleteInventory({ inventoryId: creditId, reverseLedgerEntry: true, _syncClientId: syncClientId });
-        })
-        .withFailureHandler(rollback)
-        .apiDeleteInventory({ inventoryId: deductId, reverseLedgerEntry: true, _syncClientId: syncClientId });
+          })
+          .withFailureHandler(rollback)
+          .apiDeleteInventory({ inventoryId: deductId, reverseLedgerEntry: true, _syncClientId: syncClientId });
+      }
     }
 
     function formatCount(value) {
@@ -6680,7 +6673,7 @@
         return 'currency';
       }
 
-      if (category === 'delerium' || (/delerium|delirium/.test(name) && !category.includes('potion'))) {
+      if (category === 'delerium' || /^(delerium|delirium)\s+(chip|fragment|shard|crystal|geode|massive\s+cluster|unknown)/i.test(row && row['Item'] || '')) {
         return 'delerium crystal';
       }
 
@@ -6994,6 +6987,7 @@
     function saveInventoryEdits() {
       const status  = getEditStatusElement();
       const button  = document.getElementById('saveInventoryButton');
+      const mobileButton = document.getElementById('mobileInventorySaveButton');
       const payload = getInventoryEditorValues();
 
       if (!payload.inventoryId) {
@@ -7001,14 +6995,16 @@
         return;
       }
 
-      button.disabled = true;
+      if (button) button.disabled = true;
+      if (mobileButton) mobileButton.disabled = true;
       status.textContent = 'Saving…';
 
       _inFlightWrites++;
       google.script.run
         .withSuccessHandler(res => {
           _inFlightWrites--;
-          button.disabled = false;
+          if (button) button.disabled = false;
+          if (mobileButton) mobileButton.disabled = false;
           if (!res || !res.ok) {
             status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Save failed.')}</span>`;
             return;
@@ -7020,7 +7016,8 @@
         })
         .withFailureHandler(err => {
           _inFlightWrites--;
-          button.disabled = false;
+          if (button) button.disabled = false;
+          if (mobileButton) mobileButton.disabled = false;
           status.innerHTML = `<span class="error">Save failed: ${escapeHtml(err.message || err)}</span>`;
         })
         .apiUpdateInventory({ ...payload, _syncClientId: syncClientId });
@@ -7082,7 +7079,7 @@
     function deleteSelectedInventory(inventoryIdFromCard, options) {
       const opts = options || {};
       const inventoryId   = inventoryIdFromCard || document.getElementById('editInventoryId').value;
-      const detailButton  = document.getElementById('deleteInventoryButton');
+      const detailButton  = document.getElementById('deleteInventoryButton') || document.getElementById('mobileInventoryDeleteButton');
       const status        = getEditStatusElement();
       const existingRow   = inventoryRows.find(r => r['Inventory ID'] === inventoryId);
       const currentQty    = toNumber(existingRow && existingRow['Qty']);

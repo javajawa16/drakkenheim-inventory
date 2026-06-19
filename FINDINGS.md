@@ -69,7 +69,7 @@ until something else re-renders the sheet (scope toggle, reopen) or a reload. Fi
 in `rollback()`, also call `renderGoldSheetBody()` + `renderGoldSheetButtons()`
 and surface an error via `goldSheetStatus` so the failed undo is visible.
 
-#### RISK · Index.html:6318 · Member-send undo is two non-atomic deletes — partial failure creates gold
+#### ~~RISK · Index.html:6318 · Member-send undo is two non-atomic deletes — partial failure creates gold~~ FIXED
 Story: **Undo last pay** (member-send variant). `undoResourcePay` for a
 member-send deletes the pool/personal deduct row first, then — on success —
 chains a second `apiDeleteInventory` for the recipient credit row (6318). If the
@@ -81,7 +81,7 @@ real and silent. There is no transaction wrapping the two row deletes. Consider 
 single server endpoint that reverses both rows under one lock (and one ledger
 reversal), so undo is atomic.
 
-#### RISK · Index.html:4967 · Gold sheet enters note-edit mode for any resource, not just gold
+#### ~~RISK · Index.html:4967 · Gold sheet enters note-edit mode for any resource, not just gold~~ FIXED
 `renderGoldSheetButtons` (4964) gates note-edit UI on `if (ledgerEditTarget)`
 with no `ledgerEditTarget.resource === 'gold'` check — unlike its delerium
 counterpart `renderDeleriumSheetActions` (4457), which correctly checks
@@ -207,7 +207,7 @@ either (a) route qty/delete through a batch endpoint that drains all rollup rows
 surface "open description to adjust quantity," or (c) at minimum auto-combine
 the group server-side before applying the edit.
 
-#### RISK · Index.html:6978 · In-flight button disable targets the hidden desktop button on mobile
+#### ~~RISK · Index.html:6978 · In-flight button disable targets the hidden desktop button on mobile~~ FIXED
 Story: **Edit inventory item** / **Delete**. `saveInventoryEdits` does
 `document.getElementById('saveInventoryButton')` and
 `deleteSelectedInventory` does `document.getElementById('deleteInventoryButton')`
@@ -1119,7 +1119,7 @@ mode, so a user who switches mode to "set", changes the size, and Confirms gets 
 was ignored. The `add`/`remove` path honors `size`; `set` does not. Either honor `size`
 in `apiSetItemQuantity` or hide/disable the size field when mode is `set`.
 
-#### RISK · Index.html:7093 · Client/server delerium quick-edit classification diverges
+#### ~~RISK · Index.html:7093 · Client/server delerium quick-edit classification diverges~~ FIXED
 `getQuickEditType` (client, 7081) treats anything whose name matches `/delerium|delirium/`
 (and category not potion) as `delerium crystal`, but server `classifyQuickEdit_`
 (Code.js:1806) only matches `category === 'delerium'` OR a name matching
