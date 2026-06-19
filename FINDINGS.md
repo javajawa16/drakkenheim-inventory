@@ -1,9 +1,110 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 10. Index.html lines 3001–4500 (inventory render, search)
+Next section: 11. Index.html lines 4501–6000 (gold/delerium UI, sync)
 
 ## Sessions
+
+### 2026-06-19 (run 36) — Sections audited: 10
+
+Section 10 = Index.html lines 3001–4500 (inventory render, search). Range covers:
+phone/DPR scaling helpers, the delegated swipe-to-delete gesture layer
+(`initInventoryGestures`), `setCommandMode`/command-search handlers, the legacy
+chat-style "campaign notes" v1 block (`openCampaignNotes`…`deleteCampaignNote`,
+3342–3894 — dead: `openCampaignNotes` has no caller, skipped per audit rules),
+the combine-duplicate flow (`findDuplicateInventoryCandidate`, `showCombineChoice`,
+`confirmCombineInventoryItem`), `loadInventory`/`renderInventory`/
+`renderInventoryRowCard`/`renderInventoryDashboard`, the collaborative-sync poll
+(`pollSync`/`startSyncPoll`/`stopSyncPoll`), and Party Notes v2 load/render
+(`loadNotes`/`renderNotesList`).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, with
+execution-trace + state-machine on each write path):
+
+- **Combine duplicate** (add → duplicate detected → combine sheet → Confirm).
+  `findDuplicateInventoryCandidate` (3423) → `showCombineChoice` (3432) →
+  `confirmCombineInventoryItem` (3455) → `apiCombineInventoryItems`. Clean:
+  `_inFlightWrites` paired on both handlers, `pendingCombineChoice` restored on
+  failure so the sheet stays open and retryable, success merges target / drops
+  source and re-renders. Navigate-away (switch to Add tab mid-flight): combine
+  overlay stays active but the success handler closes it via
+  `keepDuplicateInventoryItem`; no stuck state.
+- **Delete inventory item** (swipe → Delete) + **swipe-tap to open**.
+  `initInventoryGestures` (3056) → `handleInventoryDeleteActionById` (7474) →
+  `deleteSelectedInventory` (7489). Optimistic decrement/remove, full rollback to
+  `previousRows` on both failure paths, `_inFlightWrites` paired, retryable. Found
+  the tap double-fire RISK below.
+- **View item details** (tap card → description sheet). Tap routes through the
+  gesture layer → `openInventoryPrimaryActionById` (6836) →
+  `openInventoryDescription`. `suppressInventoryClickUntil` correctly swallows the
+  synthetic post-touch `click`. Found tap double-fire RISK below.
+- **Quick-adjust currency** (dashboard gold/delerium card tap). `renderInventoryDashboard`
+  (4319) wires `openGoldSheet`/`openDeleriumSheet`. Affected by the sync-render BUG
+  below (foreign gold/delerium qty change doesn't repaint the dashboard total).
+- **Collaborative sync interference** (cross-cutting). `pollSync` (4357) +
+  `loadInventory` (4077). In-flight deferral via `pendingForeignReload` /
+  `_inFlightWrites` is correct and own-write skip works. Found the stale-render BUG
+  below in the signature gate.
+- **Tab switch during in-flight** (cross-cutting). `setCommandMode` (3206) →
+  `loadInventory`; the `if (_inFlightWrites > 0) return` guard at 4132 preserves
+  optimistic state on revalidation. Clean.
+- **iOS background/foreground** (cross-cutting). `stopSyncPoll`/`startSyncPoll`
+  (4388/4393) + the `visibilitychange` listener; poll restarts and an immediate
+  check fires on foreground. Clean (deferral logic above carries any unresolved
+  in-flight write).
+
+#### BUG · Index.html:4073 · Sync revalidation misses field-only changes (qty/holder/notes/gold/delerium)
+
+`inventorySignature_()` returns only `inventoryRows.length + '|' + first-8 Inventory IDs`.
+`loadInventory`'s success handler (4140–4144) re-renders only when
+`signatureAfterFetch !== signatureBeforeFetch`. Any foreign write that changes a
+field **without** adding/removing a row or reordering the first 8 rows produces an
+identical signature, so the freshly-fetched rows are stored in `inventoryRows` and
+cached but **never rendered** — the DOM keeps the stale values until the next
+unrelated interaction (filter keystroke, tab switch, swipe). This silently breaks:
+
+- **Collaborative sync interference**: another user's *Edit inventory item* (qty/
+  holder/notes/value), partial **Sell**, **Give to…** (holder reassignment),
+  **Quick-adjust currency** (gold row qty), or **Delerium** receive/sell (crystal
+  row qty) all keep row count and IDs constant. My 20 s poll fires
+  `loadInventory(true)`, the new data arrives, signatures match → no repaint. The
+  gold/delerium dashboard totals and `N×` card titles stay wrong.
+- Also affects the normal foreground revalidation path (tab switch back after the
+  60 s TTL), not just the poll.
+
+Fix: make the signature cover the mutable fields it renders — e.g. fold
+`Qty`/`Holder`/`Value GP`/`Notes` of each row into the hash (or hash the whole
+payload), or simply always `renderInventory()` on a real fetch (the README's
+"only re-render when changed" optimization is what introduced the gap). The
+existing `_inFlightWrites > 0` early-return already protects optimistic state, so
+unconditional re-render here is safe.
+
+#### RISK · Index.html:3169 · Tap opens the panel twice when `pointerup` precedes `touchend`
+
+In `initInventoryGestures`, both the `pointerup` handler (3085) and the `touchend`
+handler (3151) detect a stationary tap and call `openInventoryPrimaryActionById(...)`
+directly. The `pointerup` branch guards with `if (Date.now() - lastTapOpenedAt < 500)
+return` (3091), but the `touchend` tap branch (3169–3173) has **no** such guard — it
+only sets `lastTapOpenedAt`. On touch input both event streams fire for one tap; when
+the browser dispatches `pointerup` before `touchend` (the common WebKit/Chrome order),
+`pointerup` opens (setting `lastTapOpenedAt`), then `touchend` opens again because it
+never checks the timestamp. Result: `openInventoryPrimaryAction` runs twice — for a
+library item that means a duplicate `apiGetEquipmentItem` round-trip and a re-render of
+the description sheet; for a gold/delerium row `openQuickEditPanel` re-initialises mid-
+interaction. The synthetic `click` is correctly suppressed by `suppressInventoryClickUntil`,
+so only the pointer/touch pair is unguarded. Fix: add the same
+`if (Date.now() - lastTapOpenedAt < 500) return;` guard to the `touchend` tap branch
+(or route both through one `maybeOpenFromTap()` helper).
+
+#### Note · Index.html:4357 · Sync poll deferral and combine/delete flows are clean
+
+`pollSync` correctly defers foreign reloads while local writes are in flight
+(`pendingForeignReload` + `_inFlightWrites`/`_inFlightNoteWrites`) and skips reloads
+for the client's own writes; the deferred reload fires on a subsequent poll once
+writes drain. `confirmCombineInventoryItem` and `deleteSelectedInventory` both pair
+`_inFlightWrites`, roll back to a captured snapshot on failure, and remain retryable
+without reload. Traced as part of Combine duplicate, Delete, and the three
+cross-cutting sync stories.
 
 ### 2026-06-19 (run 35) — Sections audited: 9
 
