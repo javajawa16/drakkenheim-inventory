@@ -1521,8 +1521,7 @@
       .desktop-editor { display: block; }
       .mobile-sheet { display: none !important; }
       #descriptionSheet.active { display: block !important; }
-      #notesSheet.active       { display: block !important; }
-      #noteFormSheet.active    { display: block !important; }
+#noteFormSheet.active    { display: block !important; }
       #goldSheet.active        { display: block !important; }
       #payReasonSheet.active   { display: block !important; }
       #giveItemSheet.active    { display: block !important; }
@@ -2500,33 +2499,6 @@
     </div>
   </div>
 
-  <!-- ── Full-screen campaign notes ────────────────────────────── -->
-  <div id="notesSheet" class="mobile-sheet">
-    <div class="mobile-sheet-panel">
-      <div class="mobile-sheet-header">
-        <div class="mobile-sheet-title">Campaign Notes</div>
-      </div>
-      <div class="mobile-sheet-body notes-sheet-body">
-        <div class="notes-status-row">
-          <div id="campaignNotesStatus">Loading…</div>
-          <div id="campaignNotesMeta"></div>
-        </div>
-        <div id="campaignNotesList" class="notes-list"></div>
-      </div>
-      <div id="notesComposerBar" class="mobile-sheet-actions notes-sheet-actions">
-        <div class="notes-composer">
-          <label class="sr-only" for="campaignNotesBody">Campaign note</label>
-          <textarea id="campaignNotesBody" class="notes-editor" placeholder="Write a note..." oninput="handleCampaignNotesInput()"></textarea>
-          <button id="campaignNotesClear" class="notes-clear" type="button" aria-label="Clear note" onclick="clearCampaignNoteComposer()">×</button>
-        </div>
-        <div class="notes-action-row">
-          <button id="campaignNotesSaveButton" class="primary" onclick="submitCampaignNote()">Add Note</button>
-          <button class="secondary" onclick="closeCampaignNotes()">Done</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- ── Note add/edit form ────────────────────────────────────── -->
   <div id="noteFormSheet" class="mobile-sheet">
     <div class="mobile-sheet-panel">
@@ -2796,20 +2768,12 @@
     let lastInventoryLoadAt = 0;
     const CACHE_KEY = 'drakken_inventory_v1';
     const EQUIPMENT_CACHE_KEY = 'drakken_equipment_index_v2';
-    const NOTES_DRAFT_KEY = 'drakken_campaign_notes_draft_v1';
     const IDENTITY_CACHE_KEY = 'drakkenheim_identity_v2';
     const INVENTORY_SCOPE_KEY = 'drakkenheim_inventory_scope_v1';
     const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
     const EQUIPMENT_CACHE_MAX_AGE = 30 * 60 * 1000; // 30 minutes
     const IDENTITY_CACHE_MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours
     const INVENTORY_REVALIDATE_MS = 60 * 1000;
-    let campaignNotes = [];
-    let campaignNotesLoaded = false;
-    let campaignNotesLoading = false;
-    let campaignNotesSaving = false;
-    let campaignNotesViewportBound = false;
-    let campaignNotesAccess = null;
-
     /* ── Party Notes v2 state ─────────────────────────────────────── */
     let notesData        = [];
     let notesLoaded      = false;
@@ -2839,11 +2803,6 @@
       'Quest':    'rgba(234,179,8,.55)',
       'Location': 'rgba(20,184,166,.55)'
     };
-    const NOTE_ACTION_WIDTH = 220;
-    const NOTE_ACTION_ACTIVATE = 380;
-    const NOTE_ACTION_MAX_DRAG = 420;
-    let campaignNoteDraft = '';
-    let campaignNoteEditingId = '';
     let pendingCombineChoice = null;
     const itemCache = {}; // libraryItemId → full sanitized item object (null = fetched, not found)
     let characterOptions = [];
@@ -3342,74 +3301,6 @@
       searchEquipment();
     }
 
-    function getCampaignNotesDraft() {
-      try {
-        const raw = localStorage.getItem(NOTES_DRAFT_KEY);
-        if (!raw) return null;
-        const draft = JSON.parse(raw);
-        if (draft && typeof draft.body === 'string') return draft;
-      } catch (_) {}
-      return null;
-    }
-
-    function cacheCampaignNotesDraft(body, editingId) {
-      try {
-        localStorage.setItem(NOTES_DRAFT_KEY, JSON.stringify({
-          body: String(body || ''),
-          editingId: editingId || '',
-          ts: Date.now()
-        }));
-      } catch (_) {}
-    }
-
-    function clearCampaignNotesDraft() {
-      try {
-        localStorage.removeItem(NOTES_DRAFT_KEY);
-      } catch (_) {}
-    }
-
-    function updateCampaignNotesMeta() {
-      const meta = document.getElementById('campaignNotesMeta');
-      if (!meta) return;
-      const parts = [];
-      if (campaignNotes.length) {
-        parts.push(`${campaignNotes.length} note${campaignNotes.length === 1 ? '' : 's'}`);
-        if (campaignNotes[0].updatedAt) parts.push(`Latest ${formatShortDateTime(campaignNotes[0].updatedAt)}`);
-      }
-      meta.textContent = parts.join(' · ');
-    }
-
-    function setCampaignNotesStatus(html) {
-      const el = document.getElementById('campaignNotesStatus');
-      if (el) el.innerHTML = html || '';
-    }
-
-    function checkCampaignNotesAccess(force = false, callback) {
-      if (!force && campaignNotesAccess && typeof callback === 'function') {
-        callback(campaignNotesAccess);
-        return;
-      }
-
-      google.script.run
-        .withSuccessHandler(res => {
-          const access = {
-            allowed: Boolean(res && res.ok && res.allowed),
-            message: (res && res.message) || 'Notes are under construction.'
-          };
-          campaignNotesAccess = access;
-          if (typeof callback === 'function') callback(access);
-        })
-        .withFailureHandler(() => {
-          const access = {
-            allowed: false,
-            message: 'Notes are under construction.'
-          };
-          campaignNotesAccess = access;
-          if (typeof callback === 'function') callback(access);
-        })
-        .apiGetCampaignNotesAccess();
-    }
-
     function syncModalOpenState() {
       document.body.classList.toggle('app-modal-open', Boolean(document.querySelector('.mobile-sheet.active')));
     }
@@ -3487,413 +3378,6 @@
           targetId: choice.targetId,
           _syncClientId: syncClientId
         });
-    }
-
-    function openCampaignNotes() {
-      checkCampaignNotesAccess(false, access => {
-        if (!access.allowed) {
-          setMainStatus(`<span class="error">${escapeHtml(access.message || 'Notes are under construction.')}</span>`);
-          return;
-        }
-
-        const sheet = document.getElementById('notesSheet');
-        const body = document.getElementById('campaignNotesBody');
-        const draft = getCampaignNotesDraft();
-
-        sheet.classList.add('active');
-        syncModalOpenState();
-        bindCampaignNotesViewport();
-        syncCampaignNotesViewport();
-
-        if (draft && typeof draft.body === 'string') {
-          body.value = draft.body;
-          campaignNoteDraft = draft.body;
-          campaignNoteEditingId = draft.editingId || '';
-          setCampaignNotesStatus('<span class="success">Draft restored locally.</span>');
-        } else if (campaignNoteDraft) {
-          body.value = campaignNoteDraft;
-          setCampaignNotesStatus('Draft ready.');
-        } else {
-          body.value = '';
-          setCampaignNotesStatus('Loading…');
-        }
-
-        syncCampaignNoteComposerUi();
-        renderCampaignNotes();
-        updateCampaignNotesMeta();
-        loadCampaignNotes();
-        setTimeout(() => {
-          body.focus();
-          scrollCampaignNotesToBottom();
-          syncCampaignNotesViewport();
-        }, 60);
-      });
-    }
-
-    function closeCampaignNotes() {
-      const body = document.getElementById('campaignNotesBody').value;
-      campaignNoteDraft = body;
-      cacheCampaignNotesDraft(body, campaignNoteEditingId);
-      campaignNoteEditingId = '';
-      document.getElementById('notesSheet').classList.remove('active');
-      document.documentElement.style.setProperty('--keyboard-offset', '0px');
-      syncModalOpenState();
-    }
-
-    function bindCampaignNotesViewport() {
-      if (campaignNotesViewportBound || !window.visualViewport) return;
-      campaignNotesViewportBound = true;
-      window.visualViewport.addEventListener('resize', syncMobileSheetViewport);
-      window.visualViewport.addEventListener('scroll', syncMobileSheetViewport);
-    }
-
-    function syncMobileSheetViewport() {
-      if (!document.querySelector('.mobile-sheet.active')) {
-        document.documentElement.style.setProperty('--keyboard-offset', '0px');
-        return;
-      }
-      const vv = window.visualViewport;
-      if (!vv) return;
-      const offset = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-      document.documentElement.style.setProperty('--keyboard-offset', `${offset}px`);
-    }
-
-    function syncCampaignNotesViewport() { syncMobileSheetViewport(); }
-
-    function loadCampaignNotes(preloadOnly = false) {
-      if (campaignNotesAccess && !campaignNotesAccess.allowed) return;
-      if (campaignNotesLoading) return;
-      campaignNotesLoading = true;
-      google.script.run
-        .withSuccessHandler(res => {
-          campaignNotesLoading = false;
-          if (!res || !res.ok || !Array.isArray(res.notes)) {
-            if (!preloadOnly) {
-              setCampaignNotesStatus(`<span class="error">${escapeHtml((res && res.error) || 'Could not load notes.')}</span>`);
-            }
-            return;
-          }
-
-          campaignNotes = res.notes;
-          campaignNotesLoaded = true;
-          updateCampaignNotesMeta();
-          if (!preloadOnly || document.getElementById('notesSheet').classList.contains('active')) {
-            renderCampaignNotes();
-            setCampaignNotesStatus('Ready.');
-            scrollCampaignNotesToBottom();
-          }
-        })
-        .withFailureHandler(err => {
-          campaignNotesLoading = false;
-          if (!preloadOnly) {
-            setCampaignNotesStatus(`<span class="error">Notes failed: ${escapeHtml(err.message || err)}</span>`);
-          }
-        })
-        .apiGetCampaignNotes();
-    }
-
-    function handleCampaignNotesInput() {
-      const body = document.getElementById('campaignNotesBody').value;
-      campaignNoteDraft = body;
-      cacheCampaignNotesDraft(body, campaignNoteEditingId);
-      setCampaignNotesStatus(body.trim() ? 'Draft ready.' : 'Ready.');
-      syncCampaignNoteComposerUi();
-    }
-
-    function syncCampaignNoteComposerUi() {
-      const button = document.getElementById('campaignNotesSaveButton');
-      const clear = document.getElementById('campaignNotesClear');
-      const body = document.getElementById('campaignNotesBody');
-      if (!button) return;
-      button.textContent = campaignNoteEditingId ? 'Update Note' : 'Add Note';
-      button.disabled = campaignNotesSaving;
-      if (clear && body) {
-        clear.classList.toggle('visible', Boolean(body.value));
-      }
-    }
-
-    function focusCampaignNoteComposer(selectAll = false) {
-      const body = document.getElementById('campaignNotesBody');
-      const composerBar = document.getElementById('notesComposerBar');
-      if (!body || !composerBar) return;
-
-      composerBar.scrollIntoView({ behavior: 'smooth', block: 'end' });
-
-      setTimeout(() => {
-        body.focus({ preventScroll: true });
-        if (typeof body.setSelectionRange === 'function') {
-          if (selectAll) {
-            body.setSelectionRange(0, body.value.length);
-          } else {
-            const end = body.value.length;
-            body.setSelectionRange(end, end);
-          }
-        }
-        composerBar.scrollIntoView({ behavior: 'smooth', block: 'end' });
-        syncCampaignNotesViewport();
-      }, 80);
-    }
-
-    function renderCampaignNotes() {
-      const list = document.getElementById('campaignNotesList');
-      if (!list) return;
-
-      if (!campaignNotes.length) {
-        list.innerHTML = '<div class="status centered">No notes yet.</div>';
-        return;
-      }
-
-      const orderedNotes = campaignNotes.slice().sort((a, b) => {
-        const aTime = new Date(a.createdAt || a.updatedAt || 0).getTime();
-        const bTime = new Date(b.createdAt || b.updatedAt || 0).getTime();
-        return aTime - bTime;
-      });
-
-      list.innerHTML = orderedNotes.map(note => `
-        <div class="notes-note-row" data-note-id="${escapeHtml(note.noteId)}">
-          <button class="notes-edit-action" type="button" onclick="event.stopPropagation(); startEditCampaignNote('${escapeJsString(note.noteId)}')" style="width:${NOTE_ACTION_WIDTH}px;">Edit</button>
-          <button class="notes-delete-action" type="button" onclick="event.stopPropagation(); deleteCampaignNote('${escapeJsString(note.noteId)}')" style="width:${NOTE_ACTION_WIDTH}px;">Delete</button>
-          <div class="notes-note notes-note-card ${note._pending ? 'pending' : ''} ${campaignNoteEditingId === note.noteId ? 'editing' : ''}" data-note-id="${escapeHtml(note.noteId)}">
-            <div class="notes-note-meta">${escapeHtml(formatShortDateTime(note.updatedAt || note.createdAt))}${note.updatedBy ? ` · ${escapeHtml(note.updatedBy)}` : ''}</div>
-            <div class="notes-note-body">${escapeHtml(note.body)}</div>
-          </div>
-        </div>
-      `).join('');
-
-      bindCampaignNoteGestures();
-    }
-
-    function scrollCampaignNotesToBottom() {
-      const list = document.getElementById('campaignNotesList');
-      if (!list) return;
-      requestAnimationFrame(() => {
-        list.scrollTop = list.scrollHeight;
-      });
-    }
-
-    function bindCampaignNoteGestures() {
-      document.querySelectorAll('.notes-note-row').forEach(row => {
-        const card = row.querySelector('.notes-note-card');
-        if (!card) return;
-        let startX = 0;
-        let startY = 0;
-        let dragging = false;
-        let axisLocked = null;
-        let triggered = false;
-
-        function setNoteSwipeVisual(currentOffset, animate) {
-          const editButton = row.querySelector('.notes-edit-action');
-          const deleteButton = row.querySelector('.notes-delete-action');
-          const clamped = Math.max(-NOTE_ACTION_MAX_DRAG, Math.min(NOTE_ACTION_MAX_DRAG, currentOffset));
-          const revealOffset = Math.max(-NOTE_ACTION_WIDTH, Math.min(NOTE_ACTION_WIDTH, clamped));
-          const editProgress = revealOffset > 0 ? Math.min(1, revealOffset / NOTE_ACTION_WIDTH) : 0;
-          const deleteProgress = revealOffset < 0 ? Math.min(1, Math.abs(revealOffset) / NOTE_ACTION_WIDTH) : 0;
-
-          card.classList.toggle('snap', animate);
-          card.style.transform = clamped ? `translateX(${clamped}px)` : '';
-
-          if (editButton) {
-            editButton.style.opacity = String(editProgress);
-            editButton.style.transform = `translateX(${Math.round(-18 * (1 - editProgress))}px) scale(${(0.96 + (0.04 * editProgress)).toFixed(3)})`;
-          }
-          if (deleteButton) {
-            deleteButton.style.opacity = String(deleteProgress);
-            deleteButton.style.transform = `translateX(${Math.round(18 * (1 - deleteProgress))}px) scale(${(0.96 + (0.04 * deleteProgress)).toFixed(3)})`;
-          }
-        }
-
-        card.addEventListener('touchstart', e => {
-          const touch = e.changedTouches[0];
-          startX = touch.clientX;
-          startY = touch.clientY;
-          dragging = true;
-          triggered = false;
-          axisLocked = null;
-          setNoteSwipeVisual(0, false);
-        }, { passive: true });
-        card.addEventListener('touchend', e => {
-          if (!dragging) return;
-          dragging = false;
-          if (triggered) return;
-          const touch = e.changedTouches[0];
-          const dx = touch.clientX - startX;
-          const dy = touch.clientY - startY;
-          if (Math.abs(dy) > 40) return;
-          if (Math.abs(dx) < 24 && Math.abs(dy) < 24) {
-            setNoteSwipeVisual(0, true);
-            return;
-          }
-          setNoteSwipeVisual(0, true);
-        }, { passive: true });
-        card.addEventListener('touchmove', e => {
-          if (!dragging) return;
-          const touch = e.changedTouches[0];
-          const dx = touch.clientX - startX;
-          const dy = touch.clientY - startY;
-          if (!axisLocked) {
-            if (Math.abs(dx) >= Math.abs(dy) * 2) axisLocked = 'h';
-            else if (Math.abs(dy) > Math.abs(dx)) axisLocked = 'v';
-            else return;
-          }
-          if (axisLocked === 'v') return;
-          const liveOffset = Math.max(-NOTE_ACTION_MAX_DRAG, Math.min(NOTE_ACTION_MAX_DRAG, dx));
-          setNoteSwipeVisual(liveOffset, false);
-          if (liveOffset <= -NOTE_ACTION_ACTIVATE) {
-            dragging = false;
-            triggered = true;
-            setNoteSwipeVisual(0, true);
-            deleteCampaignNote(row.dataset.noteId);
-            return;
-          }
-          if (liveOffset >= NOTE_ACTION_ACTIVATE) {
-            dragging = false;
-            triggered = true;
-            setNoteSwipeVisual(0, true);
-            startEditCampaignNote(row.dataset.noteId);
-          }
-        }, { passive: true });
-      });
-    }
-
-    function startEditCampaignNote(noteId) {
-      const note = campaignNotes.find(entry => entry.noteId === noteId);
-      if (!note) return;
-      campaignNoteEditingId = noteId;
-      campaignNoteDraft = note.body;
-      document.getElementById('campaignNotesBody').value = note.body;
-      cacheCampaignNotesDraft(note.body, noteId);
-      setCampaignNotesStatus('Editing note.');
-      renderCampaignNotes();
-      syncCampaignNoteComposerUi();
-      focusCampaignNoteComposer(true);
-    }
-
-    function clearCampaignNoteComposer() {
-      campaignNoteEditingId = '';
-      campaignNoteDraft = '';
-      const body = document.getElementById('campaignNotesBody');
-      body.value = '';
-      clearCampaignNotesDraft();
-      setCampaignNotesStatus('Ready.');
-      renderCampaignNotes();
-      syncCampaignNoteComposerUi();
-      focusCampaignNoteComposer(false);
-    }
-
-    function submitCampaignNote() {
-      const bodyInput = document.getElementById('campaignNotesBody');
-      const body = bodyInput.value.trim();
-      if (!body) {
-        setCampaignNotesStatus('<span class="error">Write a note first.</span>');
-        return;
-      }
-
-      const nowIso = new Date().toISOString();
-      const isEditing = Boolean(campaignNoteEditingId);
-      const tempId = isEditing ? campaignNoteEditingId : `temp_${Date.now()}`;
-      const previousNotes = campaignNotes.slice();
-      const existing = campaignNotes.find(note => note.noteId === campaignNoteEditingId);
-      const optimistic = {
-        noteId: tempId,
-        createdAt: existing ? existing.createdAt : nowIso,
-        updatedAt: nowIso,
-        updatedBy: 'You',
-        body,
-        _pending: true
-      };
-
-      if (isEditing) {
-        campaignNotes = campaignNotes.map(note => note.noteId === campaignNoteEditingId ? optimistic : note);
-      } else {
-        campaignNotes = [...campaignNotes, optimistic];
-      }
-
-      campaignNotesLoaded = true;
-      campaignNoteDraft = '';
-      campaignNotesSaving = true;
-      renderCampaignNotes();
-      scrollCampaignNotesToBottom();
-      updateCampaignNotesMeta();
-      setCampaignNotesStatus(isEditing ? 'Updating…' : 'Adding…');
-      bodyInput.value = '';
-      campaignNoteEditingId = '';
-      clearCampaignNotesDraft();
-      syncCampaignNoteComposerUi();
-
-      const runner = google.script.run
-        .withSuccessHandler(res => {
-          campaignNotesSaving = false;
-          if (!res || !res.ok || !res.note) {
-            campaignNotes = previousNotes;
-            renderCampaignNotes();
-            updateCampaignNotesMeta();
-            setCampaignNotesStatus(`<span class="error">${escapeHtml((res && res.error) || 'Note save failed.')}</span>`);
-            campaignNoteEditingId = isEditing ? tempId : '';
-            bodyInput.value = body;
-            campaignNoteDraft = body;
-            cacheCampaignNotesDraft(body, campaignNoteEditingId);
-            syncCampaignNoteComposerUi();
-            return;
-          }
-
-          if (isEditing) {
-            campaignNotes = campaignNotes.map(note => note.noteId === tempId ? res.note : note);
-          } else {
-            campaignNotes = campaignNotes.map(note => note.noteId === tempId ? res.note : note);
-          }
-          renderCampaignNotes();
-          scrollCampaignNotesToBottom();
-          updateCampaignNotesMeta();
-          setCampaignNotesStatus(`<span class="success">${escapeHtml(res.message || 'Note saved.')}</span>`);
-          syncCampaignNoteComposerUi();
-        })
-        .withFailureHandler(err => {
-          campaignNotesSaving = false;
-          campaignNotes = previousNotes;
-          renderCampaignNotes();
-          updateCampaignNotesMeta();
-          setCampaignNotesStatus(`<span class="error">Note save failed: ${escapeHtml(err.message || err)}</span>`);
-          campaignNoteEditingId = isEditing ? tempId : '';
-          bodyInput.value = body;
-          campaignNoteDraft = body;
-          cacheCampaignNotesDraft(body, campaignNoteEditingId);
-          syncCampaignNoteComposerUi();
-        });
-
-      if (isEditing) {
-        runner.apiUpdateCampaignNote({ noteId: tempId, body });
-      } else {
-        runner.apiAddCampaignNote({ body });
-      }
-    }
-
-    function deleteCampaignNote(noteId) {
-      const note = campaignNotes.find(entry => entry.noteId === noteId);
-      if (!note) return;
-      const previousNotes = campaignNotes.slice();
-      campaignNotes = campaignNotes.filter(entry => entry.noteId !== noteId);
-      renderCampaignNotes();
-      updateCampaignNotesMeta();
-      setCampaignNotesStatus('Deleting…');
-
-      google.script.run
-        .withSuccessHandler(res => {
-          if (!res || !res.ok) {
-            campaignNotes = previousNotes;
-            renderCampaignNotes();
-            updateCampaignNotesMeta();
-            setCampaignNotesStatus(`<span class="error">${escapeHtml((res && res.error) || 'Delete failed.')}</span>`);
-            return;
-          }
-          setCampaignNotesStatus(`<span class="success">${escapeHtml(res.message || 'Note deleted.')}</span>`);
-        })
-        .withFailureHandler(err => {
-          campaignNotes = previousNotes;
-          renderCampaignNotes();
-          updateCampaignNotesMeta();
-          setCampaignNotesStatus(`<span class="error">Delete failed: ${escapeHtml(err.message || err)}</span>`);
-        })
-        .apiDeleteCampaignNote(noteId);
     }
 
     function showSection(section) {
@@ -7679,16 +7163,6 @@
       const status = document.getElementById('searchStatus');
       const shouldPaintSearchUi = !preloadOnly || commandMode === 'add';
 
-      function maybePreloadNotes() {
-        if (preloadOnly && !campaignNotesLoaded && !campaignNotesLoading) {
-          checkCampaignNotesAccess(false, access => {
-            if (access.allowed) {
-              loadCampaignNotes(true);
-            }
-          });
-        }
-      }
-
       if (equipmentIndexLoading) {
         if (shouldPaintSearchUi) {
           searchEquipment();
@@ -7700,7 +7174,6 @@
         if (shouldPaintSearchUi) {
           searchEquipment();
         }
-        maybePreloadNotes();
         return;
       }
 
@@ -7754,7 +7227,6 @@
           if (shouldPaintSearchUi) {
             searchEquipment();
           }
-          maybePreloadNotes();
         })
         .withFailureHandler(err => {
           equipmentIndexLoading = false;
@@ -7768,7 +7240,6 @@
               status.textContent = 'Refresh failed — showing cached library.';
             }
           }
-          maybePreloadNotes();
         })
         .apiGetEquipmentIndex();
     }

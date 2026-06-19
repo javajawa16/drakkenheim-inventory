@@ -1311,7 +1311,7 @@ execution-trace + state-machine on the consuming write path):
 - **Create note** — touches the section-1 `CAMPAIGN_NOTES_HEADERS` constant
   (135); traced to disambiguate the two coexisting note backends (below).
 
-#### RISK · Code.js:135 · Two parallel note backends share no schema; only one is documented
+#### ~~RISK · Code.js:135 · Two parallel note backends share no schema; only one is documented~~ FIXED
 `CAMPAIGN_NOTES_HEADERS` (5 columns: Note ID · Created At · Updated At ·
 Updated By · Body) backs the **legacy** "campaign notes" feature on the
 `CAMPAIGN_NOTES_FEED` sheet (`CONFIG.NOTES_SHEET`, line 22), consumed by

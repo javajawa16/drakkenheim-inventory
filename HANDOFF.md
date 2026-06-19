@@ -634,7 +634,6 @@ Fix:
 6. **Party Notes — next steps**:
    - Item detail integration: "+ Add Item Note" on `#descriptionSheet`; `relatedItemId` field and hidden form input already plumbed.
    - Note detail/full-view sheet (expand beyond 3-line body preview).
-   - Remove legacy `CAMPAIGN_NOTES_FEED` v1 functions when confirmed unused.
 
 7. **Remaining open RISKs** (deferred — complex or schema-level changes):
    - RISK 8240: leaked `_inFlightWrites` permanently freezes reconciliation — needs watchdog/id-based counter (not a simple fix)
@@ -642,7 +641,6 @@ Fix:
    - RISK 6741: Undo Last Pay removes inventory rows but leaves RESOURCE_LEDGER entries; history shows the payment until next reload
    - RISK 1853: `appendResourceLedger_` swallows errors silently — ledger write failure invisible to client
    - RISK 6435: ledger note-edit falls back to Timestamp for same-second multi-row ops — needs stable per-entry ID
-   - RISK 135: two note backends coexist (CAMPAIGN_NOTES_FEED v1 + NOTES v2) — retire v1 when confirmed unused
 
 8. **"Give to…" rollup limitation** — moves only the representative row. Needs a dedicated server-side multi-row move endpoint for full FIFO give.
 

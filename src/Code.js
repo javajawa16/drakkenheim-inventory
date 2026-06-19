@@ -19,7 +19,6 @@ const CONFIG = {
   INVENTORY_SHEET: 'PARTY_INVENTORY',
   DELERIUM_SHEET: 'DELERIUM_LEDGER',
   RESOURCE_LEDGER_SHEET: 'RESOURCE_LEDGER',
-  NOTES_SHEET: 'CAMPAIGN_NOTES_FEED',
   NOTES_OWNER_EMAIL: 'javajawa16@gmail.com',
   CHARACTERS_SHEET: 'CHARACTERS',
   USER_PROFILES_SHEET: 'USER_PROFILES',
@@ -130,14 +129,6 @@ const RESOURCE_LEDGER_HEADERS = [
   'Item',
   'Notes',
   'Character'
-];
-
-const CAMPAIGN_NOTES_HEADERS = [
-  'Note ID',
-  'Created At',
-  'Updated At',
-  'Updated By',
-  'Body'
 ];
 
 const CHARACTERS_HEADERS = [
@@ -268,7 +259,6 @@ function setupInventoryTabs() {
     writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.INVENTORY_SHEET), INVENTORY_HEADERS);
     writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.DELERIUM_SHEET), DELERIUM_HEADERS);
     writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.RESOURCE_LEDGER_SHEET), RESOURCE_LEDGER_HEADERS);
-    writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.NOTES_SHEET), CAMPAIGN_NOTES_HEADERS);
     writeHeaderOnly_(getOrCreateSheet_(ss, PARTY_NOTES_SHEET), PARTY_CAMPAIGN_NOTES_HEADERS);
     writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.CHARACTERS_SHEET), CHARACTERS_HEADERS);
     writeHeaderOnly_(getOrCreateSheet_(ss, CONFIG.USER_PROFILES_SHEET), USER_PROFILE_HEADERS);
@@ -278,7 +268,6 @@ function setupInventoryTabs() {
     log_('INFO', 'Inventory tabs setup complete', {
       inventorySheet: CONFIG.INVENTORY_SHEET,
       deleriumSheet: CONFIG.DELERIUM_SHEET,
-      notesSheet: CONFIG.NOTES_SHEET,
       partyNotesSheet: PARTY_NOTES_SHEET,
       charactersSheet: CONFIG.CHARACTERS_SHEET,
       userProfilesSheet: CONFIG.USER_PROFILES_SHEET,
@@ -295,7 +284,6 @@ function resetAppDataSheets() {
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.INVENTORY_SHEET), INVENTORY_HEADERS);
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.DELERIUM_SHEET), DELERIUM_HEADERS);
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.RESOURCE_LEDGER_SHEET), RESOURCE_LEDGER_HEADERS);
-    clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.NOTES_SHEET), CAMPAIGN_NOTES_HEADERS);
     clearSheetToHeaders_(getOrCreateSheet_(ss, PARTY_NOTES_SHEET), PARTY_CAMPAIGN_NOTES_HEADERS);
     clearSheetToHeaders_(getOrCreateSheet_(ss, CONFIG.LOG_SHEET), [
       'Timestamp',
@@ -320,7 +308,6 @@ function resetAppDataSheets() {
         CONFIG.INVENTORY_SHEET,
         CONFIG.DELERIUM_SHEET,
         CONFIG.RESOURCE_LEDGER_SHEET,
-        CONFIG.NOTES_SHEET,
         PARTY_NOTES_SHEET,
         CONFIG.LOG_SHEET
       ],
@@ -1521,35 +1508,6 @@ function requireAllowedUser_() {
   return email;
 }
 
-function requireCampaignNotesOwner_() {
-  const email  = requireAllowedUser_();
-  const admins = getAdminEmails_();
-
-  if (!admins.length) {
-    throw new Error('Notes are unavailable.');
-  }
-
-  if (!admins.includes(email)) {
-    throw new Error('Notes are under construction.');
-  }
-
-  return email;
-}
-
-function apiGetCampaignNotesAccess() {
-  try {
-    const email   = requireAllowedUser_();
-    const allowed = getAdminEmails_().includes(email);
-    return {
-      ok: true,
-      allowed,
-      message: allowed ? 'Notes available.' : 'Notes are under construction.'
-    };
-  } catch (err) {
-    return publicApiError_('apiGetCampaignNotesAccess', err, { allowed: false });
-  }
-}
-
 function requireAdminUser_() {
   const activeEmail = getActiveUserEmail_();
   const effectiveEmail = safeText_(Session.getEffectiveUser().getEmail()).toLowerCase();
@@ -1986,229 +1944,6 @@ function apiGetInventory() {
 
   } catch (err) {
     return publicApiError_('apiGetInventory', err, { rows: [], resourceLedger: [] });
-  }
-}
-
-function apiGetCampaignNotes() {
-  try {
-    requireCampaignNotesOwner_();
-    const ss = getInventorySpreadsheet_();
-    const sheet = getOrCreateSheet_(ss, CONFIG.NOTES_SHEET);
-    writeHeaderOnly_(sheet, CAMPAIGN_NOTES_HEADERS);
-
-    if (sheet.getLastRow() < 2) {
-      return {
-        ok: true,
-        notes: []
-      };
-    }
-
-    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, CAMPAIGN_NOTES_HEADERS.length).getValues();
-    const notes = values
-      .filter(row => String(row[0] || '').trim() && String(row[4] || '').trim())
-      .map(row => ({
-        noteId: safeText_(row[0]),
-        createdAt: normalizeForClient_(row[1]),
-        updatedAt: normalizeForClient_(row[2]),
-        updatedBy: safeText_(row[3]),
-        body: safeText_(row[4])
-      }))
-      .sort((a, b) => {
-        const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime() || 0;
-        const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime() || 0;
-        return bTime - aTime;
-      });
-
-    return {
-      ok: true,
-      notes
-    };
-
-  } catch (err) {
-    return publicApiError_('apiGetCampaignNotes', err, {
-      notes: []
-    });
-  }
-}
-
-function apiAddCampaignNote(payload) {
-  const lock = LockService.getDocumentLock();
-  let userEmail = '';
-
-  try {
-    userEmail = requireCampaignNotesOwner_();
-    if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
-
-    const body = validateText_(payload && payload.body, 'Note', 5000);
-    const ss = getInventorySpreadsheet_();
-    const sheet = getOrCreateSheet_(ss, CONFIG.NOTES_SHEET);
-    writeHeaderOnly_(sheet, CAMPAIGN_NOTES_HEADERS);
-
-    const createdAt = new Date();
-    const noteId = `note_${createdAt.getTime()}_${Math.floor(Math.random() * 100000)}`;
-    const normalizedBody = String(body || '').replace(/\r\n/g, '\n').trim();
-
-    sheet.appendRow([
-      noteId,
-      createdAt,
-      createdAt,
-      userEmail,
-      normalizedBody
-    ]);
-
-    auditWrite_({
-      userEmail,
-      action: 'ADD_CAMPAIGN_NOTE',
-      itemId: noteId,
-      itemName: 'Campaign Note',
-      oldValue: '',
-      newValue: normalizedBody,
-      delta: '',
-      note: `Added ${normalizedBody.length} chars`,
-      status: 'OK'
-    });
-
-    return {
-      ok: true,
-      message: 'Note added.',
-      note: {
-        noteId,
-        createdAt: normalizeForClient_(createdAt),
-        updatedAt: normalizeForClient_(createdAt),
-        updatedBy: userEmail,
-        body: normalizeForClient_(normalizedBody)
-      }
-    };
-  } catch (err) {
-    return publicApiError_('apiAddCampaignNote', err, {
-      note: null
-    });
-  } finally {
-    try {
-      lock.releaseLock();
-    } catch (_) {}
-  }
-}
-
-function apiUpdateCampaignNote(payload) {
-  const lock = LockService.getDocumentLock();
-  let userEmail = '';
-
-  try {
-    userEmail = requireCampaignNotesOwner_();
-    if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
-
-    const noteId = validateId_(payload && payload.noteId, 'note ID');
-    const body = validateText_(payload && payload.body, 'Note', 5000);
-    const ss = getInventorySpreadsheet_();
-    const sheet = getOrCreateSheet_(ss, CONFIG.NOTES_SHEET);
-    writeHeaderOnly_(sheet, CAMPAIGN_NOTES_HEADERS);
-
-    const values = sheet.getDataRange().getValues();
-    const headers = values.shift().map(String);
-    const noteIdIndex = headers.indexOf('Note ID');
-    const bodyIndex = headers.indexOf('Body');
-    const updatedAtIndex = headers.indexOf('Updated At');
-    const updatedByIndex = headers.indexOf('Updated By');
-    const createdAtIndex = headers.indexOf('Created At');
-    const rowOffset = values.findIndex(row => safeText_(row[noteIdIndex]) === noteId);
-
-    if (rowOffset === -1) {
-      return { ok: false, error: 'Note not found.' };
-    }
-
-    const rowNumber = rowOffset + 2;
-    const row = values[rowOffset];
-    const updatedAt = new Date();
-    const normalizedBody = String(body || '').replace(/\r\n/g, '\n').trim();
-    row[bodyIndex] = normalizedBody;
-    row[updatedAtIndex] = updatedAt;
-    row[updatedByIndex] = userEmail;
-    sheet.getRange(rowNumber, 1, 1, headers.length).setValues([row]);
-
-    auditWrite_({
-      userEmail,
-      action: 'UPDATE_CAMPAIGN_NOTE',
-      itemId: noteId,
-      itemName: 'Campaign Note',
-      oldValue: '',
-      newValue: normalizedBody,
-      delta: '',
-      note: `Updated ${normalizedBody.length} chars`,
-      status: 'OK'
-    });
-
-    return {
-      ok: true,
-      message: 'Note updated.',
-      note: {
-        noteId,
-        createdAt: normalizeForClient_(row[createdAtIndex]),
-        updatedAt: normalizeForClient_(updatedAt),
-        updatedBy: userEmail,
-        body: normalizeForClient_(normalizedBody)
-      }
-    };
-  } catch (err) {
-    return publicApiError_('apiUpdateCampaignNote', err, {
-      note: null
-    });
-  } finally {
-    try {
-      lock.releaseLock();
-    } catch (_) {}
-  }
-}
-
-function apiDeleteCampaignNote(noteId) {
-  const lock = LockService.getDocumentLock();
-  let userEmail = '';
-
-  try {
-    userEmail = requireCampaignNotesOwner_();
-    if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
-
-    const id = validateId_(noteId, 'note ID');
-    const ss = getInventorySpreadsheet_();
-    const sheet = getOrCreateSheet_(ss, CONFIG.NOTES_SHEET);
-    writeHeaderOnly_(sheet, CAMPAIGN_NOTES_HEADERS);
-
-    const values = sheet.getDataRange().getValues();
-    const headers = values.shift().map(String);
-    const noteIdIndex = headers.indexOf('Note ID');
-    const rowOffset = values.findIndex(row => safeText_(row[noteIdIndex]) === id);
-
-    if (rowOffset === -1) {
-      return { ok: false, error: 'Note not found.' };
-    }
-
-    sheet.deleteRow(rowOffset + 2);
-
-    auditWrite_({
-      userEmail,
-      action: 'DELETE_CAMPAIGN_NOTE',
-      itemId: id,
-      itemName: 'Campaign Note',
-      oldValue: '',
-      newValue: '',
-      delta: '',
-      note: 'Deleted note',
-      status: 'OK'
-    });
-
-    return {
-      ok: true,
-      message: 'Note deleted.',
-      noteId: id
-    };
-  } catch (err) {
-    return publicApiError_('apiDeleteCampaignNote', err, {
-      noteId: noteId
-    });
-  } finally {
-    try {
-      lock.releaseLock();
-    } catch (_) {}
   }
 }
 
