@@ -1,9 +1,96 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 9. Index.html lines 1501–3000 (CSS continued, early JS)
+Next section: 10. Index.html lines 3001–4500 (inventory render, search)
 
 ## Sessions
+
+### 2026-06-19 (run 35) — Sections audited: 9
+
+Section 9 = Index.html lines 1501–3000. The range splits into: phone/DPR-scaled CSS
+overrides + dice-overlay + party-notes CSS (1501–2046), the entire `<body>` markup —
+header, inventory/add/notes `<section>`s, and **every mobile-sheet component**
+(`inventorySheet`, `descriptionSheet`, `quickEditSheet`, `noteFormSheet`, `combineSheet`,
+`goldSheet`, `deleriumSheet`, `sellItemSheet`, `sellBatchSheet`, `giveItemSheet`,
+`payReasonSheet`, `identitySheet`, dice overlay) plus bottom-nav (2049–2750), and the
+early JS state block + cache/character helpers (`cacheInventoryRows`,
+`primeInventoryCacheAfterAdd`, `getCachedInventoryRows/Payload`,
+`populateCharacterSelectors`, `loadCharacters`, equipment-index cache) (2752–3000).
+Because the sheets are the literal UI of nearly every story, each story was traced from
+its in-range component into the out-of-range handler.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, with
+execution-trace + state-machine on each write path / component):
+
+- **View item details** (tap card → description sheet → stat block + description).
+  `descriptionSheet` HTML (2415–2447) → `openDescriptionSheet` (~6890) →
+  `apiGetEquipmentItem` with session `itemCache`. Found the cache-poisoning RISK below.
+- **Give item to character** (description sheet → Give to… → pick). `descriptionSheet`
+  stepper (2432–2444) → `openGiveItemSheet` (5567) → `giveItemToCharacter` (6045). Found
+  the stepper-ignored BUG below. Optimistic holder swap + revert is otherwise clean and
+  closes the quick-edit sheet correctly via `closeInventoryPanels` (7391) →
+  `setQuickEditorOpen(false)`.
+- **Sell item / Remove item** (description sheet → stepper → confirm). `openSellItemSheet`
+  (5598)/`confirmSellItem` (5618) and `stepDescRemoveQty`/`confirmDescRemove` (6989/6995)
+  both honor `descRemoveQty` via FIFO drain across rollup rows; full `previousRows` revert
+  on failure; sheet closed immediately so double-tap is unreachable. Clean.
+- **Edit inventory item** / **Quick-adjust** / **Combine duplicate** / **Create/Edit note**
+  — component structure traced (`inventorySheet` 2345, `quickEditSheet` 2450,
+  `combineSheet` 2569, `noteFormSheet` 2531) into handlers covered in runs 31/33; markup
+  matches handler IDs, no orphaned/duplicate IDs, all close buttons wired.
+- **Add library/custom item** (cache path). `addInventoryItem` (8102) success/failure
+  ordering vs the in-range `cacheInventoryRows` guard — see Note below (self-heals).
+
+#### BUG · Index.html:5571 · Description-sheet "Give to…" silently ignores the qty stepper
+Story **Give item to character**, step "pick character → confirm". The description sheet's
+shared qty stepper (`descRemoveQty`, HTML 2432–2439) is documented (README §Item
+description sheet: "shared qty stepper… stepper drives all three") to drive Sell, Give,
+and Remove. Sell (`confirmSellItem` 5637: `let remaining = descRemoveQty`) and Remove
+(`confirmDescRemove` 7009) both FIFO-drain exactly `descRemoveQty` units. **Give does not.**
+`openGiveItemSheet` (5571) even renders the promise into the title —
+`giveQty = (item === selectedInventory && descRemoveQty > 1) ? descRemoveQty : 0` →
+`Give 3× "Gemstone" To…` — but `giveItemToCharacter` (6045) ignores `descRemoveQty`
+entirely and just flips the holder of the single representative row via
+`apiUpdateInventory({inventoryId, holder})`. Concretely: a Party-pool row of `5× Gemstone`,
+stepper set to 2, tap **Give to Bob** → title says "Give 2×", but the result moves **all 5**
+gemstones to Bob (the whole representative row), and for a multi-row rollup the other rows
+stay put (the documented TODO). So Give neither splits the requested quantity nor matches
+its own title. Fix: have Give FIFO-split `descRemoveQty` across rollup rows like Sell/Remove
+(server-side this needs a qty-aware move: decrement source rows, create/merge a holder-tagged
+row), or — if partial give is out of scope — drop the `descRemoveQty` from the title and
+reset the stepper so the UI doesn't promise a quantity it discards.
+
+#### RISK · Index.html:6948 · A transient description fetch failure poisons `itemCache` for the whole session
+Story **View item details**, failure-at-step. On first open of an item with a
+`Library Item ID`, `openDescriptionSheet` fires `apiGetEquipmentItem`. The
+`withFailureHandler` (6946) sets `itemCache[libraryItemId] = null` and clears the status
+line, leaving the description area showing only `userNotes` (or blank) with **no error
+message**. Because the cached-branch test is `itemCache[libraryItemId] !== undefined`
+(6931), the now-`null` entry is treated as "fetched, not found" forever: re-opening the
+same item takes the cached branch and renders "No description available." via
+`applyItemToDescSheet_(null)` and **never retries the fetch**. So a single transient
+network/quota blip while viewing one item permanently suppresses that item's stat block +
+description for the rest of the session (until full reload), and the user gets no feedback
+that anything failed. The success path is fine; only the failure path is over-eager to
+cache. Fix: on failure, leave `itemCache[libraryItemId]` `undefined` (so the next open
+retries) and surface a retryable "Couldn't load description — tap to retry" in
+`descStatus`, rather than caching the negative result.
+
+#### Note · Index.html:2939 · `cacheInventoryRows` in-flight guard self-heals; sheet components map cleanly to handlers
+Positive baseline. Traced the in-range `cacheInventoryRows` (2939, `if (_inFlightWrites > 0)
+return;`) against `primeInventoryCacheAfterAdd` (2950) and all its callers
+(`addInventoryItem` 8197, `confirmSellItem` 5676, `confirmPayWithReason` 6149): every caller
+decrements `_inFlightWrites` **before** priming, so in the common single-write case the
+localStorage cache is written. The only skip window is a genuinely concurrent second
+in-flight write, where memory (`inventoryRows`) is correct but the cache lags one snapshot;
+a navigate-away-and-return in that window shows slightly stale cache until the next
+revalidation/`loadInventory` corrects it — self-healing, by design. Also confirmed the
+12 mobile-sheet components in this range have unique IDs matching their handlers, every
+`.active`-toggling sheet pairs an `add` with a `syncModalOpenState()`/`remove` close path,
+and the give-from-quick-edit path closes the underlying quick-edit sheet (no stuck sheet).
+Stories with clean component↔handler mapping: Edit item, Quick-adjust, Combine, Create/Edit
+note, Sell/Remove from description.
+
 
 ### 2026-06-19 (run 34) — Sections audited: 8
 
