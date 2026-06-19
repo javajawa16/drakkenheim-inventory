@@ -487,6 +487,8 @@ The `@media (min-width: 700px)` block sets `.mobile-sheet { display: none !impor
 | `@310` | Audit fix batch: runs 22-26 (pendingForeignReload, _inFlightWrites gaps, notes in-flight guard, delerium quick-add size, inventory edit save guard, Undo Last Pay wiring) |
 | `@311` | Audit fix batch: runs 27-37 — all open BUG findings closed (see session summary below) |
 | `@312` | Fix BUG 5510 + BUG 6154 from CCR audit run 37 re-audit (see session summary below) |
+| `@313–@314` | Audit BUG fixes: BUG 7379 (quick-adjust missing clientCharacter), BUG 7774 (equipment index mutual recursion) from CCR runs 38–39 |
+| `@315` | Fix 7 open RISKs: RISK 6337, 7066, 3169, 110, 7109, 6029, 5427 (see session summary below) |
 
 ---
 
@@ -603,6 +605,20 @@ Fix:
 
 ---
 
+## Session Summary (2026-06-19 — RISK patch batch, deploy @315)
+
+### 7 open RISKs fixed
+
+- **RISK 6337** — Added `'ADJUST'` to `LEDGER_VISIBLE_ACTIONS`. Gold quick-adjust entries now appear in the gold ledger (were silently invisible; delerium already showed because it skips the allowlist).
+- **RISK 3169** — Added `if (Date.now() - lastTapOpenedAt < 500) return;` guard to the `touchend` tap branch in `initInventoryGestures`. Was missing while `pointerup` branch already had it — both events fire on touch, causing double-open.
+- **RISK 110** — `openDiceCalc` now adds `app-modal-open` to `document.body`; `closeDiceCalc` calls `syncModalOpenState()`. Dice overlay now honors the scroll-lock contract (body could scroll behind the calculator before).
+- **RISK 7066** — Added `descActionInFlight` boolean flag (declared near `quickEditInFlight`). Both `confirmSellItem` and `confirmDescRemove` guard on it and set/clear it around the server call.
+- **RISK 7109** — `openQuickEditPanel` now returns early with `if (quickEditInFlight) return;` instead of unconditionally resetting the flag. Prevents a second quick-edit from opening mid-flight and clearing the in-flight guard.
+- **RISK 6029** — Added `sellBatchGeneration` counter. Success handler captures `const gen = ++sellBatchGeneration` before scheduling the 1.5 s close; timer only fires `closeSellBatchSheet()` if generation hasn't advanced (i.e. sheet wasn't reopened for a new batch).
+- **RISK 5427** — `renderGoldSheetButtons` now computes `isDMGoldScope = isDMUser && goldSheetScope !== 'party'`. In DM grand-total scope, only the Done button renders; Got Paid / Pay / Split are hidden so the DM cannot accidentally attribute gold to their character name instead of the party pool.
+
+---
+
 ## Outstanding / Next Tasks
 
 1. **Import equipment library** — upload `equipment_library_5e.xlsx` to Google Drive, open as Sheets, paste rows 2–5837 into `EQUIPMENT_LIBRARY_CLEAN` at row 2. Activates full stat blocks for all 5,836 items.
@@ -621,23 +637,19 @@ Fix:
    - Note detail/full-view sheet (expand beyond 3-line body preview).
    - Remove legacy `CAMPAIGN_NOTES_FEED` v1 functions when confirmed unused.
 
-7. **Open RISKs from audit** (no BUGs remain):
-   - RISK 3169: tap double-opens panel — `touchend` tap branch missing `lastTapOpenedAt` guard
-   - RISK 110: dice overlay missing `app-modal-open` scroll-lock — body scrolls behind the calculator
-   - RISK 7093: client/server delerium quick-edit type classification diverges for custom item names
-   - RISK 7109: `openQuickEditPanel` resets `quickEditInFlight = false` even if a call is in-flight
+7. **Remaining open RISKs** (deferred — complex or schema-level changes):
+   - RISK 8240: leaked `_inFlightWrites` permanently freezes reconciliation — needs watchdog/id-based counter (not a simple fix)
+   - RISK 7093: client/server delerium quick-edit type classification diverges for custom names — align classifiers
    - RISK 6741: Undo Last Pay removes inventory rows but leaves RESOURCE_LEDGER entries; history shows the payment until next reload
    - RISK 1853: `appendResourceLedger_` swallows errors silently — ledger write failure invisible to client
    - RISK 4810: Party Notes tab gating — `applyIdentity` shows it to everyone; README says beta-only; confirm intent
-   - RISK 6029: sell-batch 1.5 s auto-close timer has no generation counter — can close a re-opened sheet
-   - RISK 6435: ledger note-edit falls back to Timestamp for same-second multi-row ops (ambiguous)
-   - RISK Code.js:135: two note backends coexist without documentation (CAMPAIGN_NOTES_FEED vs NOTES)
-   - RISK 5427: DM gold scope shows write buttons (Got Paid/Pay/Split) — DM tapping them creates gold attributed to DM character name instead of party pool
+   - RISK 6435: ledger note-edit falls back to Timestamp for same-second multi-row ops — needs stable per-entry ID
+   - RISK 135: two note backends coexist (CAMPAIGN_NOTES_FEED v1 + NOTES v2) — retire v1 when confirmed unused
 
 8. **"Give to…" rollup limitation** — moves only the representative row. Needs a dedicated server-side multi-row move endpoint for full FIFO give.
 
 9. **Ledger entry ID** — DEFERRED. `apiUpdateLedgerNote` Timestamp-based fallback can hit wrong row in batch ops. Requires new `Entry ID` column in `RESOURCE_LEDGER_HEADERS` and threading through all `appendResourceLedger_` callers and the client cache.
 
-10. **Audit cursor** — currently at section 12: `Index.html lines 6001–7500` (inventory groups, description sheet, sell batch). New findings will appear at the top of `FINDINGS.md`.
+10. **Audit cursor** — currently at section 1: `Code.js lines 1–500` (config, helpers, validation). New findings will appear at the top of `FINDINGS.md`.
 
-11. **Version limit** — currently at `@312`; prune old versions at `script.google.com` when approaching 200.
+11. **Version limit** — currently at `@315`; prune old versions at `script.google.com` when approaching 200.
