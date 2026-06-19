@@ -1,9 +1,89 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 1. Code.js lines 1–500 (config, helpers, validation)
+Next section: 2. Code.js lines 501–1100 (auth, character, inventory read)
 
 ## Sessions
+
+### 2026-06-19 (run 40) — Sections audited: 1
+
+Section 1 = Code.js lines 1–500 (config, helpers, validation). This range is
+almost entirely declarative config + admin/editor-only utilities + the web-app
+entry point; only a small slice executes inside catalog user stories. Read
+in-range (`CONFIG`, the `*_HEADERS` schemas, `APPROVED_INVENTORY_CATEGORIES`,
+`DELERIUM_SIZE_VALUES`, `QUICK_ADD_ITEMS`, `onOpen`/setup/health-check/clean-library
+admin functions, `doGet`/`include_`) plus the cross-referenced surfaces that carry
+section-1 config into stories: `apiGetCategories`/`apiGetQuickAddItems` (880/889),
+`apiSellInventoryBatch` (669), the core validators `safeText_`/`validateText_`/
+`validateQuantity_`/`validateMoney_` (1244/1606/1616/1634), and the client mirrors
+(`QUICK_ADD_ITEMS` 2856, `DELERIUM_SIZES` 2794, the delerium `<select>` options).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine where a write path is reached):
+
+- **All stories — page load** via `doGet` (247) + `include_` (255). Single entry
+  for every story. See RISK below (no error isolation).
+- **Add library item (quick-add variant)** — `apiGetQuickAddItems` (889) surfaces
+  the server `QUICK_ADD_ITEMS` (53) to the client buttons; client keeps a hardcoded
+  mirror (2856) overwritten at boot (2924). Verified server↔client parity (name /
+  category / rarity / valueGp all reconcile; server strips `editType` but it is
+  re-resolved server-side from `quickKey` via `getQuickAddItem_` 1814, so the client
+  never needs it). No divergence.
+- **Add custom item / Edit inventory item** — `apiGetCategories` (880) returns
+  `APPROVED_INVENTORY_CATEGORIES` (30) for the category dropdown; `{ok, rows}`
+  contract matches the client reader. Clean.
+- **Delerium receive/sell** — server `DELERIUM_SIZE_VALUES` (43, lowercase) is the
+  validation gate (2662/2789/3776). Confirmed the client `DELERIUM_SIZES` (2794) and
+  every `<select>` option (2320/6313) are lowercase and identical; the capitalized
+  `LOOKUPS` "Delerium Types" rows (358) are spreadsheet-only and never compared
+  against the gate. No case-mismatch bug.
+- **Sell item / Remove item / Sell item batch** — these reach the in-range header
+  schema `INVENTORY_HEADERS` (86) via the gold-row writer in `apiSellInventoryBatch`
+  (732–738); confirmed the gRow keys all 18 headers exactly. (The endpoint body lives
+  at 669–758, section-2 territory; not re-audited here.)
+
+#### RISK · Code.js:247 · `doGet` has no error isolation — any template/include failure takes the whole app down for every story
+Cross-cutting: **page load** for every catalog story. `doGet` builds the page with
+`HtmlService.createTemplateFromFile('Index').evaluate()` and `Index.html:6` contains
+one server scriptlet `<?!= include_('Wallpaper'); ?>` → `include_` (255) does
+`createHtmlOutputFromFile('Wallpaper').getContent()`. There is no try/catch anywhere
+on this path. If the `Wallpaper` file is renamed/removed, or its content errors, or
+the template evaluation throws for any reason, `evaluate()` throws and every visitor
+gets a raw GAS error page instead of the app — no story can even begin. Probability
+is low today (Wallpaper is static HTML and present), but the sole entry point for the
+entire app has zero fallback. Fix: wrap the template build in try/catch and return a
+minimal static `HtmlOutput` ("Inventory is temporarily unavailable — reload") on
+failure, so a single bad include degrades gracefully instead of hard-failing load.
+
+#### IDEA · Code.js:427 · Admin equipment-library import shares the document lock with player writes, locking out all sells/adds for up to ~4.25 min
+`continueCleanEquipmentLibrary` takes `LockService.getDocumentLock()` (427) and holds
+it across a batch that intentionally runs up to `maxRuntimeMs = 4.25 min` (434).
+Player write endpoints contend on the same document lock with short tries —
+`apiSellInventoryBatch` does `lock.tryLock(10000)` (674) and returns
+`{ok:false, error:'Server busy, please try again.'}` on timeout. So while a DM/admin
+runs a library import batch from the editor, **Sell item / Remove item / Sell batch /
+Add / quick-adjust** (any endpoint on the shared doc lock) fail with "Server busy" for
+the whole batch window. It's intentional maintenance and rare, but undocumented as a
+player-facing outage window. Suggestion: run imports during downtime, or scope the
+import to a narrower lock (e.g. a dedicated PropertiesService flag) so player writes
+aren't starved; at minimum note the window in HANDOFF/README so it isn't mistaken for a
+sync bug.
+
+#### Note · Code.js:1244 · Core validators/helpers and section-1 config are clean across all write stories
+Positive baseline. `safeText_` (1244) maps null/undefined→'' and otherwise
+`String(value).trim()` — numeric `0`→`'0'` (not dropped), Dates stringify safely;
+no data is silently lost. `validateQuantity_` (1616) rejects non-finite input
+(`Number(undefined)`→NaN throws "Quantity must be numeric") and range-checks min/max;
+`validateText_` (1606) length-guards and returns trimmed text; `validateMoney_`/
+`normalizeOptionalMoney_` (1634/1646) pass `''` through and reject negatives. These
+thread through every write story (Add, Edit, Sell, Gold, Delerium, Notes) and handle
+empty/0/NaN correctly — bad input surfaces as a clean `!res.ok` the client can retry,
+not a corrupt write. Config constants (`QUICK_ADD_ITEMS`, `APPROVED_INVENTORY_CATEGORIES`,
+`DELERIUM_SIZE_VALUES`, the `*_HEADERS` schemas) are internally consistent and match
+their client mirrors. `PARTY_NOTES_SHEET`/`PARTY_CAMPAIGN_NOTES_HEADERS` referenced by
+`setupInventoryTabs`/`resetAppDataSheets` (272/299) are defined later (2253/2246) but
+GAS evaluates all top-level `const`s at script load before any function body runs, so
+there is no ReferenceError.
 
 ### 2026-06-19 (run 39) — Sections audited: 13
 
