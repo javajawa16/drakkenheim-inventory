@@ -1,9 +1,121 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
+Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
 
 ## Sessions
+
+### 2026-06-19 (run 30) — Sections audited: 4
+
+Section 4 = Code.js lines 1701–2300 ("sell, combine, gold ops"). The literal
+range is mostly client-sanitizers / ledger helpers (`sanitizeResourceLedgerForClient_`,
+`getResourceLedgerForClient_`, `appendResourceLedger_`, `auditWrite_`), the sync
+helpers (`bumpSync_` 2219, `apiGetSyncState` 2229), and the legacy campaign-notes
+APIs. The actual sell/combine/gold APIs live outside the range and were traced
+where they sit: `apiSellInventoryBatch` (671), `apiDepleteResource` (2773),
+`apiUpdateLedgerNote` (2905), `apiReceiveResource` (2961), `apiSellInventoryItem`
+(3046), `apiSellDelerium` (3101), `apiSplitGold` (3186), `apiSendGoldToMember`
+(3324), `apiCombineInventoryItems` (3565). Client handlers: `confirmPayWithReason`
+(Index.html:6104), `splitGold` (6184), `payResource` (6662), `undoResourcePay`
+(6731), `receivedGold` (5460), `sellDelerium` (5254), `confirmSellBatch` (~5960),
+`confirmCombineInventoryItem` (3455), `updateLedgerNoteFromBottom` (6411).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, with
+execution-trace + state-machine on each write path):
+
+- **Undo last pay** (Gold tab → Pay → character → Undo) — found the BUG below: the
+  undo for a member-pay deletes only the pool-deduct row and leaves the +amount
+  credit row in place, creating gold.
+- **Pay gold** (Pay → route to Purchase or character → confirm) — `confirmPayWithReason`
+  builds an optimistic pending ledger entry, clears inputs, `_inFlightWrites++`,
+  routes to `apiSendGoldToMember` (member) or `apiDepleteResource` (Purchase). Both
+  success/fail branches `removePending` + decrement; failure `restoreInputs`. Server
+  writes credit+deduct rows (member) or single deduct (Purchase), lock released in
+  `finally`. Clean except the undo wiring (see BUG) and a redundant-reload note.
+- **Receive gold** (Got Paid → amount+note → confirm) — `receivedGold` → `apiReceiveResource`.
+  Optimistic pending entry, clean rollback on both failure branches, lock released
+  in `finally`. Clean.
+- **Split gold evenly** (treasurer) — `splitGold` → `apiSplitGold`. Optimistic deduct
+  pending entry; server deducts pool then credits each active non-DM member, remainder
+  to pool; all ledger entries returned and merged; lock in `finally`. Double-tap
+  guarded by immediate input-clear. Clean.
+- **Edit ledger note** (tap entry → inline edit → Update Note) — `selectLedgerRowForEdit`
+  / `updateLedgerNoteFromBottom` → `apiUpdateLedgerNote` (matches by entryId or
+  normalized timestamp+resource). Buttons disabled during flight, re-enabled on
+  failure, local entry patched on success. Clean.
+- **Sell item / Sell batch** (description sheet → Sell for Gold → stepper; Sell Items
+  batch) — `confirmSellBatch` → `apiSellInventoryBatch` (FIFO drain, deletes/decrements
+  highest-row-first, appends gold row + ledger). Confirm button disabled during flight,
+  re-enabled on failure. Pessimistic (rows removed only on success). See IDEA on the
+  redundant `loadInventory(true)`.
+- **Sell crystals / Receive crystals** (Delerium tab) — `sellDelerium` / delerium
+  `apiReceiveResource` branch. Optimistic negative/positive rows + pending ledger,
+  full snapshot revert on both failure branches, `refreshDeleriumStateFromInventory_`
+  rebuilds counters. 0 gp inline-confirm path works. Clean.
+- **Combine duplicate** (duplicate detected → combine sheet → Confirm) —
+  `confirmCombineInventoryItem` → `apiCombineInventoryItems`. Double-tap guarded
+  (`pendingCombineChoice` nulled first), failure restores choice for retry, server
+  merges qty/holder/faction/notes and deletes source with row-shift adjustment.
+  Clean.
+
+#### BUG · Index.html:6155 · Undo of a member-pay creates gold (only deduct row reversed)
+
+Story: **Undo last pay**, at the Undo step. When a treasurer routes a Pay to a
+character, `confirmPayWithReason` calls `apiSendGoldToMember`, which writes TWO
+inventory rows: `item` (Gold, Holder = recipient, Qty = **+amount**) and
+`poolDeduct` (Gold, Qty = **−amount**) — a transfer that nets zero. On success the
+handler stores the undo token as `lastResourceUndo['gold'] = { item: res.poolDeduct,
+ledgerEntry: res.ledgerEntry }` (Index.html:6155) — i.e. it remembers **only the
+deduct row**.
+
+`undoResourcePay` (Index.html:6731) reverses by deleting a single inventory row:
+`const itemId = undo.item['Inventory ID']` → `apiDeleteInventory({ inventoryId: itemId })`.
+That deletes the −amount pool-deduct row but leaves the +amount credit to the
+recipient untouched on both client and server. Net effect of "Undo Last Pay":
+the pool is refunded **and** the recipient keeps the gold → `amount` gp is created
+from nothing every time a member-pay is undone. (The "Undo Last Pay" button in the
+gold sheet, Index.html:5450, only ever appears after a member-pay, because the
+Purchase path via `apiDepleteResource` returns no `poolDeduct` and so never sets
+`lastResourceUndo` — so every time this button is usable, it mis-reverses.)
+
+Fix: the undo token must carry both inventory IDs (credit + deduct) and
+`undoResourcePay` must delete both (ideally one server call that reverses the whole
+SEND/SEND_DEDUCT pair atomically under the lock). The dashboard `payResource` undo
+is correct because `apiDepleteResource` creates only one row.
+
+#### RISK · Index.html:6741 · Undo deletes inventory rows but leaves RESOURCE_LEDGER entries on the server
+
+`undoResourcePay` removes the matching `Inventory ID` from the in-memory
+`inventoryResourceLedger` and deletes the inventory row via `apiDeleteInventory`,
+but `apiDeleteInventory` does not touch the RESOURCE_LEDGER sheet. The SEND /
+SEND_DEDUCT (or PAY) ledger rows persist server-side, so after the next
+`loadInventory(true)` / 20 s sync the "undone" payment reappears in the ledger
+history (and, combined with the BUG above, the orphaned credit row also reappears).
+Locally the undo looks clean; a reload exposes the divergence. Consider having the
+undo reverse the ledger entries too, or post a compensating REVERSAL entry.
+
+#### IDEA · Index.html:6028 · Sell-batch does an optimistic update then immediately full-reloads
+
+Story: **Sell item / Sell batch**, friction. `confirmSellBatch`'s success handler
+optimistically rebuilds `inventoryRows` (decrement/remove sold rows, prime gold
+item) and `renderInventory()` — then calls `loadInventory(true)` on the very next
+line, forcing a full server round-trip that overwrites the just-applied optimistic
+state. The optimistic block is effectively dead work and the extra reload can cause
+a visible flicker / scroll reset and an unnecessary `apiGetInventory` call. Either
+trust the optimistic update (drop the reload) or skip the optimistic rebuild and
+rely on the reload — not both.
+
+#### Note · Code.js:2905 · Ledger-note edit, receive, split, delerium, combine all traced clean
+
+`apiUpdateLedgerNote` (entryId-or-timestamp match, schema-mismatch guarded, lock in
+`finally`), `apiReceiveResource`, `apiSplitGold`, `apiSellDelerium`,
+`apiSellInventoryBatch`, and `apiCombineInventoryItems` all validate before writing,
+release the LockService document lock on every path including auth-failure and
+error (`finally { try { lock.releaseLock() } catch {} }`), and return sanitized
+optimistic payloads the client merges correctly. Stories confirmed clean: Receive
+gold, Pay gold (Purchase path), Split gold evenly, Edit ledger note, Sell crystals,
+Receive crystals, Combine duplicate, Sell item/batch (modulo the IDEA above). The
+only economy-affecting defect found this section is the member-pay Undo BUG.
 
 ### 2026-06-19 (run 29) — Sections audited: 3
 
