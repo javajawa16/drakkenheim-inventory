@@ -1,9 +1,128 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 3. Code.js lines 1101–1700 (inventory write — add, edit, delete)
+Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
 
 ## Sessions
+
+### 2026-06-19 (run 42) — Sections audited: 3
+
+Section 3 = Code.js lines 1101–1700 (inventory write — add, edit, delete). The
+named range holds the spreadsheet/row helpers (`writeInventoryRow_` 1749,
+`getInventoryRowObjectById_` 1736), the validators every write path funnels
+through (`validateId_` 1561, `validateText_` 1571, `validateQuantity_` 1581,
+`validateMoney_` 1599, `normalizeOptionalMoney_` 1611), the sanitizers
+(`sanitizeInventoryForClient_` 1654), audit/ledger writers (`auditWrite_` 1786,
+`appendResourceLedger_` 1816, `deleteResourceLedgerRowsForInventory_` 1843),
+`classifyQuickEdit_`/`getQuickAddDefinition_`, and the access gates
+(`requireAllowedUser_` 1486, `requireTreasurer_` 1426). The actual write
+endpoints these back live just outside the range and were traced in full:
+`apiAddInventory` (2181), `apiAddCustomInventory` (2290), `apiUpdateInventory`
+(3165), `apiDeleteInventory` (3256), `apiCombineInventoryItems` (3329).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every write path reached):
+
+- **Add library item / Add custom item** — `addInventoryItem` (Index 7664) →
+  optimistic row (`_opt_<ts>`) prepended + cached → `apiAddInventory` /
+  `apiAddCustomInventory` / `apiQuickAddInventory` → success removes optimistic
+  row, `primeInventoryCacheAfterAdd` (2911) merges the real row, then
+  `findDuplicateInventoryCandidate` → `showCombineChoice`. Failure (both
+  `!ok` and `withFailureHandler`) removes the optimistic row, re-caches, and
+  restores every form field + `selectedEquipment` + quick-add size + scroll
+  mode from `payloadSnapshot`/`selectedSnapshot`. Double-submit is guarded
+  implicitly: the submit handler runs `clearAddForm()` synchronously, so a
+  second tap hits `if (!rawName) return`. `_inFlightWrites++` defers the poll's
+  foreign reload. Clean rollback. See IDEA below (combine-after-add friction).
+- **Edit inventory item** — `selectInventoryItem` (6427) /
+  `syncInventoryEditorFieldsFromRow` (6890) → `saveInventoryEdits` (6976) →
+  `apiUpdateInventory` (3165, partial-update via `field === undefined ?
+  existing : field`). Pessimistic: local row only updated after server ok.
+  See BUG (rollup desync) and RISK (mobile button id) below.
+- **Delete inventory item** — `deleteSelectedInventory` (7064): swipe path
+  decrements one via `apiAdjustInventory`; full-delete via `apiDeleteInventory`
+  (3256). Optimistic remove with `previousRows` snapshot + full revert on
+  `!ok`/failure; qty>1 edit-form delete has an inline confirm gate. Mobile
+  double-tap is masked because `closeInventoryPanels(false)` closes the sheet
+  synchronously.
+- **Combine duplicate** — `showCombineChoice` (3326) / `confirmCombineInventoryItem`
+  (3349) → `apiCombineInventoryItems` (3329). Double-tap guarded
+  (`pendingCombineChoice = null` at entry); failure restores `choice` and keeps
+  the sheet open for retry; client rollup key (Item|Category|Rarity, 6156)
+  exactly matches the server's combine constraint (3360-3366), so a suggested
+  combine never gets rejected for a key mismatch.
+
+#### BUG · Index.html:6427 · Edit/edit-delete only mutate the representative row of a multi-row rollup
+Story: **Edit inventory item** (and edit-form **Delete**). Cards are rendered
+from `rollupInventoryRows` (6164), which visually merges every raw row sharing
+`Item|Category|Rarity` into one card with the summed Qty. Combining duplicates
+is *optional* (the user can tap "Keep separate"), so a card routinely fronts
+several underlying `PARTY_INVENTORY` rows. Tapping/​swiping resolves the card to
+a single representative row — `getInventoryIndexById(representativeId)` (6380) →
+`inventoryRows[index]` — and loads only that row's `Inventory ID` into
+`editInventoryId`. `saveInventoryEdits` → `apiUpdateInventory` (3165) then writes
+**only the representative row**. So if a user sees "5× Potion" (rep row qty 3 +
+a second row qty 2) and edits Qty to 2, the server sets the rep row to 2 and
+leaves the other row at 2 — the rolled-up card now shows 4, not 2. Holder/Value/
+Name edits likewise apply to one underlying row, silently desyncing the group
+(e.g. the card shows two different per-unit values after a Value edit). The
+edit-form Delete path is worse: the qty>1 confirm gate reads `currentQty` from
+the representative row only (7070), so it warns "Removes all 3×" yet deletes
+just the rep row, leaving the other 2 behind. Note this is the same class of
+limitation the README already documents for "Give to…", and the description
+sheet deliberately avoids it by using `apiSellInventoryBatch` FIFO across all
+rollup rows. Suggested fix: when the selected card has `_rollupCount > 1`,
+either (a) route qty/delete through a batch endpoint that drains all rollup rows
+(like sell/remove), or (b) disable in-place qty editing on rolled-up cards and
+surface "open description to adjust quantity," or (c) at minimum auto-combine
+the group server-side before applying the edit.
+
+#### RISK · Index.html:6978 · In-flight button disable targets the hidden desktop button on mobile
+Story: **Edit inventory item** / **Delete**. `saveInventoryEdits` does
+`document.getElementById('saveInventoryButton')` and
+`deleteSelectedInventory` does `document.getElementById('deleteInventoryButton')`
+— but those IDs exist only on the **desktop** editor buttons (2193, 2197). The
+**mobile sheet** Save/Delete buttons (2404, 2407) carry no IDs. On a phone
+(the primary platform), `getElementById` returns the hidden desktop button, so
+`button.disabled = true` flips an off-screen element and the visible mobile
+button is never disabled. For Save this leaves the mobile double-tap unguarded
+→ two `apiUpdateInventory` calls fire with identical payloads. The duplicate
+write is idempotent (same field values), so today the impact is limited to a
+redundant round-trip and no visible "saving" disabled state on the real button;
+but the guard is silently dead on mobile and would mask a real race if the
+update payload ever became non-idempotent. Delete is incidentally protected
+because `closeInventoryPanels(false)` closes the sheet synchronously before a
+second tap can land. Fix: give the mobile buttons the same IDs (or pass the
+clicked button via the onclick handler) so the disable applies where the user
+actually taps.
+
+#### IDEA · Index.html:7763 · Combine prompt fires after every duplicate add even though the list already shows them merged
+Story: **Add library item / Combine duplicate**. After a successful add the
+list immediately rolls the new row into the existing one (one card, summed
+Qty) via `rollupInventoryRows`. The very next line still pops the combine
+mobile-sheet (`findDuplicateInventoryCandidate` → `showCombineChoice`). To the
+user the item already *looks* combined, yet a sheet asks them to combine — and
+for repeated quick-adds (e.g. stocking five Potions of Healing one tap at a
+time) the prompt reappears on every add, interrupting the flow. The combine is
+only a storage-row merge with no user-visible difference once rolled up.
+Suggestion: suppress the prompt for quick-add/identical-value duplicates (or
+silently auto-combine same-name+same-value rows server-side at add time), and
+reserve the explicit prompt for cases where merging is lossy (differing Value
+GP / Holder), where the warning message actually adds value.
+
+#### Note · Code.js:2181 · Write-path baseline is solid — locks, rollback, and poll deferral all clean
+Traced add / custom-add / edit / delete / combine end-to-end. Every endpoint
+acquires `LockService.getDocumentLock()` with `tryLock(10000)` *inside* the try
+and releases in `finally` (wrapped so a never-acquired release is ignored), so
+the lock is freed on auth-failure, validation-throw, busy-return, and success
+paths alike. Client rollbacks are complete on add (optimistic row removed +
+form restored), delete (`previousRows` snapshot reverted), and combine (`choice`
+restored, sheet kept open). `_inFlightWrites` correctly brackets every write so
+the 20 s poll's foreign reload is deferred, and `primeInventoryCacheAfterAdd`'s
+`exists` check (2916) means a poll-driven reload that already inserted the real
+row won't double-insert. `apiUpdateInventory`'s `field === undefined ? existing`
+pattern makes partial updates (e.g. holder-only change at 5634) safe.
+
 
 ### 2026-06-19 (run 41) — Sections audited: 2
 
