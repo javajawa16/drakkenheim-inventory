@@ -1,9 +1,139 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
+Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
 
 ## Sessions
+
+### 2026-06-19 (run 43) — Sections audited: 4
+
+Section 4 = Code.js lines 1701–2300 (sell, combine, gold ops). The named range
+holds the ledger/audit backbone (`appendResourceLedger_` 1816,
+`deleteResourceLedgerRowsForInventory_` 1843, `auditWrite_` 1786), the
+inventory read (`apiGetInventory` 1938), sync (`bumpSync_` 1976,
+`apiGetSyncState` 1986), the notes write APIs (`apiCreateNote`/`apiUpdateNote`/
+`apiArchiveNote` 2087–2179), and `apiAddInventory` 2181. The actual sell/
+combine/gold-ops endpoints the section is themed around live just outside it and
+were read in full: `apiSellInventoryBatch` (663), `apiQuickAddInventory` (2389),
+`apiDepleteResource` (2530), `apiUpdateLedgerNote` (2662), `apiReceiveResource`
+(2718), `apiSellInventoryItem` (2803), `apiSellDelerium` (2858), `apiSplitGold`
+(2943), `apiSendGoldToMember` (3081), `apiCombineInventoryItems` (3329),
+`apiDeleteInventory` (3256, undo path).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every write path):
+
+- **Receive gold** — `receivedGold` (Index 5000) → optimistic pending ledger
+  entry + field-clear → `apiReceiveResource` → success removes pending, primes
+  gold row, prepends `res.ledgerEntries`. Failure (both `!ok` and
+  `withFailureHandler`) removes pending, restores amount/note, shows error.
+  Field-clear-before-async guards double-tap (2nd tap reads amount='' → returns).
+- **Pay gold (Purchase / member)** — `openPayReasonSheet` (5071) →
+  `confirmPayWithReason` (5637) routes to `apiDepleteResource` (Purchase) or
+  `apiSendGoldToMember` (member). Optimistic pending entry + undo state set
+  (treasurer only). Both handlers balance `_inFlightWrites`.
+- **Split gold evenly** — `splitGold` (5724) → `apiSplitGold` (treasurer-gated
+  client + server via `requireTreasurer_`). Full snapshot/rollback; pool deduct
+  + per-member credit + remainder all conserved server-side.
+- **Edit ledger note** — `selectLedgerRowForEdit` (5910) →
+  `updateLedgerNoteFromBottom` (5958) → `apiUpdateLedgerNote`. Gold reuses the
+  amount/note inputs (amount made readOnly); delerium uses its own note input.
+- **Undo last pay** — `undoGoldPay` (4995) → `undoResourcePay` (6278) →
+  `apiDeleteInventory({reverseLedgerEntry:true})` (which DOES reverse the ledger
+  via `deleteResourceLedgerRowsForInventory_` — README TODO about non-reversal
+  is stale). Member-send undo chains a 2nd delete for the credit row.
+- **Sell item (description sheet)** — `confirmSellItem` (5159, `descActionInFlight`
+  guard) → FIFO drain across rollup rows → optimistic row removal →
+  `apiSellInventoryBatch` → success primes gold row + `loadInventory(true)`.
+- **Sell items batch (treasurer)** — `confirmSellBatch` (5540) →
+  `apiSellInventoryBatch`; 1.5s auto-close guarded by `sellBatchGeneration`.
+- **Sell crystals / Receive crystals** — `sellDelerium` (4791, 0gp inline
+  confirm) / `receiveDelerium` (4720) → `apiSellDelerium` / `apiReceiveResource`.
+  Full snapshot rollback; `refreshDeleriumStateFromInventory_` after optimistic
+  rows resets counters, which guards double-tap.
+- **Combine duplicate** — `confirmCombineInventoryItem` (3349) →
+  `apiCombineInventoryItems`. Non-optimistic ("Combining…"); failure restores
+  `pendingCombineChoice` for retry.
+
+#### BUG · Index.html:6297 · Failed Undo Last Pay is silent and leaves gold sheet inconsistent
+Story: **Undo last pay**, failure-at-step. `undoResourcePay` optimistically
+removes the deduct inventory row + ledger entry, clears `lastResourceUndo`, and
+calls `apiDeleteInventory`. If the server delete fails, `rollback()` (6297)
+restores `inventoryRows`, `inventoryResourceLedger`, and `lastResourceUndo`, then
+calls only `renderInventory()` — it never re-renders the open gold sheet
+(`renderGoldSheetBody` / `renderGoldSheetButtons`) and shows no status message.
+Result: the user is looking at the gold modal, which still displays the payment
+as undone (ledger entry gone, Undo button gone) even though the server kept the
+payment and the in-memory data was actually restored. The discrepancy persists
+until something else re-renders the sheet (scope toggle, reopen) or a reload. Fix:
+in `rollback()`, also call `renderGoldSheetBody()` + `renderGoldSheetButtons()`
+and surface an error via `goldSheetStatus` so the failed undo is visible.
+
+#### RISK · Index.html:6318 · Member-send undo is two non-atomic deletes — partial failure creates gold
+Story: **Undo last pay** (member-send variant). `undoResourcePay` for a
+member-send deletes the pool/personal deduct row first, then — on success —
+chains a second `apiDeleteInventory` for the recipient credit row (6318). If the
+first delete succeeds but the second fails, the deduct is gone while the credit
+remains: net party gold increases by the sent amount (money created from
+nothing). The code recovers by `loadInventory(true)`, which faithfully reloads
+the corrupted server state rather than fixing it — the accounting error is now
+real and silent. There is no transaction wrapping the two row deletes. Consider a
+single server endpoint that reverses both rows under one lock (and one ledger
+reversal), so undo is atomic.
+
+#### RISK · Index.html:4967 · Gold sheet enters note-edit mode for any resource, not just gold
+`renderGoldSheetButtons` (4964) gates note-edit UI on `if (ledgerEditTarget)`
+with no `ledgerEditTarget.resource === 'gold'` check — unlike its delerium
+counterpart `renderDeleriumSheetActions` (4457), which correctly checks
+`resource === 'delerium'`. `openGoldSheet` (4424) also does not reset
+`ledgerEditTarget`. So a `ledgerEditTarget` left dangling from a delerium note
+edit would push the gold sheet into "Editing note … gp / Update Note" mode for a
+delerium entry; tapping Update Note then writes with `resource:'delerium'` and
+the (stale) `deleriumSheetNote` value. Today both `closeGoldSheet` and
+`closeDeleriumSheet` cancel the edit on their explicit Done buttons, so the
+dangling state is hard to reach (no backdrop-close on these sheets) — hence RISK
+not BUG — but the asymmetric guard is a latent defect. Fix: add the
+`resource === 'gold'` check in `renderGoldSheetButtons`, and clear
+`ledgerEditTarget` in `openGoldSheet`/`openDeleriumSheet`.
+
+#### IDEA · Index.html:5233 · Sell-for-gold forces a full reload that the other gold ops avoid
+Story: **Sell item** / **Sell items batch**, efficiency. `apiSellInventoryBatch`
+(Code.js 746) returns only `{message, goldItem}` — it appends a RESOURCE_LEDGER
+entry server-side but does not return it. So `confirmSellItem` (5223) and
+`confirmSellBatch` (5560) must call `loadInventory(true)` (a full
+inventory + 60-row ledger re-read) just to surface the new gold ledger row. By
+contrast `apiReceiveResource`, `apiDepleteResource`, `apiSplitGold`, and
+`apiSellDelerium` all return `ledgerEntries`/`ledgerEntry` and prepend them
+optimistically with no reload. Returning the ledger entry from
+`apiSellInventoryBatch` would let the sell paths skip the extra round-trip and
+match the snappier feel of the other gold flows.
+
+#### RISK · Index.html:5020 · Optimistic ledger prepend + slice(0,60) silently drops the 60th entry on rollback
+Cross-cutting (Receive gold 5020, Pay 5659, Split 5746, Sell crystals 4840).
+Each optimistic handler does `ledger = [pending, ...ledger].slice(0, 60)`. When
+the in-memory ledger is already at the 60-entry cap, prepending the pending entry
+and slicing drops the oldest real entry. On the failure path the rollback only
+filters out the pending entry (`removePending`) — it does not restore the dropped
+60th entry, so it vanishes from the in-memory buffer until the next
+`loadInventory`. Impact is low (it is the 60th-oldest visible entry and a reload
+restores it), but the rollbacks that snapshot `previousLedger` (sellDelerium,
+receiveDelerium) are correct and the ones that use `removePending`
+(receivedGold, confirmPayWithReason, splitGold) are not. For consistency, snapshot
+`previousLedger` in those three too.
+
+#### Note · Index.html:5000 · Clean rollback + double-submit traces on the resource write paths
+Confirms full traces of **Receive gold**, **Pay gold**, **Split gold**, **Sell
+item**, **Sell items batch**, **Receive/Sell crystals**, **Give item**, and
+**Combine duplicate**. `receivedGold`, `splitGold`, `sellDelerium`,
+`receiveDelerium`, `giveItemToCharacter`, and `confirmSellItem` all snapshot
+prior state and roll back fully on BOTH `!res.ok` and `withFailureHandler`;
+`_inFlightWrites` is incremented once and decremented on every terminal path
+(deferring the 20s sync poll until writes settle); double-tap is guarded either
+by `descActionInFlight` (sell item), `sellBatchConfirmBtn.disabled` (batch),
+synchronous field-clear (receive/pay/split), or `refreshDeleriumStateFromInventory_`
+resetting counters (delerium). Server endpoints release the document lock in
+`finally` on all paths including auth failure. `apiSplitGold` conserves gold
+exactly (pool deduct = per-member credits + remainder).
 
 ### 2026-06-19 (run 42) — Sections audited: 3
 
