@@ -1833,6 +1833,23 @@ function appendResourceLedger_(entry) {
   }
 }
 
+function deleteResourceLedgerRowsForInventory_(ss, inventoryId) {
+  try {
+    const sheet = getSheetByTrimmedName_(ss, CONFIG.RESOURCE_LEDGER_SHEET);
+    if (!sheet || sheet.getLastRow() < 2) return;
+    const idCol = RESOURCE_LEDGER_HEADERS.indexOf('Inventory ID') + 1;
+    const lastRow = sheet.getLastRow();
+    const ids = sheet.getRange(2, idCol, lastRow - 1, 1).getValues();
+    for (let i = ids.length - 1; i >= 0; i--) {
+      if (String(ids[i][0]).trim() === inventoryId) {
+        sheet.deleteRow(i + 2);
+      }
+    }
+  } catch (err) {
+    Logger.log(`Failed to reverse ledger entry for ${inventoryId}: ${err.message}`);
+  }
+}
+
 function csvEscape_(value) {
   if (value === null || value === undefined) return '';
 
@@ -3256,6 +3273,10 @@ function apiDeleteInventory(payload) {
     }
 
     sheet.deleteRow(found.rowNumber);
+
+    if (payload && payload.reverseLedgerEntry) {
+      deleteResourceLedgerRowsForInventory_(ss, id);
+    }
 
     auditWrite_({
       userEmail,

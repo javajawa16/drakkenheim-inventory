@@ -6331,10 +6331,10 @@
               _inFlightWrites--;
               loadInventory(true);
             })
-            .apiDeleteInventory({ inventoryId: creditId, _syncClientId: syncClientId });
+            .apiDeleteInventory({ inventoryId: creditId, reverseLedgerEntry: true, _syncClientId: syncClientId });
         })
         .withFailureHandler(rollback)
-        .apiDeleteInventory({ inventoryId: deductId, _syncClientId: syncClientId });
+        .apiDeleteInventory({ inventoryId: deductId, reverseLedgerEntry: true, _syncClientId: syncClientId });
     }
 
     function formatCount(value) {

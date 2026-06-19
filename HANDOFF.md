@@ -638,7 +638,6 @@ Fix:
 7. **Remaining open RISKs** (deferred — complex or schema-level changes):
    - RISK 8240: leaked `_inFlightWrites` permanently freezes reconciliation — needs watchdog/id-based counter (not a simple fix)
    - RISK 7093: client/server delerium quick-edit type classification diverges for custom names — align classifiers
-   - RISK 6741: Undo Last Pay removes inventory rows but leaves RESOURCE_LEDGER entries; history shows the payment until next reload
    - RISK 1853: `appendResourceLedger_` swallows errors silently — ledger write failure invisible to client
    - RISK 6435: ledger note-edit falls back to Timestamp for same-second multi-row ops — needs stable per-entry ID
 

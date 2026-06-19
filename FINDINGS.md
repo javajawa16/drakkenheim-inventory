@@ -1070,7 +1070,7 @@ Fix: the undo token must carry both inventory IDs (credit + deduct) and
 SEND/SEND_DEDUCT pair atomically under the lock). The dashboard `payResource` undo
 is correct because `apiDepleteResource` creates only one row.
 
-#### RISK · Index.html:6741 · Undo deletes inventory rows but leaves RESOURCE_LEDGER entries on the server
+#### ~~RISK · Index.html:6741 · Undo deletes inventory rows but leaves RESOURCE_LEDGER entries on the server~~ FIXED
 
 `undoResourcePay` removes the matching `Inventory ID` from the in-memory
 `inventoryResourceLedger` and deletes the inventory row via `apiDeleteInventory`,
