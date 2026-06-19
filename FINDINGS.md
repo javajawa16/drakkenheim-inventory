@@ -1,9 +1,104 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 12. Index.html lines 6001–7500 (inventory groups, description sheet, sell batch)
+Next section: 13. Index.html lines 7501–end (add item flow, custom item, form handling)
 
 ## Sessions
+
+### 2026-06-19 (run 38) — Sections audited: 12
+
+Section 12 = Index.html lines 6001–7500 (inventory groups, description sheet,
+sell batch). Read in-range plus the referenced sheets that open from the
+description sheet: `openGiveItemSheet`/`openSellItemSheet`/`confirmSellItem`
+(5617–5738), `openSellBatchSheet`…`copyPartyPoolInventory` (5741–5991), and the
+server functions `apiAdjustInventory`/`apiSetItemQuantity` (Code.js 3741–3920)
+to confirm ledger attribution.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, with
+execution-trace + state-machine on each write path):
+
+- **View item details** (tap card → description sheet → stat block + description
+  loads). `openInventoryDescription` (6963) → cached `itemCache[libraryItemId]`
+  short-circuit, else `apiGetEquipmentItem` with a `capturedId` guard
+  (`selectedInventory['Inventory ID'] !== capturedId` → bail) so a late fetch
+  cannot paint the wrong item. Failure handler does NOT cache null (next open
+  retries). Clean.
+- **Give item to character** (description → Give to… → `giveItemToCharacter`
+  6081). Optimistic holder swap on the representative row, full revert on both
+  error branches, `_inFlightWrites++/--` balanced. Documented rollup limitation
+  only (moves rep row). Clean within scope.
+- **Sell item** (description → Sell for Gold → stepper → `confirmSellItem` 5667)
+  and **Remove item** (description → Remove stepper → `confirmDescRemove` 7066):
+  both FIFO-drain across rollup rows, optimistic qty decrement, full
+  `previousRows` restore on failure, `loadInventory(true)` reconcile on success.
+  See RISK (no re-entry guard) and RISK (silent no-op when item vanished) below.
+- **Sell item batch** (treasurer → `openSellBatchSheet` 5741 →
+  `confirmSellBatch` 6026): FIFO distribution, balanced in-flight, retry-able on
+  failure. Known 1.5 s auto-close-timer TODO already logged; not re-reported.
+- **Quick-adjust currency/delerium** (tap gold/delerium card → quick-edit sheet
+  → add/remove/set → Confirm). `openQuickEditPanel` (7179) / `confirmQuickEdit`
+  (7308). `quickEditInFlight` guards double-tap; verify call guarded by
+  `selectedQuickEdit.itemId`. See BUG (missing clientCharacter) and RISK
+  (gold ADJUST invisible) below.
+- **Edit inventory item** (swipe → Edit → Save → `saveInventoryEdits` 7474) and
+  **Delete** (`deleteSelectedInventory` 7562): save disables button + restores on
+  failure; delete has the qty>1 confirm gate and optimistic decrement/filter with
+  `previousRows` restore. Clean.
+- **Pay gold / Undo last pay** dashboard breakout (`payResource` 6712 /
+  `undoResourcePay` 6781): traced; known "undo does not reverse RESOURCE_LEDGER"
+  TODO already logged.
+
+#### BUG · Index.html:7379 · Quick add/remove adjust writes a ledger entry with no author
+In `confirmQuickEdit`, the **set** branch calls `apiSetItemQuantity({… clientCharacter:
+myCharacterName …})` (7365) but the **add/remove** branch calls
+`apiAdjustInventory({ itemId, delta, note, size, _syncClientId })` (7379) with **no
+`clientCharacter`**. Server-side both functions attribute the ledger row via
+`character: safeText_(payload && payload.clientCharacter)` (Code.js:3805 for adjust,
+:3917 for set). So a currency/delerium quick-adjust done with **Add** or **Remove**
+records a RESOURCE_LEDGER entry whose `Character` column is blank, while the
+otherwise-identical **Set** adjustment, and every other ledger write in the app,
+records the writer. Story: *Quick-adjust currency/delerium* — the audit-trail "who
+changed this" is lost for the add/remove path only. Fix: add
+`clientCharacter: myCharacterName || ''` to the `apiAdjustInventory` payload at 7379,
+matching the set branch.
+
+#### RISK · Index.html:6337 · Gold quick-adjust ledger entries are silently hidden
+`apiAdjustInventory`/`apiSetItemQuantity` stamp gold quick-edits with
+`Action: 'ADJUST'` (Code.js:3797/3909). `confirmQuickEdit` pushes the returned
+`ledgerEntry` into `inventoryResourceLedger` (7345) and caches it, but
+`renderResourceLedger` filters gold entries through `LEDGER_VISIBLE_ACTIONS`
+(6337), which does **not** include `ADJUST`. Result: a gold quick-adjust changes
+the live Gold total but produces **no visible ledger row** in either the Gold
+sheet (`renderResourceLedger('gold', 60)`, 5470) or the dashboard breakout (6325).
+Delerium quick-adjusts are unaffected because non-gold entries skip the
+allow-list filter (6369), so the two resources behave inconsistently for the same
+user action. Story: *Quick-adjust currency*. Either add `'ADJUST'` to
+`LEDGER_VISIBLE_ACTIONS`, or intentionally document that gold quick-adjusts are
+ledger-silent (combined with the BUG above, gold quick-adjusts are currently both
+unattributed and invisible).
+
+#### RISK · Index.html:7066 · Description Sell/Remove rely on sheet-close, not an in-flight flag, to block re-entry
+`confirmSellItem` (5667) and `confirmDescRemove` (7066) have no boolean re-entry
+guard. They prevent a second submission only by calling `closeDescriptionSheet()`
+synchronously before the async `apiSellInventoryBatch`. Neither nulls
+`selectedInventory` (only `closeInventoryPanels` does, which these paths don't
+call), and each recomputes `allForKey`/`items` from the live, already-mutated
+`inventoryRows`. A genuine fast double-tap on the **Remove**/**Sell for Gold**
+button that lands before the sheet's hide transition completes would fire the
+handler twice and drain the FIFO rows a second time (double removal/sale). Lower
+confidence because the immediate `classList.remove('active')` usually intercepts
+the second tap, but adding a simple `if (descActionInFlight) return;` guard
+(mirroring `quickEditInFlight`) would close the race deterministically.
+
+#### Note · Index.html:6963 · Stale-item edge in description-sheet write paths
+Story trace note for *Sell/Remove item* navigate-away: if a collaborator's write
+triggers `loadInventory(true)` while the description sheet is open (no local
+in-flight write to defer the poll), `inventoryRows` is replaced but the open sheet
+is not re-rendered — title/stepper-max go stale. If the item was fully removed by
+the other user, `allForKey` is empty and both `confirmSellItem`/`confirmDescRemove`
+hit `if (!items.length) return;` — a silent no-op with no status feedback. Edge
+case; worth a one-line "Item no longer available" message rather than a silent
+return. Otherwise the description-sheet flows are clean.
 
 ### 2026-06-19 (run 37) — Sections audited: 11
 
