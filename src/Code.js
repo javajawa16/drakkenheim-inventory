@@ -3779,7 +3779,7 @@ function apiAdjustInventory(payload) {
 
       if (size) {
         rowObj['Item'] = `Delerium ${size.replace(/\b\w/g, c => c.toUpperCase())}`;
-        if (note) rowObj['Notes'] = [note, `Size: ${size}`].join('\n');
+        // Note intentionally goes to the ledger only — not overwritten on the row
       }
     }
 
@@ -3886,6 +3886,14 @@ function apiSetItemQuantity(payload) {
     const quickType = classifyQuickEdit_(found.rowObj);
     const oldQty = Number(found.rowObj['Qty'] || 0);
     const rowObj = Object.assign({}, found.rowObj, { 'Qty': qty });
+
+    if (quickType === 'delerium crystal') {
+      const size = normalizeDeleriumSize_(payload && payload.size);
+      if (size && DELERIUM_SIZE_VALUES.includes(size)) {
+        rowObj['Item'] = `Delerium ${size.replace(/\b\w/g, c => c.toUpperCase())}`;
+      }
+    }
+
     const valueGp = validateMoney_(rowObj['Value GP']);
     rowObj['Total Value GP'] = valueGp === '' ? '' : qty * valueGp;
 

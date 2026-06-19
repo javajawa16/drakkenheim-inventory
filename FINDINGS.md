@@ -61,7 +61,7 @@ execution-trace + state-machine on each write path):
 - **Create / Edit / Pin / Archive note** (4580–4746) — re-confirmed run 31 traces;
   `_inFlightNoteWrites`/`_notesActionInFlight` paired, optimistic + rollback. No new issue.
 
-#### BUG · Index.html:5154 · Non-treasurer "Received" delerium button can never succeed
+#### ~~BUG · Index.html:5154 · Non-treasurer "Received" delerium button can never succeed~~ FIXED
 Story **Receive crystals**, non-treasurer path. README §Delerium: "Non-treasurers see a
 Received button to log crystal pickups." But `renderDeleriumSheetBody` builds the
 adjustable per-size counters **only** inside `if (isTreasurer)` (5028); the non-treasurer
@@ -176,7 +176,7 @@ execution-trace + state-machine on each write path):
   check fires on foreground. Clean (deferral logic above carries any unresolved
   in-flight write).
 
-#### BUG · Index.html:4073 · Sync revalidation misses field-only changes (qty/holder/notes/gold/delerium)
+#### ~~BUG · Index.html:4073 · Sync revalidation misses field-only changes (qty/holder/notes/gold/delerium)~~ FIXED
 
 `inventorySignature_()` returns only `inventoryRows.length + '|' + first-8 Inventory IDs`.
 `loadInventory`'s success handler (4140–4144) re-renders only when
@@ -265,7 +265,7 @@ execution-trace + state-machine on each write path / component):
 - **Add library/custom item** (cache path). `addInventoryItem` (8102) success/failure
   ordering vs the in-range `cacheInventoryRows` guard — see Note below (self-heals).
 
-#### BUG · Index.html:5571 · Description-sheet "Give to…" silently ignores the qty stepper
+#### ~~BUG · Index.html:5571 · Description-sheet "Give to…" silently ignores the qty stepper~~ FIXED (removed misleading qty from title; full FIFO give deferred to a future multi-row endpoint)
 Story **Give item to character**, step "pick character → confirm". The description sheet's
 shared qty stepper (`descRemoveQty`, HTML 2432–2439) is documented (README §Item
 description sheet: "shared qty stepper… stepper drives all three") to drive Sell, Give,
@@ -420,7 +420,7 @@ execution-trace + state-machine on each write path):
   choice on failure with retry kept open, `_inFlightWrites` balanced, server merges
   qty/holder/faction/notes and value-mismatch is surfaced in the message. Clean.
 
-#### BUG · Code.js:3781 · Quick-adjust delerium overwrites the item's Notes with the ledger note
+#### ~~BUG · Code.js:3781 · Quick-adjust delerium overwrites the item's Notes with the ledger note~~ FIXED
 In `apiAdjustInventory`, the `quickType === 'delerium crystal'` branch does
 `if (note) rowObj['Notes'] = [note, 'Size: '+size].join('\n')`. The Quick-adjust
 "Note" field is meant as a *transaction* note (it is also written to the ledger as
@@ -439,7 +439,7 @@ branch has the same flavor — it canonicalizes a custom name (e.g. "Aqua Deleri
 category `delerium` → "Delerium Chip") on a plain quantity bump because the size dropdown
 always defaults to a concrete size.
 
-#### BUG · Code.js:3860 · "Set" quick-edit mode silently drops the delerium size selection
+#### ~~BUG · Code.js:3860 · "Set" quick-edit mode silently drops the delerium size selection~~ FIXED
 `apiSetItemQuantity` has no `size` parameter and no delerium branch, and
 `confirmQuickEdit` (Index.html:7290) only sends `{itemId, quantity, note}` in the `set`
 branch. The Quick-adjust sheet still renders and pre-selects the size dropdown in `set`
@@ -528,7 +528,7 @@ execution-trace + state-machine on each write path):
   found by entryId/timestamp and patched on success, `cancelLedgerEdit` on close.
   Clean (only-deduct-row note inconsistency for member sends is cosmetic).
 
-#### BUG · Index.html:6155 · "Undo Last Pay" duplicates gold after Pay→member
+#### ~~BUG · Index.html:6155 · "Undo Last Pay" duplicates gold after Pay→member~~ FIXED
 Story **Undo last pay**, after **Pay gold → character**. When a Pay is routed to a
 party member, `confirmPayWithReason` stores `lastResourceUndo['gold'] = { item:
 res.poolDeduct, ledgerEntry: res.ledgerEntry }` (6155). `apiSendGoldToMember`
@@ -718,7 +718,7 @@ execution-trace + state-machine on each write path):
   merges qty/holder/faction/notes and deletes source with row-shift adjustment.
   Clean.
 
-#### BUG · Index.html:6155 · Undo of a member-pay creates gold (only deduct row reversed)
+#### ~~BUG · Index.html:6155 · Undo of a member-pay creates gold (only deduct row reversed)~~ FIXED
 
 Story: **Undo last pay**, at the Undo step. When a treasurer routes a Pay to a
 character, `confirmPayWithReason` calls `apiSendGoldToMember`, which writes TWO

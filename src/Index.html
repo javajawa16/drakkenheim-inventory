@@ -4071,7 +4071,9 @@
 
     /* ── Inventory: load & render ────────────────────────────────── */
     function inventorySignature_() {
-      return inventoryRows.length + '|' + inventoryRows.slice(0, 8).map(r => r['Inventory ID']).join(',');
+      return inventoryRows.map(r =>
+        `${r['Inventory ID']}:${r['Qty']}:${r['Holder'] || ''}:${r['Value GP'] || ''}:${r['Notes'] || ''}`
+      ).join('|');
     }
 
     function loadInventory(force = false) {
@@ -5086,11 +5088,22 @@
       } else {
         const lines = breakout.filter(b => toNumber(b.qty) > 0 && b.label !== 'unknown');
         totalCrystals = lines.reduce((s, b) => s + toNumber(b.qty), 0);
-        contentHtml = lines.length
-          ? `<div class="resource-lines">` +
-            lines.map(b => `<div class="resource-line"><span>${escapeHtml(b.label)}</span><strong>${escapeHtml(formatCount(b.qty))}</strong></div>`).join('') +
-            `</div>`
-          : `<div class="status centered">No delerium in party pool.</div>`;
+        const recvSizes = DELERIUM_SIZES.filter(s => s !== 'unknown');
+        contentHtml = `<div>` +
+          recvSizes.map(size => {
+            const sizeId = size.replace(/\s+/g, '_');
+            return `
+              <div class="delerium-row">
+                <span class="delerium-row-label">${escapeHtml(titleCase(size))}</span>
+                <span class="delerium-receiving" id="dLabel_${escapeHtml(sizeId)}" style="display:none;"></span>
+                <div class="delerium-counter">
+                  <button class="delerium-counter-btn" type="button" data-size="${escapeHtml(size)}" onclick="adjustDeleriumReceive(this.dataset.size,-1)">−</button>
+                  <span class="delerium-counter-qty" id="dReceive_${escapeHtml(sizeId)}">0</span>
+                  <button class="delerium-counter-btn" type="button" data-size="${escapeHtml(size)}" onclick="adjustDeleriumReceive(this.dataset.size,1)">+</button>
+                </div>
+              </div>`;
+          }).join('') +
+          `</div>`;
       }
 
       if (titleEl) titleEl.textContent = `Purple Rocks = ${formatCount(totalCrystals)} crystals`;
@@ -5142,6 +5155,26 @@
         }
       }
 
+      updateDeleriumButtonStates();
+    }
+
+    function adjustDeleriumReceive(size, delta) {
+      const original = deleriumOriginalQtys[size] || 0;
+      deleriumSellQtys[size] = Math.max(original, (deleriumSellQtys[size] !== undefined ? deleriumSellQtys[size] : original) + delta);
+      const receiving = deleriumSellQtys[size] - original;
+      const sizeId = size.replace(/\s+/g, '_');
+      const qtyEl = document.getElementById('dReceive_' + sizeId);
+      if (qtyEl) qtyEl.textContent = String(receiving);
+      const lblEl = document.getElementById('dLabel_' + sizeId);
+      if (lblEl) {
+        if (receiving > 0) {
+          lblEl.textContent = `+${receiving} receiving`;
+          lblEl.className = 'delerium-receiving';
+          lblEl.style.display = '';
+        } else {
+          lblEl.style.display = 'none';
+        }
+      }
       updateDeleriumButtonStates();
     }
 
@@ -5583,8 +5616,7 @@
       const item = selectedInventory || selectedQuickEdit;
       if (!item) return;
       const title = document.getElementById('giveItemTitle');
-      const giveQty = (item === selectedInventory && descRemoveQty > 1) ? descRemoveQty : 0;
-      if (title) title.textContent = `Give ${giveQty > 1 ? giveQty + '× ' : ''}"${item['Item'] || 'Item'}" To…`;
+      if (title) title.textContent = `Give "${item['Item'] || 'Item'}" To…`;
       const currentHolder = String(item['Holder'] || '');
       const options = [
         { holder: '', label: 'Party Pool', meta: 'Return to shared inventory' },
@@ -6154,7 +6186,7 @@
           inventoryResourceLedger = [res.ledgerEntry, ...inventoryResourceLedger].slice(0, 60);
         }
         if (isTreasurer && res.poolDeduct) {
-          lastResourceUndo['gold'] = { item: res.poolDeduct, ledgerEntry: res.ledgerEntry };
+          lastResourceUndo['gold'] = { item: res.poolDeduct, creditItem: isMember ? (res.item || null) : null, ledgerEntry: res.ledgerEntry };
         }
         cacheInventoryRows(inventoryRows, inventoryResourceLedger);
         goldSheetMutated = true;
@@ -6738,44 +6770,64 @@
 
     function undoResourcePay(resource) {
       const undo = lastResourceUndo[resource];
-      const itemId = undo && undo.item && undo.item['Inventory ID'];
-      if (!itemId || resourcePayInFlight[resource]) return;
+      const deductId = undo && undo.item && undo.item['Inventory ID'];
+      if (!deductId || resourcePayInFlight[resource]) return;
 
       resourcePayInFlight[resource] = true;
+      const creditId = undo.creditItem && undo.creditItem['Inventory ID'];
 
       const previousRows = inventoryRows.slice();
       const previousLedger = inventoryResourceLedger.slice();
-      inventoryRows = inventoryRows.filter(row => row['Inventory ID'] !== itemId);
-      inventoryResourceLedger = inventoryResourceLedger.filter(entry => entry['Inventory ID'] !== itemId);
+      inventoryRows = inventoryRows.filter(r =>
+        r['Inventory ID'] !== deductId && (!creditId || r['Inventory ID'] !== creditId)
+      );
+      inventoryResourceLedger = inventoryResourceLedger.filter(e => e['Inventory ID'] !== deductId);
       _inFlightWrites++;
       cacheInventoryRows(inventoryRows, inventoryResourceLedger);
       lastResourceUndo[resource] = null;
       renderInventory();
 
+      function rollback() {
+        resourcePayInFlight[resource] = false;
+        _inFlightWrites--;
+        inventoryRows = previousRows;
+        inventoryResourceLedger = previousLedger;
+        cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+        lastResourceUndo[resource] = undo;
+        renderInventory();
+      }
+
       google.script.run
         .withSuccessHandler(res => {
-          resourcePayInFlight[resource] = false;
-          _inFlightWrites--;
-          if (!res || !res.ok) {
-            inventoryRows = previousRows;
-            inventoryResourceLedger = previousLedger;
+          if (!res || !res.ok) { rollback(); return; }
+          if (!creditId) {
+            // Purchase path: single deduct row, done
+            resourcePayInFlight[resource] = false;
+            _inFlightWrites--;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
-            lastResourceUndo[resource] = undo;
-            renderInventory();
-          } else {
-            cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+            return;
           }
+          // Member-send path: also delete the recipient credit row
+          google.script.run
+            .withSuccessHandler(res2 => {
+              resourcePayInFlight[resource] = false;
+              _inFlightWrites--;
+              if (!res2 || !res2.ok) {
+                // Deduct deleted, credit persists — reload server truth
+                loadInventory(true);
+              } else {
+                cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+              }
+            })
+            .withFailureHandler(() => {
+              resourcePayInFlight[resource] = false;
+              _inFlightWrites--;
+              loadInventory(true);
+            })
+            .apiDeleteInventory({ inventoryId: creditId, _syncClientId: syncClientId });
         })
-        .withFailureHandler(() => {
-          resourcePayInFlight[resource] = false;
-          _inFlightWrites--;
-          inventoryRows = previousRows;
-          inventoryResourceLedger = previousLedger;
-          cacheInventoryRows(inventoryRows, inventoryResourceLedger);
-          lastResourceUndo[resource] = undo;
-          renderInventory();
-        })
-        .apiDeleteInventory({ inventoryId: itemId, _syncClientId: syncClientId });
+        .withFailureHandler(rollback)
+        .apiDeleteInventory({ inventoryId: deductId, _syncClientId: syncClientId });
     }
 
     function formatCount(value) {
@@ -7304,6 +7356,8 @@
             itemId: selectedQuickEdit.itemId,
             quantity: amount,
             note,
+            size,
+            clientCharacter: myCharacterName || '',
             _syncClientId: syncClientId
           });
         return;
