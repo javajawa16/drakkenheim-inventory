@@ -1,9 +1,108 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 7. Code.js lines 3501–end (sync, audit, utilities)
+Next section: 8. Index.html lines 1–1500 (HTML structure, CSS)
 
 ## Sessions
+
+### 2026-06-19 (run 33) — Sections audited: 7
+
+Section 7 = Code.js lines 3501–end. Despite the "sync, audit, utilities" label,
+the real `bumpSync_`/`apiGetSyncState`/`auditWrite_`/`log_` definitions live at
+1823–2250; the **line range** 3501–4067 actually holds the tail of
+`apiDeleteInventory` (3501), `apiCombineInventoryItems` (3565),
+`apiGetCurrencyQuickEdit` (3688), `apiAdjustCurrency` (3730, unused wrapper),
+`apiAdjustInventory` (3740), `apiSetItemQuantity` (3860), and the read/write
+utilities `getInventoryRowObjectById_`, `writeInventoryRow_`, `classifyQuickEdit_`,
+`ensureInventoryHeaders_`, `fillMissingInventoryRarity_`, `findInventoryRowById_`.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, with
+execution-trace + state-machine on each write path):
+
+- **Quick-adjust currency/delerium** (tap card → quick-edit sheet → add/remove/set →
+  amount → Confirm). Client `openQuickEditPanel` (Index.html:7108), `confirmQuickEdit`
+  (7237) → `apiAdjustInventory` (add/remove) or `apiSetItemQuantity` (set). Found the
+  Notes-overwrite BUG, the set-mode-drops-size BUG, the classification-divergence RISK,
+  and the in-flight-flag-reset RISK below.
+- **Delete inventory item** (swipe card → Delete; confirm if qty>1) and the edit-form
+  delete. `handleInventoryDeleteActionById` (7474) → `deleteSelectedInventory` (7489) →
+  `apiAdjustInventory` (decrement) or `apiDeleteInventory` (3501). Optimistic
+  decrement/filter with `previousRows` snapshot, full revert + re-render on both
+  failure paths, `_inFlightWrites` balanced, confirm-all gate for qty>1. Clean except
+  the swipe-decrement-of-a-delerium-row interaction noted under the Notes BUG.
+- **Combine duplicate** (duplicate detected after add → combine sheet → Confirm).
+  `confirmCombineInventoryItem` (Index.html:3455) → `apiCombineInventoryItems` (3565).
+  `pendingCombineChoice` nulled-then-copied (double-tap safe), full restore of the
+  choice on failure with retry kept open, `_inFlightWrites` balanced, server merges
+  qty/holder/faction/notes and value-mismatch is surfaced in the message. Clean.
+
+#### BUG · Code.js:3781 · Quick-adjust delerium overwrites the item's Notes with the ledger note
+In `apiAdjustInventory`, the `quickType === 'delerium crystal'` branch does
+`if (note) rowObj['Notes'] = [note, 'Size: '+size].join('\n')`. The Quick-adjust
+"Note" field is meant as a *transaction* note (it is also written to the ledger as
+`ledgerEntry.notes`). For the **currency** branch the note is correctly sent only to
+the ledger and the row's `Notes` are left untouched — but for delerium the same note
+*replaces* the row's persistent `Notes`. So in the Quick-adjust story, step "enter
+amount + note → Confirm" on any delerium crystal silently destroys whatever was in the
+item's Notes (e.g. "found in dragon hoard" → "from the cache\nSize: chip"). It is also
+reachable without typing a note via swipe-remove-one: `handleInventoryDeleteActionById`
+→ `deleteSelectedInventory` calls `apiAdjustInventory({delta:-1, note:'Swipe remove one'})`,
+so a swipe on a delerium row rewrites Notes to "Swipe remove one\nSize: …". Fix: append
+the ledger note to the ledger only; do not assign it into `rowObj['Notes']` (or, if a
+size-driven Notes update is wanted, append rather than replace, and gate it on an actual
+size change). The unconditional `rowObj['Item'] = 'Delerium {Size}'` rename in the same
+branch has the same flavor — it canonicalizes a custom name (e.g. "Aqua Delerium" with
+category `delerium` → "Delerium Chip") on a plain quantity bump because the size dropdown
+always defaults to a concrete size.
+
+#### BUG · Code.js:3860 · "Set" quick-edit mode silently drops the delerium size selection
+`apiSetItemQuantity` has no `size` parameter and no delerium branch, and
+`confirmQuickEdit` (Index.html:7290) only sends `{itemId, quantity, note}` in the `set`
+branch. The Quick-adjust sheet still renders and pre-selects the size dropdown in `set`
+mode, so a user who switches mode to "set", changes the size, and Confirms gets a
+"Quantity updated." success with the size change discarded — no error, no indication it
+was ignored. The `add`/`remove` path honors `size`; `set` does not. Either honor `size`
+in `apiSetItemQuantity` or hide/disable the size field when mode is `set`.
+
+#### RISK · Index.html:7093 · Client/server delerium quick-edit classification diverges
+`getQuickEditType` (client, 7081) treats anything whose name matches `/delerium|delirium/`
+(and category not potion) as `delerium crystal`, but server `classifyQuickEdit_`
+(Code.js:1806) only matches `category === 'delerium'` OR a name matching
+`^(delerium|delirium)\s+(chip|fragment|shard|crystal|geode|massive cluster|unknown)`.
+For an item named "Aqua Delerium" with a non-delerium category, the client opens the
+delerium size editor (size dropdown active), but the server's `quickType` is `''`, so
+`apiAdjustInventory` skips the delerium branch entirely: the size selection is a no-op
+**and no ledger entry is appended** (`ledgerEntry` stays null), yet the user sees
+"Saved." and used a "Quick Delerium" editor expecting a logged crystal transaction. The
+adjustment still happens, but it never reaches the delerium ledger. Align the two
+classifiers (ideally have the client trust the `editType` returned by
+`apiGetCurrencyQuickEdit` at Index.html:7161 rather than its own `getQuickEditType`).
+
+#### RISK · Index.html:7109 · openQuickEditPanel resets the in-flight guard, allowing a double write + UI race
+`openQuickEditPanel` unconditionally sets `quickEditInFlight = false`. If a quick-adjust
+is already in flight (panel showing "Saving…") and the user opens the quick editor for a
+second item (reachable on desktop, where `desktopQuickEditor` doesn't fully block the
+list), the guard is cleared and a second `apiAdjustInventory`/`apiSetItemQuantity` can be
+launched while the first is unresolved. `confirmQuickEdit`'s `finishSuccess` also lacks
+the identity guard that `apiGetCurrencyQuickEdit`'s handler has
+(`selectedQuickEdit.itemId !== row[...]` at 7152), so the first response's
+`closeQuickEditPanel()` + success status land on the *second* item's open panel. Row data
+stays correct (handlers key off `res.item`'s ID), so this is a UI/state-machine race, not
+data loss — but `_inFlightWrites` can briefly double and the panel closes out from under
+an unresolved second write. Suggest not resetting `quickEditInFlight` when it is already
+true (or refusing to open a new quick edit mid-flight), and adding an identity check in
+`finishSuccess`.
+
+#### Note · Index.html:4357 · Sync deferral correctly protects in-range write paths
+Traced the cross-cutting "collaborative sync interference" concern against the Section 7
+writes: `pollSync` (4357) sets `pendingForeignReload = true` and leaves
+`syncState.inventory.ts` unchanged when a foreign write arrives while `_inFlightWrites > 0`,
+so `loadInventory(true)` is deferred (and re-attempted on the next poll) rather than
+clobbering an optimistic quick-adjust/delete/combine mid-flight. All three traced flows
+increment/decrement `_inFlightWrites` on both success and failure, so the guard holds.
+`apiDeleteInventory` (3501) and `apiCombineInventoryItems` (3565) release the
+`DocumentLock` in `finally` on every path including not-found/auth-failure. Clean.
+
 
 ### 2026-06-19 (run 32) — Sections audited: 6
 
