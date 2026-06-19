@@ -1,8 +1,8 @@
-# Handoff — 2026-06-17 (updated)
+# Handoff — 2026-06-19 (updated)
 
 ## Project
 
-**Drakkenheim Party Inventory Web App** — Google Apps Script web app backed by the "Wieners of Drakkenheim" spreadsheet (`1DRs3BhuiAdojDBonns42b8FRPEBLNdjH2z8AUfW5U0o`). Source in `src/`, deployed via `clasp`, currently at version `@306`.
+**Drakkenheim Party Inventory Web App** — Google Apps Script web app backed by the "Wieners of Drakkenheim" spreadsheet (`1DRs3BhuiAdojDBonns42b8FRPEBLNdjH2z8AUfW5U0o`). Source in `src/`, deployed via `clasp`, currently at version `@311`.
 
 ---
 
@@ -479,34 +479,137 @@ The `@media (min-width: 700px)` block sets `.mobile-sheet { display: none !impor
 - **`apiQuickAddInventory` ledger entry**: Notes + Character fields now included in the sanitized return, matching `apiDepleteResource`/`apiReceiveResource`.
 - **`apiSellDelerium`/`apiSplitGold`** ledger entries: all five inline `ledgerEntries.push()` calls now wrapped with `sanitizeResourceLedgerForClient_`; `SPLIT_REMAINDER` entry got its missing `Character` field.
 
-### Current deploy state
+### Current deploy state (`@307–@311`, 2026-06-19)
 
-No new deploy since `@306`. All changes above are local source only — `clasp push` + `clasp deploy-webapp` required before the next session.
+| Version | What it contains |
+|---|---|
+| `@307–@309` | Audit fix batch: runs 1-21 (CSS/sheet-visibility bugs, combineSheet, auth hardening, ledger gaps, poll-clobber class, delerium send/receive, notes subsystem) |
+| `@310` | Audit fix batch: runs 22-26 (pendingForeignReload, _inFlightWrites gaps, notes in-flight guard, delerium quick-add size, inventory edit save guard, Undo Last Pay wiring) |
+| `@311` | Audit fix batch: runs 27-37 — all open BUG findings closed (see session summary below) |
+
+---
+
+## Session Summary (2026-06-19 — audit runs 22-37, deploys @307-@311)
+
+### CCR audit continuation
+
+The scheduled Claude Code remote agent continued through all 13 Index.html sections and all 7 Code.js sections (re-audited against the post-fix tree). Runs 22-37 surfaced 15 BUG-severity findings, all of which are now fixed and live at `@311`. `FINDINGS.md` has every BUG entry struck through; remaining open items are RISKs and IDEAs only.
+
+---
+
+### `_inFlightWrites` — closed the last gaps (runs 22-24)
+
+`addInventoryItem` (BUG 8033, run 22), `receiveDelerium` / `sellDelerium` (run 11), `confirmSellBatch` (RISK 5923, run 24), `confirmCombineInventoryItem` (RISK 3449, run 23), and `saveInventoryEdits` (RISK 7390, run 25) were the last write paths missing `_inFlightWrites++/--`. All now bracket their server calls consistently.
+
+---
+
+### `pendingForeignReload` flag (BUG 4349, run 23)
+
+Root cause: when `pollSync` deferred a foreign reload (because `_inFlightWrites > 0`), it left `syncState.ts` un-advanced. When the local write then committed, the marker was overwritten to `by=me`. The next poll saw `by === syncClientId` and skipped the reload permanently — the foreign write was silently lost.
+
+Fix: added `pendingForeignReload` and `pendingForeignNoteReload` boolean flags. The defer branch sets the flag instead of relying on ts comparison. On a later poll where `_inFlightWrites === 0`, if the flag is set, `loadInventory(true)` fires and clears it regardless of `by`.
+
+---
+
+### Notes subsystem hardening (runs 17, 24, 31)
+
+- **`_inFlightNoteWrites`** counter: mirrors `_inFlightWrites` for notes; `pollSync` defers `loadNotes(true)` while > 0
+- **`_notesActionInFlight` Set**: per-noteId guard on `archiveNote`, `toggleNotePin`, `deleteNoteFromForm` — prevents double-tap desync
+- **Stale-index rollback fixed** (RISK 4628, run 31): edit/archive/delete rollbacks now call `findIndex` at handler time; `archiveNote` and `deleteNoteFromForm` use `!notesData.some(n => n.noteId ===)` before re-inserting, safe after a mid-flight `loadNotes` replaces the array
+- **Failed create restores form** (BUG 4650, run 31): create branch snapshots all five fields before `closeNoteForm()`; on failure, `restoreNoteForm_()` re-opens the sheet pre-filled so nothing is lost
+- **Create-success re-renders** (BUG 4631, run 17): `renderNotesList()` added to create-success ok branch — card was stuck "Saving…" until an unrelated action
+
+---
+
+### `inventorySignature_` expanded (BUG 4073, run 36)
+
+Previously: `length + '|' + first-8-IDs` — did not detect qty, holder, value, or notes changes. Foreign edits (Edit item, Give to…, quick-adjust) with a stable row set never triggered a re-render; values stayed stale until the next interaction.
+
+Fix: signature now covers `InventoryID:Qty:Holder:ValueGP:Notes` for every row via `.map().join('|')`.
+
+---
+
+### `apiUpdateInventory` drops Item/Category/Rarity (BUG Code.js:3408, run 29)
+
+`apiUpdateInventory` built its `rowObj` with `...existingObj` spread for Item/Category/Rarity — payload values were silently ignored. A user who renamed an item or re-categorized it saw optimistic success, then a revert on the next sync.
+
+Fix: added `payload.x === undefined ? existingObj[x] : validate(payload.x)` fallback guards for all three fields, matching the existing pattern for Qty/Holder/ValueGP/Notes.
+
+Also: `apiAddInventory` (RISK 2424, run 29) now honors `payload.category` / `payload.rarity` overrides on library adds — user edits before tapping Add no longer snap back to library defaults.
+
+---
+
+### Delerium quick-adjust bugs (Code.js:3781 and 3860, run 33)
+
+- **BUG 3781**: `apiAdjustInventory` delerium branch was writing the ledger transaction note into the row's persistent `Notes` field (`rowObj['Notes'] = [note, 'Size: '+size].join('\n')`). This destroyed any item-specific note on every qty adjust, including swipe-remove-one. Fix: removed the `rowObj['Notes']` write; note now goes to the ledger only.
+- **BUG 3860**: `apiSetItemQuantity` (set-mode quick-edit) had no `size` parameter. User changes to the size dropdown in set mode were silently discarded. Fix: client now passes `size` in the set call; server applies the delerium rename if size is valid.
+
+---
+
+### Undo Last Pay gold duplication (BUG 6155, runs 30 and 32)
+
+`apiSendGoldToMember` writes two rows: `res.poolDeduct` (−amount from pool) and `res.item` (+amount credit to recipient). The undo token stored only `poolDeduct`; `undoResourcePay` deleted only that one row, leaving the credit row in place — creating gold from nothing on every member-pay undo.
+
+Fix:
+- `confirmPayWithReason` onSuccess now stores `creditItem: isMember ? res.item : null` in `lastResourceUndo['gold']`
+- `undoResourcePay` makes two sequential `apiDeleteInventory` calls for member-pays: deduct first, then credit. If the second call fails (rare), `loadInventory(true)` resyncs server truth rather than attempting a complex local rollback.
+
+---
+
+### Other bug fixes
+
+| Bug | Fix |
+|---|---|
+| **BUG 6205** — `splitGold` failure loses typed amount/note | Snapshot `savedAmount`/`savedNote` before clearing inputs; restore both on `!ok` and failure |
+| **BUG 5154** — non-treasurer Received always fails (no counter UI) | Non-treasurer delerium sheet now shows `+/−` receive counters per size via new `adjustDeleriumReceive()`; Received button enables when any delta > 0 |
+| **BUG 5571** — Give title promises a qty it ignores | Removed `"Give 3×"` from `openGiveItemSheet` title; only the representative row moves, so the qty was misleading |
+| **BUG 6948/RISK 6936** — description failure caches `null`, blocks retry; blank body | Failure handler no longer writes `itemCache[libraryItemId] = null`; shows `userNotes \|\| 'No description available.'` instead of blank |
+| **RISK Code.js:290** — `resetAppDataSheets` wipes CHARACTERS roster | Removed CHARACTERS from the clear list; roster preserved on reset (consistent with `resetCampaignData()`) |
+
+---
+
+### Quality-of-life fixes (IDEAs)
+
+- **IDEA 6028** — `confirmSellBatch` applied an optimistic row-decrement block immediately before `loadInventory(true)` which overwrote it; removed the dead block
+- **IDEA 7401** — `saveInventoryEdits` now calls `closeInventoryPanels(false)` on success, consistent with give/delete flows
+- **RISK 4628 (notes rollback stale index)** — all three notes rollback handlers (edit/archive/delete) now find the note by `noteId` at rollback time rather than using a captured array index from before the API call
 
 ---
 
 ## Outstanding / Next Tasks
 
-1. **Deploy to Apps Script** — run `.\scripts\clasp-push.ps1` then `.\scripts\clasp-deploy-webapp.ps1 "audit fix batch"`. Many sessions of changes since `@306` are local only. Prune old versions at `script.google.com` first if near the 200-version limit.
+1. **Import equipment library** — upload `equipment_library_5e.xlsx` to Google Drive, open as Sheets, paste rows 2–5837 into `EQUIPMENT_LIBRARY_CLEAN` at row 2. Activates full stat blocks for all 5,836 items.
 
-2. **Import equipment library** — upload `equipment_library_5e.xlsx` to Google Drive, open as Sheets, paste rows 2–5837 into `EQUIPMENT_LIBRARY_CLEAN` at row 2. This activates full stat blocks for all 5,836 items.
+2. **Delete `temp_patch.py`** — one-shot file, no longer needed.
 
-3. **Delete `temp_patch.py`** — one-shot file, no longer needed.
+3. **Swipe-delete confirmation** — single swipe + tap permanently deletes with no undo. Consider inline confirm (same pattern as 0 gp delerium sell). Edit form has multi-qty guard; swipe-delete does not.
 
-4. **Swipe-delete confirmation** — single swipe + tap permanently deletes with no undo. Consider inline confirm (same pattern as 0 gp delerium sell). Edit form delete now has a multi-qty guard; swipe-delete does not.
+4. **Gold float rounding** — `parseFloat(x.toFixed(2))` at write boundaries in `apiSplitGold`.
 
-5. **Gold float rounding** — add `parseFloat(x.toFixed(2))` at write boundaries in `apiSplitGold`.
+5. **Existing inventory stat block backfill** — items added before library import have non-matching IDs. Options: manual edit of Library Item ID column, or name-based backfill.
 
-6. **Existing inventory stat block backfill** — items added before new library import have IDs from `makeStableItemId_()` (Code.js hash). New library items use `makeId()` (parse_compendium.js hash). IDs don't match so existing items get no stat block. Options: manual edit of Library Item ID in spreadsheet, or automated name-based backfill function.
+6. **Party Notes — next steps**:
+   - Tab is now visible to all users (beta gate removed). Confirm this is intentional or restore `isTreasurer` gate in `applyIdentity` + `setCommandMode`.
+   - Item detail integration: "+ Add Item Note" on `#descriptionSheet`; `relatedItemId` field and hidden form input already plumbed.
+   - Note detail/full-view sheet (expand beyond 3-line body preview).
+   - Remove legacy `CAMPAIGN_NOTES_FEED` v1 functions when confirmed unused.
 
-7. **Party Notes — next steps**:
-   - Currently treasurer-only (Corvane) for beta. Open to all players when ready.
-   - Item detail integration: "+ Add Item Note" button on `#descriptionSheet`; show related notes inline (`relatedItemId` field and hidden form input already in place server-side and in the form).
-   - Note detail/full-view sheet (expand beyond 3-line body preview on tap).
-   - Old `CAMPAIGN_NOTES_FEED` v1 functions still in Code.js — remove once confirmed no longer used.
+7. **Open RISKs from audit** (no BUGs remain):
+   - RISK 3169: tap double-opens panel — `touchend` tap branch missing `lastTapOpenedAt` guard
+   - RISK 110: dice overlay missing `app-modal-open` scroll-lock — body scrolls behind the calculator
+   - RISK 7093: client/server delerium quick-edit type classification diverges for custom item names
+   - RISK 7109: `openQuickEditPanel` resets `quickEditInFlight = false` even if a call is in-flight
+   - RISK 6741: Undo Last Pay removes inventory rows but leaves RESOURCE_LEDGER entries; history shows the payment until next reload
+   - RISK 1853: `appendResourceLedger_` swallows errors silently — ledger write failure invisible to client
+   - RISK 4810: Party Notes tab gating — `applyIdentity` shows it to everyone; README says beta-only; confirm intent
+   - RISK 6029: sell-batch 1.5 s auto-close timer has no generation counter — can close a re-opened sheet
+   - RISK 6435: ledger note-edit falls back to Timestamp for same-second multi-row ops (ambiguous)
+   - RISK Code.js:135: two note backends coexist without documentation (CAMPAIGN_NOTES_FEED vs NOTES)
 
-8. **Collaborative sync — known edge case**: if two players write within the same ~20s poll window, the second writer may not see the first writer's change until the next poll cycle. Acceptable for a turn-based D&D session.
+8. **"Give to…" rollup limitation** — moves only the representative row. Needs a dedicated server-side multi-row move endpoint for full FIFO give.
 
-9. **"Give to…" rollup limitation** — from the description sheet, "Give to…" only reassigns the representative row's holder (one underlying row). When an item is rolled up from multiple additions, only one unit moves. Workaround: use the item edit form for each addition, or add a bulk-give API.
+9. **Ledger entry ID** — DEFERRED. `apiUpdateLedgerNote` Timestamp-based fallback can hit wrong row in batch ops. Requires new `Entry ID` column in `RESOURCE_LEDGER_HEADERS` and threading through all `appendResourceLedger_` callers and the client cache.
 
-10. **Ledger entry ID deferred** — `apiUpdateLedgerNote` keys on Timestamp (first 19 chars). Same-millisecond collisions in batch ops (split-gold, sell-delerium) could match the wrong row. Requires adding a stable `Entry ID` column to `RESOURCE_LEDGER_HEADERS` and threading it through every `appendResourceLedger_` call and the client cache. Low urgency — batch ops each write to distinct seconds in practice.
+10. **Audit cursor** — currently at section 12: `Index.html lines 6001–7500` (inventory groups, description sheet, sell batch). New findings will appear at the top of `FINDINGS.md`.
+
+11. **Version limit** — currently at `@311`; prune old versions at `script.google.com` when approaching 200.

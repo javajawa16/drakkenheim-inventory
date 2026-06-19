@@ -39,7 +39,7 @@ Local working repo for the **Wieners of Drakkenheim** D&D campaign inventory web
 - Holder assignment with character dropdowns (populated from CHARACTERS sheet)
 - Per-player scope slider (Party ↔ character name) — see Identity section
 - Item detail view: stat block (Damage · Properties · Range · AC · Weight · Value) shown above description, matching D&D compendium format; library description cached in-session
-- Inventory filter clears on every tab switch; tab switch uses in-memory rows (no flash), background sync only re-renders when data has changed
+- Inventory filter clears on every tab switch; tab switch uses in-memory rows (no flash), background sync re-renders only when data actually changed (signature covers row count, IDs, Qty, Holder, Value GP, Notes)
 - Swipe gestures use a single delegated listener on the list container; filter input debounced 80 ms; swiping a new card auto-closes any previously open swipe
 - Filtered view shows notes inline for gold and delerium rows (single line, meta suppressed when notes present)
 - Add item library preview: stat block + description in a unified scrollable container; category/rarity shown as pills
@@ -63,39 +63,32 @@ Local working repo for the **Wieners of Drakkenheim** D&D campaign inventory web
 - Ledger entries are tappable: tap to edit the note, save writes back to RESOURCE_LEDGER sheet
 - Treasurer scope: Party Pool / character toggle; DM sees grand total on DM tab
 
-### Delerium sheet (treasurer / DM only)
+### Delerium sheet
 - Sheet title: **Purple Rocks = XX crystals** (live total in header)
 - Counter section is **statically pinned** above a scrollable ledger (same `flex-shrink: 0` pattern as gold scope slider)
-- Single set of per-size counters — bidirectional: decrement below stock = sell (red label), increment above stock = receive (green label)
+- **Treasurer view**: per-size bidirectional counters — decrement below stock = sell (red label), increment above stock = receive (green label); `[Received]` / `[Sell]` buttons side by side, each activates only in its direction, both disabled when counters are mixed; 0 gp sell has inline "are you sure?" confirmation
+- **Non-treasurer view**: per-size `+/−` receive counters starting at 0 (driven by `adjustDeleriumReceive()`); `[Received]` button activates when any size > 0; no sell path
 - Counter font sizes use DPR-scaled CSS variables (`--phone-font-heading` for labels/qty, `--phone-font-body` for variance labels) — required because GAS webview renders at ~980px CSS width and scales visually; hardcoded px values appear too small
-- **`[Received]` `[Sell]`** side by side — each activates only when the counters are in the matching direction; both disable when counters are mixed (+/−); silent guard prevents posting in mixed state
-- Gold received (33%) and Note (66%) inputs share one inline row
-- Sell accepts 0 gp with inline "are you sure?" confirmation
-- Non-treasurers see a Received button to log crystal pickups
+- Gold received (33%) and Note (66%) inputs share one inline row (treasurer)
 - Ledger shows up to 60 entries (full in-memory buffer), independently scrollable
 
 ### Party Notes
-- **3rd bottom-nav tab** ("Party Notes") — currently treasurer-only (Corvane) for beta; gated in `setCommandMode` and `applyIdentity`
+- **3rd bottom-nav tab** ("Party Notes") — visible to all users (beta gate removed from `applyIdentity`; open to everyone)
 - Normal `<section>` in `<main>`, shown/hidden via `.active` class (same pattern as inventory/add)
 - Backed by a `NOTES` sheet (auto-created on first use) with 11-column schema:
   `Note ID · Created At · Updated At · Author · Category · Title · Note · Tags · Pinned · Archived · Related Item ID`
+- **3 categories**: General, Quest, Location — `PARTY_NOTES_CATEGORIES` in Code.js and `NOTE_CATEGORIES` in client are authoritative; README "8 categories" table is stale
 - **Filter bar**: in the app header (replaces commandSearch row on notes tab). Live search, category dropdown, 📌 pinned-only toggle — all client-side, no server roundtrip
-- **8 categories** with playful display labels:
-
-| Internal | Display label |
-|---|---|
-| General | General Nonsense |
-| Quest | Quest |
-| Location | Location |
-
 - **Note cards**: category pill + tags on same row (tags right-aligned), title, 3-line body preview, author + date, Pin/Archive buttons. Cards with in-flight creates are dimmed + non-clickable with "Saving…" badge.
-- **Optimistic saves**: create/edit/archive/pin all update local state immediately; server syncs in background; rollback on failure
+- **Optimistic saves**: create/edit/archive/pin all update local state immediately; server syncs in background; rollback on failure. Failed create re-opens the form pre-filled (no content loss).
 - **Caching**: notes loaded once and kept in memory; 2-minute TTL triggers silent background refresh on tab switch; preloaded in background immediately after identity resolves
+- **In-flight guards**: `_inFlightNoteWrites` counter defers poll-triggered `loadNotes(true)` mid-write; `_notesActionInFlight` Set prevents double-tap on pin/archive/delete; rollbacks find note by ID at handler time (no stale array index)
 - **Add/Edit form**: mobile-sheet overlay — Title, Category, Note body, Tags, Pinned checkbox, hidden Related Item ID
 - Author set from `clientCharacter` (not `Session.getActiveUser()` — known unreliable)
 - `apiGetNotes({})` — loads all non-archived notes, pinned-first, Updated At desc. Client applies all filters.
 - `apiCreateNote(payload)`, `apiUpdateNote({noteId, patch})`, `apiArchiveNote({noteId})`
 - `Related Item ID` field plumbed server-side and in form — item-detail integration not yet built
+- Legacy `CAMPAIGN_NOTES_FEED` (5-col schema) and its four API functions still in Code.js — both note backends are live; see Known TODOs
 
 ### Dice calculator
 - Accessible via the d20 icon button in the header search bar row (next to Filter/Search input)
@@ -185,9 +178,14 @@ npm install          # one-time: installs clasp + xlsx
 - Import `equipment_library_5e.xlsx` into `EQUIPMENT_LIBRARY_CLEAN` sheet to activate the full 5e item stat blocks
 - Swipe-delete has no undo — consider inline confirmation (same pattern as 0 gp delerium sell)
 - Gold float rounding: `parseFloat(x.toFixed(2))` at write boundaries in `apiSplitGold`
-- Apps Script version limit — prune old versions at `script.google.com` before the next deploy batch (was at @306 before audit fixes; versions not yet pushed)
+- Apps Script version limit — prune old versions at `script.google.com` periodically (currently at `@311`)
 - Existing inventory items added before new equipment library import won't have stat blocks (different hash functions). Options: manual edit of Library Item ID column, or automated name-based backfill.
-- "Give to…" from description sheet moves only the representative row when an item is rolled up from multiple additions — other rows stay in place
+- "Give to…" from description sheet moves only the representative row when an item is rolled up from multiple additions — other rows stay in place; FIFO multi-row give needs a dedicated server endpoint
+- Undo Last Pay removes inventory rows but does not reverse RESOURCE_LEDGER entries; ledger history shows the original payment after undo until the next reload
+- `appendResourceLedger_` swallows its own errors — a ledger write failure is invisible to the client (phantom entry disappears on next reload)
+- Sell-batch auto-close timer (1.5 s) has no generation counter — reopening the sheet within 1.5 s of a successful sell closes it again
+- Ledger note-edit still falls back to Timestamp matching for entries without an Inventory ID (same-second multi-size delerium sells share a timestamp) — DEFERRED pending ledger schema revision
+- Two parallel note backends coexist: `CAMPAIGN_NOTES_FEED` (legacy 5-col, active v1 UI) and `NOTES` (current 11-col Party Notes). Only the 11-col schema is documented. Consider retiring v1 when confirmed unused.
 
 ## CSS / Layout Architecture Notes
 
