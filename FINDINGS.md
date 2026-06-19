@@ -1,9 +1,132 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 11. Index.html lines 4501–6000 (gold/delerium UI, sync)
+Next section: 12. Index.html lines 6001–7500 (inventory groups, description sheet, sell batch)
 
 ## Sessions
+
+### 2026-06-19 (run 37) — Sections audited: 11
+
+Section 11 = Index.html lines 4501–6000 (gold/delerium UI, sync). The actual sync
+poll lives at 4357–4395 (traced run 36); the in-range material is: the tail of
+Party Notes v2 handlers (`renderNotesList` tail, `handleNotesSearch`, `openNoteForm`,
+`deleteNoteFromForm`, `saveNoteForm`, `archiveNote`, `toggleNotePin` — 4501–4746),
+the full identity flow (`readCachedIdentity`/`cacheIdentity`/`applyIdentity`/
+`loadMyIdentity`/`loadFallbackCharacterIdentity`/`showIdentitySheet`/`confirmIdentity`
+— 4754–4914), the **Gold sheet** (`openGoldSheet`/`setGoldSheetScope`/
+`renderGoldSheetBody`/`renderGoldSheetButtons`/`receivedGold`/`openPayReasonSheet` —
+4918–5559), the **Delerium sheet** (`renderDeleriumSheetActions`/`openDeleriumSheet`/
+`renderDeleriumSheetBody`/`adjustDeleriumSell`/`updateDeleriumButtonStates`/
+`receiveDelerium`/`refreshDeleriumStateFromInventory_`/`sellDelerium` — 4948–5362),
+**Give item** (`openGiveItemSheet`/`giveItemToCharacter` — 5567/6045), **Sell item**
+(`openSellItemSheet`/`confirmSellItem` — 5598/5618), and the **Sell batch** sheet
+(`openSellBatchSheet`…`confirmSellBatch` — 5692–6043). Ledger-edit handlers
+(`renderResourceLedger`/`selectLedgerRowForEdit`/`cancelLedgerEdit`/
+`updateLedgerNoteFromBottom` — 6311–6450) read outside range.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, with
+execution-trace + state-machine on each write path):
+
+- **Receive crystals** (Delerium tab → increment → Received → gold + note → confirm).
+  Treasurer path via `receiveDelerium` (5154) is clean (optimistic rows + pending
+  ledger, full revert on both error branches, counters resynced via
+  `refreshDeleriumStateFromInventory_`). The **non-treasurer** path is BROKEN — see
+  BUG below.
+- **Sell crystals** (decrement → Sell → 0 gp inline confirm). `sellDelerium` (5254)
+  clean: 0 gp confirm gate, optimistic negative rows, inputs snapshotted/restored,
+  double-tap naturally guarded by the post-sell counter resync (delta→0). Noted the
+  button-state-not-refreshed-after-sell nit (Sell stays red until next adjust) — benign
+  (second tap bails on empty `items`).
+- **Receive gold (Got Paid)** (`receivedGold` 5460) and **Pay gold** (`openPayReasonSheet`
+  5529 → `confirmPayWithReason` 6104). Receive: optimistic pending ledger, inputs
+  restored on failure, double-tap guarded by cleared amount → re-validates `>0`. Balance
+  lag IDEA already filed (run 32). Pay-reason validates amount before opening; amount
+  re-read at confirm.
+- **Edit ledger note** (Gold + Delerium) — `selectLedgerRowForEdit` (6363) →
+  `updateLedgerNoteFromBottom` (6411). Buttons disabled during save; `closeGoldSheet`/
+  `closeDeleriumSheet` both `cancelLedgerEdit()` so no stuck edit state on navigate-away;
+  amount field readOnly toggled correctly. Found the timestamp-match RISK below.
+- **Give item to character** (`giveItemToCharacter` 6045) — optimistic holder swap, full
+  revert on both failure paths, `.saving` pulse null-checked. Clean (qty-stepper-ignored
+  BUG already filed run 35; rollup limitation is a README TODO).
+- **Sell item** (`confirmSellItem` 5618) and **Sell batch** (`confirmSellBatch` 5977).
+  Single-item sell: FIFO drain, optimistic pre-call removal, full `previousRows` revert.
+  Batch: optimistic removal deferred to success handler (no rollback needed on failure),
+  confirm button disabled during flight. Found the auto-close RISK below.
+- **Identity selection** (`confirmIdentity` 4884 → `apiSetMyCharacter`) — double-tap
+  guarded (`identityChoiceSaving`), optimistic local apply, localStorage cache persists on
+  server failure. `startSyncPoll` (4388) is idempotent (`if (syncPollTimer) return`) so
+  the 2–3 `applyIdentity` calls per load (cached + fallback + confirm) don't stack polls.
+  Clean — except the notes-tab gating RISK below.
+- **Create / Edit / Pin / Archive note** (4580–4746) — re-confirmed run 31 traces;
+  `_inFlightNoteWrites`/`_notesActionInFlight` paired, optimistic + rollback. No new issue.
+
+#### BUG · Index.html:5154 · Non-treasurer "Received" delerium button can never succeed
+Story **Receive crystals**, non-treasurer path. README §Delerium: "Non-treasurers see a
+Received button to log crystal pickups." But `renderDeleriumSheetBody` builds the
+adjustable per-size counters **only** inside `if (isTreasurer)` (5028); the non-treasurer
+`else` branch (5071–5078) renders a read-only `resource-lines` list with no counters and
+no way to call `adjustDeleriumSell`. `openDeleriumSheet` (4999) calls
+`refreshDeleriumStateFromInventory_` which sets `deleriumOriginalQtys[s] ===
+deleriumSellQtys[s] === stock` for every size. `receiveDelerium` (5161) computes each
+`qty = deleriumSellQtys[s] − deleriumOriginalQtys[s]` → always `0` → `items` is empty →
+the function bails at 5164 with `"Increment at least one crystal to receive."` and never
+reaches the server. So a non-treasurer tapping **Received** can only ever see that error;
+there is no UI to specify a quantity. The documented non-treasurer crystal-pickup flow is
+non-functional. Fix: give non-treasurers a per-size quantity input (or a simple
++/− counter that drives `deleriumSellQtys` upward), or a dedicated "received N of size X"
+mini-form, so `items` can be non-empty.
+
+#### RISK · Index.html:4810 · Party Notes tab is revealed to every user, contradicting the documented treasurer-only beta gate
+`applyIdentity` unconditionally un-hides the notes tab — `notesTabEl.style.display = ''`
+plus the 3-column nav (4810–4812) — with **no `isTreasurer` check**, and `setCommandMode`
+(3206–3221) doesn't gate it either. README §Party Notes states the tab is "currently
+treasurer-only (Corvane) for beta; gated in `setCommandMode` and `applyIdentity`." The
+gate is absent in both places, so as soon as any player resolves an identity they see the
+"Party Notes" tab and can open/create/edit/pin/archive notes (the `apiCreateNote`/
+`apiUpdateNote`/`apiArchiveNote` calls carry no treasurer gate). Either the README is
+stale (beta gate intentionally dropped) or the gate was lost in a refactor and is exposing
+a beta feature to all players. Behavioral/access divergence from spec — confirm intent; if
+still beta-gated, wrap 4809–4813 in `if (isTreasurer)` (and hide via `setCommandMode` too).
+
+#### RISK · Index.html:6029 · Sell-batch 1500 ms auto-close timer can close a reopened sheet, and a manual close mid-flight hides the failure
+Story **Sell Items batch**. On success `confirmSellBatch` schedules
+`window.setTimeout(() => closeSellBatchSheet(), 1500)` (6029). The timer holds no
+generation token, so if the treasurer reopens the sell-batch sheet within that 1.5 s
+window (e.g. to sell a second lot), the stale timer fires and closes the freshly-reopened
+sheet out from under them. Separately, the **failure** path (6031–6035) only writes the
+error into `sellBatchStatus` and re-enables the confirm button — both inside the sheet; if
+the user has tapped Cancel (`closeSellBatchSheet`) during the in-flight window, the failure
+is invisible. Because the optimistic row removal is deferred to the success handler,
+inventory stays correct in that case (no data loss), but the user gets no signal the batch
+sell failed and may assume it succeeded. Fix: guard the auto-close with a generation
+counter (only close if the sheet wasn't reopened), and surface batch-sell failures via
+`setMainStatus` as a fallback when the sheet is no longer open.
+
+#### RISK · Index.html:6435 · Ledger note-edit matches by Timestamp when entryId is empty — multi-entry delerium sells can patch the wrong row client-side
+Story **Edit ledger note**. `updateLedgerNoteFromBottom`'s success handler reconciles the
+local copy with `inventoryResourceLedger.find(e => entryId ? e['Inventory ID'] === entryId
+: e['Timestamp'] === timestamp)` (6435–6436). A single delerium **Sell** of multiple sizes
+posts one `ledgerEntries` row per size, all created in the same server pass and therefore
+sharing (or nearly sharing) a `Timestamp`. If those entries carry no `Inventory ID`
+(`entryId` empty — the optimistic gold pending entry already sets `'Inventory ID': ''`),
+the client `.find` returns the **first** timestamp match and writes `newNote` onto it,
+regardless of which of the same-timestamp rows the user actually tapped. The tapped row's
+displayed note then doesn't update (or the wrong sibling's does) until the next
+`loadInventory` reload. Server-side correctness depends on `apiUpdateLedgerNote`'s own
+matching, but the optimistic client patch is ambiguous. Fix: prefer a stable per-entry key
+(write a unique ledger row id into `data-entry-id` for every entry, including delerium
+multi-sells) and match on it rather than falling back to a non-unique Timestamp.
+
+#### Note · Index.html:5154 · Treasurer gold/delerium write paths and identity flow are clean
+Positive baseline. Traced Receive gold, Pay gold, Sell crystals (treasurer), Give item,
+Sell item, Sell batch (happy + failure + navigate-away), Edit ledger note, and Identity
+selection. All paired `_inFlightWrites` on success and failure, snapshotted+restored inputs
+(`savedGoldAmount`/`savedSellGold`/`savedRecNote`), and reverted optimistic state on
+failure; sheets covering the bottom-nav defuse tab-switch-mid-flight, and both resource
+sheets cancel any active ledger edit on close. `startSyncPoll` idempotency prevents stacked
+polls across the multiple `applyIdentity` calls per load. The four findings above are the
+only divergences in this range.
 
 ### 2026-06-19 (run 36) — Sections audited: 10
 
