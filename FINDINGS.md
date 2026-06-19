@@ -1,9 +1,92 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 6. Code.js lines 2901–3500 (batch sell, give, remove)
+Next section: 7. Code.js lines 3501–end (sync, audit, utilities)
 
 ## Sessions
+
+### 2026-06-19 (run 32) — Sections audited: 6
+
+Section 6 = Code.js lines 2901–3500 ("batch sell, give, remove"). In-range write APIs:
+`apiUpdateLedgerNote` (2905), `apiReceiveResource` (2961), `apiSellInventoryItem`
+(3046, **unused** — client sells via `apiSellInventoryBatch`), `apiSellDelerium`
+(3101), `apiSplitGold` (3186), `apiSendGoldToMember` (3324), `apiUpdateInventory`
+(3408), `apiDeleteInventory` (3496, partial). Client handlers traced where they sit:
+`confirmSellItem` (Index.html:5618), `giveItemToCharacter` (6045), `confirmSellBatch`
+(5977), `sellDelerium` (5254), `receiveDelerium` (~5160), `receivedGold` (5460),
+`confirmPayWithReason` (6104), `splitGold` (6184), `payResource` (6662),
+`undoResourcePay` (6731), `updateLedgerNoteFromBottom` (6411).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, with
+execution-trace + state-machine on each write path):
+
+- **Pay gold → character** (Gold tab → Pay → pick member → confirm) via
+  `apiSendGoldToMember`. Found the gold-duplication-on-undo BUG below.
+- **Pay gold → Purchase** via `apiDepleteResource` — pending ledger entry, removePending
+  + prepend real entry, inputs saved/restored on failure. Clean.
+- **Undo last pay** (`undoGoldPay`/`undoResourcePay`) — clean for the dashboard
+  `payResource` single-row deduct; BROKEN for member sends (see BUG).
+- **Split gold evenly** (treasurer) via `apiSplitGold` — found the lost-inputs-on-failure
+  BUG below.
+- **Give item to character** (description sheet → Give to… → pick) via
+  `apiUpdateInventory({holder})` — optimistic holder swap on the representative row,
+  full revert on failure, `.saving` pulse null-checked. Clean except the documented
+  rollup limitation (README known TODO: only the representative row moves).
+- **Sell item** (description sheet → Sell for Gold → stepper) and **Remove item**
+  (description sheet → Remove → stepper) via `apiSellInventoryBatch` (out of range,
+  but traced) — FIFO drain, optimistic decrement, full `previousRows` revert on
+  failure/!ok. Clean.
+- **Sell crystals** via `apiSellDelerium` and **Receive crystals** via
+  `apiReceiveResource` — optimistic rows + pending ledger entry, inputs saved/restored
+  on both error branches, counters resynced from reverted inventory. Clean.
+- **Receive gold (Got Paid)** via `apiReceiveResource` gold branch — clean rollback,
+  but balance-lag friction noted as IDEA.
+- **Edit ledger note** via `apiUpdateLedgerNote` — buttons disabled during save, entry
+  found by entryId/timestamp and patched on success, `cancelLedgerEdit` on close.
+  Clean (only-deduct-row note inconsistency for member sends is cosmetic).
+
+#### BUG · Index.html:6155 · "Undo Last Pay" duplicates gold after Pay→member
+Story **Undo last pay**, after **Pay gold → character**. When a Pay is routed to a
+party member, `confirmPayWithReason` stores `lastResourceUndo['gold'] = { item:
+res.poolDeduct, ledgerEntry: res.ledgerEntry }` (6155). `apiSendGoldToMember`
+(Code.js:3324) writes **two** inventory rows: the member credit (`res.item`, Qty
+`+amount`, Holder = character) and the pool/personal deduction (`res.poolDeduct`, Qty
+`-amount`). The "↩ Undo Last Pay" button (5450) → `undoGoldPay` → `undoResourcePay`
+(6731) deletes **only** `undo.item['Inventory ID']` (the deduction) via
+`apiDeleteInventory`. The member credit row is never deleted. Net result: the pool/sender
+deduction is reversed **and** the recipient keeps the credited gold — `amount` gp is
+created from nothing. This persists server-side; `loadInventory(true)` reloads the
+orphaned credit row. (The dashboard `payResource` path is fine because
+`apiDepleteResource` writes a single row.) Fix: for member sends, undo must delete both
+the credit and the deduction (store both IDs, or send a dedicated reversal API), or
+suppress the Undo affordance for member-routed pays.
+
+#### BUG · Index.html:6205 · Failed Split Evenly loses the typed amount and note
+Story **Split gold evenly**, step "server returns !ok or failure". `splitGold` clears
+`goldSheetAmount` and `goldSheetNote` optimistically (6205–6206) but neither the
+success-`!ok` branch (6215–6218) nor the `withFailureHandler` (6232–6236) restores
+them — unlike `confirmPayWithReason` (`restoreInputs`), `receivedGold`
+(`savedGoldAmount`/`savedGoldNote`), and `sellDelerium`
+(`savedSellGold`/`savedSellNote`), which all snapshot and restore. The error message
+says "Failed." / shows the server error, but the amount the user typed is gone, so
+"try again" forces a full re-entry. Fix: snapshot amount/note before clearing and
+restore them in both failure paths (mirror `receivedGold`).
+
+#### IDEA · Index.html:5474 · Gold receive/pay balance lags behind the ledger entry
+Stories **Receive gold** and **Pay gold**. `receivedGold` and `confirmPayWithReason`
+optimistically insert only a *pending ledger entry*; they do **not** add an optimistic
+inventory row, so the header "Gold = XXX gp" total and the party-pool balance (both
+derived from `inventoryRows` via `getGoldBreakout`) don't move until the server
+responds and `primeInventoryCacheAfterAdd(res.items/res.item)` runs. By contrast
+`receiveDelerium` (5179) prepends optimistic inventory rows immediately, so the
+delerium total updates instantly. The result is inconsistent feedback between adjacent
+resource flows: the ledger shows the transaction but the balance appears unchanged for
+the round-trip. Suggest adding an optimistic gold inventory row (reverted on failure
+like delerium) so the balance updates in lockstep with the ledger.
+
+#### Note · Code.js:3046 · `apiSellInventoryItem` is unreachable
+Confirmed no caller in Index.html (all sell flows use `apiSellInventoryBatch`). Flagged
+only to record that the single-item sell path was excluded from story tracing as dead.
 
 ### 2026-06-19 (run 31) — Sections audited: 5
 
