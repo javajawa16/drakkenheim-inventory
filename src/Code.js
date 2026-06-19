@@ -3718,6 +3718,7 @@ function apiGetCurrencyQuickEdit(itemId) {
         editType,
         quantity: normalizeForClient_(found.rowObj['Qty']),
         holder: safeText_(found.rowObj['Holder']),
+        currentSize: editType === 'delerium crystal' ? normalizeDeleriumSize_(found.rowObj['Item']) : '',
         sizeOptions: editType === 'delerium crystal' ? DELERIUM_SIZE_VALUES.slice() : []
       }
     };

@@ -1397,7 +1397,7 @@
     .mobile-sheet-actions {
       flex-shrink: 0;
       display: grid; gap: 10px;
-      padding: 10px 14px calc(12px + var(--safe-bottom));
+      padding: 10px 14px calc(12px + var(--safe-bottom) + var(--keyboard-offset));
       background: rgba(10,16,31,.98);
       border-top: 1px solid rgba(92,115,158,.32);
     }
@@ -1531,6 +1531,8 @@
       #sellBatchSheet.active   { display: block !important; }
       #combineSheet.active     { display: block !important; }
       #identitySheet.active    { display: block !important; }
+      #inventorySheet.active   { display: block !important; }
+      #quickEditSheet.active   { display: block !important; }
 
       .bottom-nav {
         left: 20px; right: 20px; max-width: 980px; margin: 0 auto;
@@ -3532,12 +3534,12 @@
     function bindCampaignNotesViewport() {
       if (campaignNotesViewportBound || !window.visualViewport) return;
       campaignNotesViewportBound = true;
-      window.visualViewport.addEventListener('resize', syncCampaignNotesViewport);
-      window.visualViewport.addEventListener('scroll', syncCampaignNotesViewport);
+      window.visualViewport.addEventListener('resize', syncMobileSheetViewport);
+      window.visualViewport.addEventListener('scroll', syncMobileSheetViewport);
     }
 
-    function syncCampaignNotesViewport() {
-      if (!document.getElementById('notesSheet').classList.contains('active')) {
+    function syncMobileSheetViewport() {
+      if (!document.querySelector('.mobile-sheet.active')) {
         document.documentElement.style.setProperty('--keyboard-offset', '0px');
         return;
       }
@@ -3546,6 +3548,8 @@
       const offset = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
       document.documentElement.style.setProperty('--keyboard-offset', `${offset}px`);
     }
+
+    function syncCampaignNotesViewport() { syncMobileSheetViewport(); }
 
     function loadCampaignNotes(preloadOnly = false) {
       if (campaignNotesAccess && !campaignNotesAccess.allowed) return;
@@ -7044,6 +7048,7 @@
     }
 
     function openQuickEditPanel(row) {
+      quickEditInFlight = false;
       const editType = getQuickEditType(row);
       const prefix = quickPrefix();
       const qty = row['Qty'] || 0;
@@ -7078,7 +7083,10 @@
       document.getElementById(`${prefix}Note`).value = '';
       document.getElementById(`${prefix}Status`).textContent = '';
 
-      populateQuickSize(prefix, selectedQuickEdit.sizeOptions);
+      const initialSize = editType === 'delerium crystal'
+        ? (row['Item'] || '').replace(/^Delerium\s+/i, '').toLowerCase()
+        : '';
+      populateQuickSize(prefix, selectedQuickEdit.sizeOptions, initialSize);
       setQuickEditorOpen(true);
 
       google.script.run
@@ -7099,7 +7107,7 @@
             res.item.holder ? `Holder: ${res.item.holder}` : '',
             `Current: ${res.item.quantity || 0}`
           ].filter(Boolean).join(' · ');
-          populateQuickSize(activePrefix, res.item.sizeOptions || []);
+          populateQuickSize(activePrefix, res.item.sizeOptions || [], res.item.currentSize || '');
         })
         .withFailureHandler(() => {
           const status = getQuickStatusElement();
@@ -7113,7 +7121,7 @@
       }, 80);
     }
 
-    function populateQuickSize(prefix, options) {
+    function populateQuickSize(prefix, options, currentSize) {
       const field = document.getElementById(`${prefix}SizeField`);
       const select = document.getElementById(`${prefix}Size`);
       if (!field || !select) return;
@@ -7122,6 +7130,7 @@
       select.innerHTML = (options || []).map(value =>
         `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`
       ).join('');
+      if (currentSize) select.value = currentSize;
     }
 
     function setQuickEditorOpen(isOpen) {
@@ -7144,6 +7153,7 @@
 
     function closeQuickEditPanel() {
       selectedQuickEdit = null;
+      quickEditInFlight = false;
       setQuickEditorOpen(false);
       document.querySelectorAll('.inventory-card').forEach(c => c.classList.remove('selected'));
     }
@@ -7188,9 +7198,11 @@
 
       status.textContent = 'Saving…';
       quickEditInFlight = true;
+      _inFlightWrites++;
 
       const finishSuccess = res => {
         quickEditInFlight = false;
+        _inFlightWrites--;
         if (!res || !res.ok) {
           status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Quick edit failed.')}</span>`;
           return;
@@ -7213,6 +7225,7 @@
 
       const fail = err => {
         quickEditInFlight = false;
+        _inFlightWrites--;
         status.innerHTML = `<span class="error">Quick edit failed: ${escapeHtml(err.message || err)}</span>`;
       };
 
@@ -8285,6 +8298,7 @@
 
     /* ── Boot ────────────────────────────────────────────────────── */
     updatePhoneClass();
+    bindCampaignNotesViewport();
     initInventoryGestures();
     initIdentityPicker();
     setCommandMode('inventory');
