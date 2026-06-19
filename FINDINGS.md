@@ -1,9 +1,103 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
+Next section: 6. Code.js lines 2901–3500 (batch sell, give, remove)
 
 ## Sessions
+
+### 2026-06-19 (run 31) — Sections audited: 5
+
+Section 5 = Code.js lines 2301–2900 ("delerium, custom inventory, notes"). In-range
+write APIs: `apiCreateNote` (2330), `apiUpdateNote` (2371), `apiArchiveNote` (2402),
+`apiAddInventory` (2424), `apiAddCustomInventory` (2533), `apiQuickAddInventory`
+(2632), `apiDepleteResource` (2773), `apiUpdateLedgerNote` (2905, partial). Client
+handlers traced where they sit: `loadNotes` (Index.html:4429), `renderNotesList`
+(4455), `openNoteForm` (4542), `deleteNoteFromForm` (4580), `saveNoteForm` (4608),
+`archiveNote` (4690), `toggleNotePin` (4719), `addInventoryItem` (8102),
+`clearAddForm` (8251).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, with
+execution-trace + state-machine on each write path):
+
+- **Create note** (Notes → + → fill → Save → optimistic card) — found BUG below:
+  failed create discards all typed content with no restore.
+- **Edit note** (tap card → edit → Save) / **Pin note** (toggleNotePin) /
+  **Archive note** (edit form → Archive, plus card Archive) — optimistic mutate,
+  `_notesActionInFlight`/`notesSaving` guards, rollback on failure. Found the
+  stale-index rollback RISK below (edit/archive/delete vs the hardened create path).
+- **Add library item** (search → select → Add → optimistic row → confirm → combine
+  suggestion) and **Add custom item** (Custom Item → fill → Add) — both route through
+  `addInventoryItem` → `apiAddInventory` / `apiAddCustomInventory`. Traced clean
+  (see Note below).
+- **Quick-adjust currency/delerium** and **Pay gold (Purchase route)** — through
+  `apiQuickAddInventory` / `apiDepleteResource`, which call the silent-failure
+  `appendResourceLedger_` (RISK below).
+
+#### BUG · Index.html:4650 · Failed note create loses all typed content
+Story **Create note**, step "Save → server returns !ok or failure". `saveNoteForm`
+(create branch) builds the optimistic card, then `closeNoteForm()` + `renderNotesList()`
+and fires `apiCreateNote`. On failure it only removes the temp card (`splice(tidx,1)` /
+`filter`) and shows `setMainStatus('Save failed…')` — it never restores the Title,
+Category, Note body, Tags, or Pinned the user typed. The form was already closed, and
+the next `openNoteForm('add')` blanks every field, so the content is unrecoverable: the
+user must retype the whole note. This is inconsistent with `addInventoryItem`
+(Index.html:8179–8189 / 8214–8226), which snapshots the payload and restores every form
+field on both the success-not-ok and failure handlers. Fix: capture a snapshot of the
+five form values before `closeNoteForm()`, and on create failure re-open the sheet
+pre-filled (or keep the sheet open with an inline `noteFormStatus` error until the
+server confirms, mirroring the add-item pattern).
+
+#### RISK · Index.html:4628 · Edit/Archive/Delete note rollback uses a stale array index
+Stories **Edit note** / **Archive note** (+ `deleteNoteFromForm`). Each captures a
+position index `idx = notesData.findIndex(...)` and, on failure, restores via
+`notesData[idx] = backup` (saveNoteForm edit, 4637/4645) or
+`notesData.splice(idx, 0, backup)` (archiveNote 4704/4712, deleteNoteFromForm
+4595/4602). But the 20 s collaborative-sync poll calls `loadNotes(true)`, which
+**replaces `notesData` with a fresh array** (4443). If another user's write is detected
+mid-flight (Cross-cutting: collaborative-sync interference) and then the local op fails,
+`idx` now points at a different note in the new array — the rollback overwrites or
+misplaces an unrelated note until the next reload. The create branch was explicitly
+hardened against exactly this (re-finds the temp by id, 4663–4670, with the comment
+"loadNotes replaced notesData mid-flight"); edit/archive/delete were not. `toggleNotePin`
+is safe because it holds the object reference, not an index. Fix: roll back by noteId
+lookup (`findIndex` at handler time), not a captured index.
+
+#### RISK · Code.js:1853 · Resource-ledger append failure is silent; client shows a phantom entry
+Stories **Quick-adjust currency/delerium** (`apiQuickAddInventory`, 2713) and
+**Pay gold — Purchase route** (`apiDepleteResource`, 2847). `appendResourceLedger_`
+wraps its `appendRow` in `try/catch` that only `Logger.log`s on error and returns
+nothing. Both callers invoke it, then unconditionally append the inventory row and
+return `{ok:true, ledgerEntry: …}`. If the ledger append silently failed (schema drift,
+transient sheet error), the client prepends a ledger entry to `inventoryResourceLedger`
+(Index.html:8195) that was never persisted — it disappears on the next reload, while the
+inventory gold/delerium row that backs it remains, leaving the ledger and the balance
+out of sync with no error surfaced. Fix: have `appendResourceLedger_` signal failure and
+have the API either roll back the inventory row or return `ok:false`.
+
+#### IDEA · Index.html:4609 · Second note Save during an in-flight create is a silent no-op
+`saveNoteForm` guards re-entry with `if (notesSaving) return;` but writes no feedback.
+While create A is in flight the user can open the form, type note B, tap Save, and
+nothing happens — the sheet looks frozen until A resolves. Minor, recoverable. Suggest a
+brief `noteFormStatus` "Saving previous note…" message instead of a bare return.
+
+#### Note · Code.js:2424 · Add library/custom item write paths trace clean
+Stories **Add library item** and **Add custom item**. `apiAddInventory` /
+`apiAddCustomInventory`: lock acquired after `requireAllowedUser_`, released in `finally`
+on every path (success, validation throw, auth failure), `auditWrite_` records both
+SUCCESS and FAILED, `bumpSync_` only on success. Client `addInventoryItem` keys the
+optimistic row by `optId` and removes it in BOTH success and failure handlers, restores
+all form fields and scroll/quick-add/size state on failure, and double-tap is guarded by
+`clearAddForm()` synchronously emptying `#item` (a second tap reads an empty `rawName`
+and early-returns). Navigate-away during the round-trip is safe: handlers operate on
+`inventoryRows`/cache and `setMainStatus`, not on the active tab's DOM.
+
+#### Note · Code.js:2939 · Ledger-note edit matches by Inventory ID, not timestamp
+The returned `ledgerEntry.Timestamp` (rowObj['Date Added'], a separate `new Date()`)
+differs by milliseconds from the timestamp `appendResourceLedger_` actually stamps
+(1863), but `apiUpdateLedgerNote` matches by `entryId` (Inventory ID, 2939) first and
+only falls back to timestamp when entryId is absent. Since both quick-add and deplete
+set `inventoryId`, the mismatch is cosmetic and the **Edit ledger note** story is
+unaffected.
 
 ### 2026-06-19 (run 30) — Sections audited: 4
 
