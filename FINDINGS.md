@@ -1,9 +1,82 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 8. Index.html lines 1–1500 (HTML structure, CSS)
+Next section: 9. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-19 (run 34) — Sections audited: 8
+
+Section 8 = Index.html lines 1–1500. The whole range is the `<style>` block
+(`</style>` is at 2046; `<body>` opens at 2049), so the section is **pure CSS** —
+the "HTML structure" label is aspirational; no markup lives in 1–1500. Audit
+therefore focused on the *visual state machines* the in-range CSS classes drive,
+tracing each back to its JS toggler (read outside range as needed).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, with
+state-machine analysis on each CSS-driven visual transition):
+
+- **Give item to character** (description sheet → Give to… → pick → confirm).
+  The `.inventory-row.saving` pulse (CSS 528–532) is added at Index.html:6073 and
+  removed in **both** the success (6080) and failure (6094) handlers, each
+  re-querying the row by `data-inventory-id` after `renderInventory()` rebuilds it,
+  with full holder revert on failure. No stuck-pulse state; a mid-flight sync
+  re-render just rebuilds the row without `.saving` (pulse stops early, data still
+  reconciles). Clean.
+- **Quick-adjust currency/delerium** and **Add item** (mode-class CSS 951–967).
+  `.add-details-card` toggles `quick-add-mode`/`custom-mode`; library/custom/quick
+  field visibility is purely additive and the togglers (8040–8048, 7960–7961,
+  8280–8281) always `remove` both classes before re-applying, so no library+custom
+  hybrid state is reachable. `.quick-size-field.active` and `.selected-item-card.active`
+  display toggles are consistent.
+- **Per-player scope slider** (`.scope-pill.active.remind`, CSS 534–539).
+  `flashActiveScopePill` (5364) removes `.remind`, forces a reflow (`void offsetWidth`),
+  re-adds it, and cleans up on `animationend` with `{ once:true }`. Re-trigger-safe;
+  no leaked listener of consequence. Clean.
+- **Tab switch during in-flight** (cross-cutting). `.section`/`.section.active`
+  (375–376) is `display:none/block`, so a hidden section's optimistic DOM is
+  preserved, not destroyed; on return `setCommandMode` (3206) re-renders/reloads.
+  Because every full-screen `.mobile-sheet` (z-index ≥70, CSS 1240) covers the
+  bottom-nav (z-index 30) and header (z-index 22), a tab tap is unreachable while a
+  sheet is open — which defuses the navigate-away-with-sheet-open class of bugs.
+- **Collaborative sync / iOS foreground** (cross-cutting, visual layer only).
+  `html.app-booting` opacity:0 → `inventory-ready` opacity:1 (118–130) gates the
+  initial paint, masking the brief window before JS sets the `--phone-font-*` vars
+  (whose hardcoded fallbacks, e.g. `30px`, would otherwise look too small per the
+  README scaling note). No FOUC reaches the user.
+
+Secondary (interactive components / overlays not in a story): the `app-modal-open`
+scroll-lock contract (line 110) is honored by every `.mobile-sheet` via the
+self-healing `syncModalOpenState()` (3410, toggles from live `.mobile-sheet.active`
+query) and by the two direct `add` sites (identity 4869→remove 4897, description
+6963→sync 7071) — both balanced. The mobile-sheet z-index ladder is correctly
+layered (base 70; inline overrides sell/give 80, sellBatch 82, identity 90,
+payReason 80), and parent/child sheets that co-exist always give the child a higher
+override, so no same-z source-order collision is reachable. One overlay breaks the
+contract — see RISK below.
+
+#### RISK · Index.html:110 · Dice overlay is the only full-screen overlay that does not honor the `app-modal-open` scroll-lock contract
+Line 110 (`body.app-modal-open { overflow: hidden }`) is the scroll-lock every
+overlay in the app opts into so the page behind cannot move. The dice calculator
+overlay does not: `.dice-overlay` (CSS 1810–1816, `position:fixed; inset:0;
+z-index:50`) is opened by `openDiceCalc` (3916) which only toggles `.open` and never
+adds `app-modal-open`; its `.dice-sheet` is `overflow:hidden`, so a touch-drag on the
+calculator scroll-chains to the body behind it on iOS GAS webview. Behavioral
+consequence: while the dice sheet is open the inventory/gold page can scroll
+underneath the blur, and on close the user is at a different scroll position than
+where they opened it — inconsistent with every mobile-sheet, which freezes the
+background. Not data loss; a UX inconsistency. Fix: add `app-modal-open` (or call
+`syncModalOpenState` after setting/clearing `.open`) in `openDiceCalc`/`closeDiceCalc`,
+or add `overscroll-behavior: contain` to `.dice-overlay`. (CSS root in this section;
+the open/close JS and overlay block live at 1810/3916, just past the range.)
+
+#### Note · Index.html:1 · Section 8 (pure CSS) — visual state machines clean for all traced stories
+Positive baseline. Traced Give-to (`.saving` pulse), Add-item / Quick-adjust
+(mode-class visibility), scope slider (`.remind` animation), Tab-switch-during-in-flight
+(`.section` display + sheet-covers-nav), and the sync/iOS-foreground boot gate. Every
+CSS-driven visual transition has a matching, balanced JS toggler; the `app-modal-open`
+lock is self-healing and the z-index ladder is collision-free. The single divergence
+(dice overlay) is the RISK above.
 
 ### 2026-06-19 (run 33) — Sections audited: 7
 
