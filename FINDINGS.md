@@ -48,7 +48,7 @@ execution-trace + state-machine on each write path):
   `undoResourcePay` 6781): traced; known "undo does not reverse RESOURCE_LEDGER"
   TODO already logged.
 
-#### BUG · Index.html:7379 · Quick add/remove adjust writes a ledger entry with no author
+#### ~~BUG · Index.html:7379 · Quick add/remove adjust writes a ledger entry with no author~~ FIXED
 In `confirmQuickEdit`, the **set** branch calls `apiSetItemQuantity({… clientCharacter:
 myCharacterName …})` (7365) but the **add/remove** branch calls
 `apiAdjustInventory({ itemId, delta, note, size, _syncClientId })` (7379) with **no
@@ -58,9 +58,9 @@ myCharacterName …})` (7365) but the **add/remove** branch calls
 records a RESOURCE_LEDGER entry whose `Character` column is blank, while the
 otherwise-identical **Set** adjustment, and every other ledger write in the app,
 records the writer. Story: *Quick-adjust currency/delerium* — the audit-trail "who
-changed this" is lost for the add/remove path only. Fix: add
-`clientCharacter: myCharacterName || ''` to the `apiAdjustInventory` payload at 7379,
-matching the set branch.
+changed this" is lost for the add/remove path only. Fix applied: added
+`clientCharacter: myCharacterName || ''` to the `apiAdjustInventory` payload at 7379
+and to the swipe-remove-one call at 7649, matching the set branch.
 
 #### RISK · Index.html:6337 · Gold quick-adjust ledger entries are silently hidden
 `apiAdjustInventory`/`apiSetItemQuantity` stamp gold quick-edits with

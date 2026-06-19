@@ -7381,6 +7381,7 @@
           delta: mode === 'remove' ? -amount : amount,
           note,
           size,
+          clientCharacter: myCharacterName || '',
           _syncClientId: syncClientId
         });
     }
@@ -7646,7 +7647,7 @@
         });
 
       if (shouldDecrement) {
-        runner.apiAdjustInventory({ itemId: inventoryId, delta: -1, note: 'Swipe remove one', _syncClientId: syncClientId });
+        runner.apiAdjustInventory({ itemId: inventoryId, delta: -1, note: 'Swipe remove one', clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
       } else {
         runner.apiDeleteInventory({ inventoryId, _syncClientId: syncClientId });
       }
