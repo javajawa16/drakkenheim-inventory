@@ -1,9 +1,125 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 13. Index.html lines 7501–end (add item flow, custom item, form handling)
+Next section: 1. Code.js lines 1–500 (config, helpers, validation)
 
 ## Sessions
+
+### 2026-06-19 (run 39) — Sections audited: 13
+
+Section 13 = Index.html lines 7501–end (add item flow, custom item, form
+handling). Read in-range plus the cross-referenced flow helpers:
+`pollSync`/`loadInventory` (4359 / 4079), `cacheInventoryRows`/
+`primeInventoryCacheAfterAdd` (2939 / 2950), `findDuplicateInventoryCandidate`/
+`showCombineChoice`/`confirmCombineInventoryItem` (3423–3487), `setCommandMode`/
+`handleSearchInput`/`handleCommandSearchInput` (3206 / 4050 / 3281).
+
+Note: much of this section was traced in run 5 (FINDINGS ~1420) when
+`addInventoryItem` did **not** bump `_inFlightWrites`. The code has since changed
+— `addInventoryItem` (8240/8243/8279), `saveInventoryEdits` (7488/7491/7503),
+and `deleteSelectedInventory` (7622/7625/7641) now all bracket their round-trips
+in `_inFlightWrites`. That re-introduces the leak class discussed below, so the
+"immune" framing of run 5 is partially outdated for the Add path.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, with
+execution-trace + state-machine on each write path):
+
+- **Add library item** (search → `selectEquipmentResult` 7860 → `addInventoryItem`
+  8176 → optimistic `_opt_` row → server confirm → combine suggestion). Optimistic
+  row removed by `optId` filter on all three terminal branches; both failure
+  branches restore `selectedEquipment` + every form field from snapshots incl.
+  scroll-spell reconstruction; combine fires only on success-ok via
+  `findDuplicateInventoryCandidate(res.item)`. Double-submit blocked by the
+  synchronous `clearAddForm()` emptying `#item`. Clean within scope — see the
+  cold-load recursion BUG (search step) and the `_inFlightWrites`-freeze RISK.
+- **Add custom item** (`startCustomItem` 8039 / `customizeSelectedItem` 8067 →
+  `addInventoryItem` via `apiAddCustomInventory`). Same optimistic machinery;
+  clean.
+- **Edit inventory item** (`saveInventoryEdits` 7475 → `apiUpdateInventory`).
+  Non-optimistic; patches the row by id on success only, re-enables the button on
+  both paths, retryable. Clean (the single-arg `cacheInventoryRows` ledger
+  fallback is safe, as logged in run 5).
+- **Delete inventory item** (`deleteSelectedInventory` 7563, incl. swipe
+  `decrementOnly` path 7548 and qty>1 "Confirm delete all" gate 7578).
+  `previousRows` snapshot restored on both `!res.ok` and transport failure;
+  button never stuck (renderInventory recreates it). Clean.
+- **Combine duplicate** (`confirmCombineInventoryItem` 3455). `pendingCombineChoice`
+  restored on both failure branches, sheet kept open for retry, `_inFlightWrites`
+  paired. Clean.
+
+#### BUG · Index.html:7774 · `searchEquipment` ⇄ `loadEquipmentIndex` infinite mutual recursion during a cold (uncached) library load
+Story: **Add library item**, the *search* step, under failure/timing. When the
+equipment index has not yet loaded but a fetch is already in flight
+(`equipmentIndexLoaded === false && equipmentIndexLoading === true`), typing in
+the search box stack-overflows. Trace: `searchEquipment` (7769) tests
+`if (!equipmentIndexLoaded) { loadEquipmentIndex(); return; }` (7774) **before**
+anything else (even before the `q.length < 2` branch). `loadEquipmentIndex` with
+the default `preloadOnly=false` computes `shouldPaintSearchUi = true`, hits the
+`if (equipmentIndexLoading) { if (shouldPaintSearchUi) searchEquipment(); return; }`
+guard (7675–7680), and calls `searchEquipment()` again → `!loaded` →
+`loadEquipmentIndex()` → `loading` → `searchEquipment()` → … unbounded
+synchronous recursion → `RangeError: Maximum call stack size exceeded`, aborting
+that keystroke's render. Reachability: cold start with no `EQUIPMENT_LIBRARY`
+localStorage cache (first ever use, cleared cache, or expired TTL) — boot fires
+`loadEquipmentIndex(true)` (8447) which sets `equipmentIndexLoading=true` and
+dispatches `apiGetEquipmentIndex` (a sheet read, ~1–3 s). During that window the
+user switches to the Add tab (`clearAddForm`'s load call is correctly guarded by
+`!equipmentIndexLoading`, so the tab switch itself is safe) and types a letter →
+`handleCommandSearchInput` → `debouncedSearchEquipment` → `searchEquipment` →
+overflow. Every keystroke until the fetch resolves overflows; search is broken
+and throws for the whole load window. It self-heals once `apiGetEquipmentIndex`
+returns (`equipmentIndexLoaded=true` breaks the `!loaded` guard) or fails
+(`equipmentIndexLoading=false`, so the next call re-dispatches instead of
+recursing). Note the cache-paint path inside `loadEquipmentIndex` sets
+`equipmentIndexLoaded=true` *before* `loading=true`, which is exactly why a warm
+cache never hits this — masking the bug in everyday use. Fix: don't re-enter
+`searchEquipment` from the loading guard — paint a "Loading library…" status and
+return; or in `searchEquipment` guard the dispatch: `if (!equipmentIndexLoaded)
+{ if (!equipmentIndexLoading) loadEquipmentIndex(); else showLoadingStatus();
+return; }`.
+
+#### RISK · Index.html:8240 · A leaked `_inFlightWrites` does not merely defer the poll — it permanently freezes server reconciliation via the `loadInventory` 4134 guard
+Cross-cutting: **iOS background/foreground** and **collaborative sync
+interference**, intersecting every write in this section. `addInventoryItem`
+(8240), `saveInventoryEdits` (7488), and `deleteSelectedInventory` (7622) each do
+`_inFlightWrites++` and decrement **only** inside their success/failure handlers.
+If those `google.script.run` callbacks never fire — the documented iOS GAS
+webview suspension mid-round-trip (same mechanism accepted for `quickEditInFlight`
+at FINDINGS ~1311) or the webview being torn down — the counter is stranded ≥1
+for the rest of the session; nothing (not `visibilitychange` 8426, not any
+watchdog) resets it. The prior note at ~1311 states the `_inFlightWrites` leak's
+"only consequence is deferral." That is incomplete: `loadInventory`'s success
+handler early-returns at line 4134 — `if (_inFlightWrites > 0) { markInventoryReady();
+return; }` — discarding the server fetch. So with the counter stuck, **every**
+`loadInventory` (tab switch via `setCommandMode`→4079, forced reload from a
+foreign-sync poll, periodic revalidation) fetches from the server and throws the
+result away. Foreign writes never appear, the user's own subsequent writes show
+only optimistically, and `cacheInventoryRows` (2940, same `>0` guard) stops
+persisting — the inventory silently goes stale until a full page reload (which
+resets the counter to 0). Severity is higher than the deferral framing implies
+and now reaches the Add path too (run 5 audited a version where Add didn't touch
+the counter). Fix: track in-flight writes by id/token with a watchdog timeout
+that releases a stranded entry after N seconds, or reconcile the counter on
+`visibilitychange` foreground — but a blind `_inFlightWrites = 0` there is unsafe
+(a resumed-then-fired callback would decrement to −1), so prefer the
+id/watchdog approach.
+
+#### Note · Index.html:8176 · Add/Edit/Delete/Combine optimistic write paths re-confirmed clean post-`_inFlightWrites` change; navigate-away self-heals
+Stories: **Add library item**, **Add custom item**, **Edit inventory item**,
+**Delete inventory item**, **Combine duplicate**. The optimistic `_opt_` row is
+written to localStorage at 8230 while `_inFlightWrites===0` (so it does persist),
+but a navigate-away/close mid-add self-heals on next launch: the fresh page resets
+`_inFlightWrites=0`, and `loadInventory`'s server fetch replaces `inventoryRows`,
+dropping any stale `_opt_` row (the only residual exposure is an offline relaunch,
+where a fake-id `_opt_` row stays interactable — narrow edge). Tab-switch during an
+in-flight add is safe: `loadInventory`'s 4134 guard preserves the optimistic state
+and the success handler renders the confirmed row on return. `pollSync`'s
+`pendingForeignReload` correctly survives the writer's own subsequent sync bump
+(the deferred foreign reload still fires once `_inFlightWrites` returns to 0).
+Both add-failure branches (`!res.ok` 8246 and transport 8278) surface error
+feedback (`setMainStatus`, visible at top of `<main>` on the Add tab); the
+transport branch additionally writes `#addStatus` — a minor cosmetic asymmetry,
+not a feedback gap.
 
 ### 2026-06-19 (run 38) — Sections audited: 12
 
