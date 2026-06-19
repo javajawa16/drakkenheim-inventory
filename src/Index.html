@@ -2766,6 +2766,7 @@
     let expandedResource = '';
     let resourcePayInFlight = {};
     let quickEditInFlight = false;
+    let descActionInFlight = false;
     let lastResourceUndo = {};
     let suppressInventoryClickUntil = 0;
     let searchTimer         = null;
@@ -2781,6 +2782,7 @@
     let sellBatchOpenGroups   = {}; // group key → boolean
     let sellBatchAllRows      = []; // cache of all sellable rows
     let sellBatchRollups      = []; // rolled-up items (same name+holder combined)
+    let sellBatchGeneration   = 0;  // incremented on each successful sell; guards stale auto-close timer
     let _inFlightWrites           = 0;
     let _inFlightNoteWrites       = 0;
     let pendingForeignReload      = false;
@@ -3167,6 +3169,7 @@
         activeRow  = null;
 
         if (Math.abs(dx) < 22 && Math.abs(dy) < 22 && !isOpen) {
+          if (Date.now() - lastTapOpenedAt < 500) return;
           lastTapOpenedAt = Date.now();
           openInventoryPrimaryActionById(getRepId(row));
           return;
@@ -3915,10 +3918,12 @@
 
     function openDiceCalc() {
       document.getElementById('diceOverlay').classList.add('open');
+      document.body.classList.add('app-modal-open');
     }
 
     function closeDiceCalc() {
       document.getElementById('diceOverlay').classList.remove('open');
+      syncModalOpenState();
     }
 
     function _dkRender() {
@@ -5487,9 +5492,12 @@
         `;
         return;
       }
-      const showSplit = isTreasurer && (goldSheetScope === 'party' || isDMUser);
-      const showUndo  = isTreasurer && lastResourceUndo['gold'];
-      container.innerHTML = `
+      const isDMGoldScope = isDMUser && goldSheetScope !== 'party';
+      const showSplit = !isDMGoldScope && isTreasurer && (goldSheetScope === 'party' || isDMUser);
+      const showUndo  = !isDMGoldScope && isTreasurer && lastResourceUndo['gold'];
+      container.innerHTML = isDMGoldScope ? `
+        <button class="secondary" style="width:100%;margin-top:14px;" type="button" onclick="closeGoldSheet()">Done</button>
+      ` : `
         <div style="display:flex;gap:10px;margin-top:14px;">
           <button class="success" style="flex:1;" type="button" onclick="receivedGold()">Got Paid</button>
           <button class="danger"  style="flex:1;" type="button" onclick="openPayReasonSheet()">Pay</button>
@@ -5665,6 +5673,7 @@
     }
 
     function confirmSellItem() {
+      if (descActionInFlight) return;
       const item = selectedInventory;
       if (!item) return;
       const goldInput = document.getElementById('sellItemGold');
@@ -5698,6 +5707,7 @@
       closeInventoryPanels(false);
 
       const previousRows = inventoryRows.slice();
+      descActionInFlight = true;
       _inFlightWrites++;
       const soldIds = {};
       items.forEach(i => { soldIds[i.inventoryId] = i.qtyToSell; });
@@ -5715,6 +5725,7 @@
       google.script.run
         .withSuccessHandler(res => {
           _inFlightWrites--;
+          descActionInFlight = false;
           if (!res || !res.ok) {
             inventoryRows = previousRows;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
@@ -5729,6 +5740,7 @@
         })
         .withFailureHandler(() => {
           _inFlightWrites--;
+          descActionInFlight = false;
           inventoryRows = previousRows;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
@@ -6062,7 +6074,8 @@
 
           if (res.goldItem) primeInventoryCacheAfterAdd(res.goldItem);
           loadInventory(true);
-          window.setTimeout(() => closeSellBatchSheet(), 1500);
+          const gen = ++sellBatchGeneration;
+          window.setTimeout(() => { if (sellBatchGeneration === gen) closeSellBatchSheet(); }, 1500);
         })
         .withFailureHandler(err => {
           _inFlightWrites--;
@@ -6334,7 +6347,7 @@
     }
 
     // Actions shown in the general gold ledger (hides per-member credit bookkeeping)
-    const LEDGER_VISIBLE_ACTIONS = new Set(['PAY', 'ADD', 'RECEIVE', 'SPLIT_DEDUCT', 'SEND_DEDUCT', 'PERSONAL_SEND_DEDUCT']);
+    const LEDGER_VISIBLE_ACTIONS = new Set(['PAY', 'ADD', 'RECEIVE', 'SPLIT_DEDUCT', 'SEND_DEDUCT', 'PERSONAL_SEND_DEDUCT', 'ADJUST']);
 
     function getLedgerWho_(entry) {
       const action = String(entry['Action'] || '').toUpperCase();
@@ -7064,6 +7077,7 @@
     }
 
     function confirmDescRemove() {
+      if (descActionInFlight) return;
       if (!selectedInventory) return;
       const rollupKey = selectedInventory._rollupKey || getInventoryRollupKey(selectedInventory);
       const repHolder = String(selectedInventory['Holder'] || '').trim();
@@ -7106,10 +7120,12 @@
       cacheInventoryRows(inventoryRows, inventoryResourceLedger);
       renderInventory();
 
+      descActionInFlight = true;
       _inFlightWrites++;
       google.script.run
         .withSuccessHandler(res => {
           _inFlightWrites--;
+          descActionInFlight = false;
           if (!res || !res.ok) {
             inventoryRows = previousRows;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
@@ -7122,6 +7138,7 @@
         })
         .withFailureHandler(err => {
           _inFlightWrites--;
+          descActionInFlight = false;
           inventoryRows = previousRows;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
@@ -7177,7 +7194,7 @@
     }
 
     function openQuickEditPanel(row) {
-      quickEditInFlight = false;
+      if (quickEditInFlight) return;
       const editType = getQuickEditType(row);
       const prefix = quickPrefix();
       const qty = row['Qty'] || 0;

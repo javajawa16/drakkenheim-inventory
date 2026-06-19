@@ -178,7 +178,7 @@ changed this" is lost for the add/remove path only. Fix applied: added
 `clientCharacter: myCharacterName || ''` to the `apiAdjustInventory` payload at 7379
 and to the swipe-remove-one call at 7649, matching the set branch.
 
-#### RISK · Index.html:6337 · Gold quick-adjust ledger entries are silently hidden
+#### ~~RISK · Index.html:6337 · Gold quick-adjust ledger entries are silently hidden~~ FIXED
 `apiAdjustInventory`/`apiSetItemQuantity` stamp gold quick-edits with
 `Action: 'ADJUST'` (Code.js:3797/3909). `confirmQuickEdit` pushes the returned
 `ledgerEntry` into `inventoryResourceLedger` (7345) and caches it, but
@@ -193,7 +193,7 @@ user action. Story: *Quick-adjust currency*. Either add `'ADJUST'` to
 ledger-silent (combined with the BUG above, gold quick-adjusts are currently both
 unattributed and invisible).
 
-#### RISK · Index.html:7066 · Description Sell/Remove rely on sheet-close, not an in-flight flag, to block re-entry
+#### ~~RISK · Index.html:7066 · Description Sell/Remove rely on sheet-close, not an in-flight flag, to block re-entry~~ FIXED
 `confirmSellItem` (5667) and `confirmDescRemove` (7066) have no boolean re-entry
 guard. They prevent a second submission only by calling `closeDescriptionSheet()`
 synchronously before the async `apiSellInventoryBatch`. Neither nulls
@@ -313,7 +313,7 @@ member-routed pays (where undo WAS set) wouldn't show the button until scope tog
 Fix applied: extended the undo-token gate to also handle `!isMember && res.item`; added
 `renderGoldSheetButtons()` call in `onSuccess` after setting the token.
 
-#### RISK · Index.html:5427 · Gold-sheet write buttons render in the DM "grand-total" scope, letting gold be mis-attributed to the DM as a holder
+#### ~~RISK · Index.html:5427 · Gold-sheet write buttons render in the DM "grand-total" scope, letting gold be mis-attributed to the DM as a holder~~ FIXED
 Stories **Receive gold / Pay gold**. `renderGoldSheetBody` (5387) frames the DM-in-character-scope
 view as an all-rows read-only grand total (`isDMGoldScope`, 5393). But `renderGoldSheetButtons`
 (5427) renders Got Paid / Pay unconditionally and Split whenever `isTreasurer && (party ||
@@ -336,7 +336,7 @@ stale (beta gate intentionally dropped) or the gate was lost in a refactor and i
 a beta feature to all players. Behavioral/access divergence from spec — confirm intent; if
 still beta-gated, wrap 4809–4813 in `if (isTreasurer)` (and hide via `setCommandMode` too).
 
-#### RISK · Index.html:6029 · Sell-batch 1500 ms auto-close timer can close a reopened sheet, and a manual close mid-flight hides the failure
+#### ~~RISK · Index.html:6029 · Sell-batch 1500 ms auto-close timer can close a reopened sheet, and a manual close mid-flight hides the failure~~ FIXED
 Story **Sell Items batch**. On success `confirmSellBatch` schedules
 `window.setTimeout(() => closeSellBatchSheet(), 1500)` (6029). The timer holds no
 generation token, so if the treasurer reopens the sell-batch sheet within that 1.5 s
@@ -449,7 +449,7 @@ payload), or simply always `renderInventory()` on a real fetch (the README's
 existing `_inFlightWrites > 0` early-return already protects optimistic state, so
 unconditional re-render here is safe.
 
-#### RISK · Index.html:3169 · Tap opens the panel twice when `pointerup` precedes `touchend`
+#### ~~RISK · Index.html:3169 · Tap opens the panel twice when `pointerup` precedes `touchend`~~ FIXED
 
 In `initInventoryGestures`, both the `pointerup` handler (3085) and the `touchend`
 handler (3151) detect a stationary tap and call `openInventoryPrimaryActionById(...)`
@@ -613,7 +613,7 @@ payReason 80), and parent/child sheets that co-exist always give the child a hig
 override, so no same-z source-order collision is reachable. One overlay breaks the
 contract — see RISK below.
 
-#### RISK · Index.html:110 · Dice overlay is the only full-screen overlay that does not honor the `app-modal-open` scroll-lock contract
+#### ~~RISK · Index.html:110 · Dice overlay is the only full-screen overlay that does not honor the `app-modal-open` scroll-lock contract~~ FIXED
 Line 110 (`body.app-modal-open { overflow: hidden }`) is the scroll-lock every
 overlay in the app opts into so the page behind cannot move. The dice calculator
 overlay does not: `.dice-overlay` (CSS 1810–1816, `position:fixed; inset:0;
@@ -709,7 +709,7 @@ adjustment still happens, but it never reaches the delerium ledger. Align the tw
 classifiers (ideally have the client trust the `editType` returned by
 `apiGetCurrencyQuickEdit` at Index.html:7161 rather than its own `getQuickEditType`).
 
-#### RISK · Index.html:7109 · openQuickEditPanel resets the in-flight guard, allowing a double write + UI race
+#### ~~RISK · Index.html:7109 · openQuickEditPanel resets the in-flight guard, allowing a double write + UI race~~ FIXED
 `openQuickEditPanel` unconditionally sets `quickEditInFlight = false`. If a quick-adjust
 is already in flight (panel showing "Saving…") and the user opens the quick editor for a
 second item (reachable on desktop, where `desktopQuickEditor` doesn't fully block the
