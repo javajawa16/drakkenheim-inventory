@@ -5533,6 +5533,7 @@
       if (noteInput)   noteInput.value   = '';
       if (status)      status.textContent = '';
       renderGoldSheetBody();
+      goldSheetMutated = true;
 
       const removePending = () => {
         inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
@@ -5557,6 +5558,7 @@
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           goldSheetMutated = true;
           renderGoldSheetBody();
+          renderInventory();
         })
         .withFailureHandler(err => {
           _inFlightWrites--;
@@ -6162,6 +6164,7 @@
       if (noteInput) noteInput.value = '';
       if (status) status.textContent = '';
       renderGoldSheetBody();
+      goldSheetMutated = true;
 
       const removePending = () => {
         inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
@@ -6185,12 +6188,18 @@
         if (res.ledgerEntry) {
           inventoryResourceLedger = [res.ledgerEntry, ...inventoryResourceLedger].slice(0, 60);
         }
-        if (isTreasurer && res.poolDeduct) {
-          lastResourceUndo['gold'] = { item: res.poolDeduct, creditItem: isMember ? (res.item || null) : null, ledgerEntry: res.ledgerEntry };
+        if (isTreasurer) {
+          if (isMember && res.poolDeduct) {
+            lastResourceUndo['gold'] = { item: res.poolDeduct, creditItem: res.item || null, ledgerEntry: res.ledgerEntry };
+          } else if (!isMember && res.item) {
+            lastResourceUndo['gold'] = { item: res.item, creditItem: null, ledgerEntry: res.ledgerEntry };
+          }
+          renderGoldSheetButtons();
         }
         cacheInventoryRows(inventoryRows, inventoryResourceLedger);
         goldSheetMutated = true;
         renderGoldSheetBody();
+        renderInventory();
       };
       const onFail = err => {
         _inFlightWrites--;
@@ -6242,6 +6251,7 @@
       if (noteInput) noteInput.value = '';
       if (status) status.textContent = '';
       renderGoldSheetBody();
+      goldSheetMutated = true;
 
       _inFlightWrites++;
       google.script.run

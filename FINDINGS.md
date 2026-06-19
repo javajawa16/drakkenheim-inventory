@@ -77,6 +77,42 @@ non-functional. Fix: give non-treasurers a per-size quantity input (or a simple
 +/− counter that drives `deleriumSellQtys` upward), or a dedicated "received N of size X"
 mini-form, so `items` can be non-empty.
 
+#### ~~BUG · Index.html:5510 · `receivedGold`/`confirmPayWithReason`/`splitGold` set `goldSheetMutated` only inside the success handler~~ FIXED
+Story **Receive gold / Pay gold / Split gold evenly**, navigate-away step. All three gold
+write paths set `goldSheetMutated = true` only inside their success handlers (lines 5558,
+6192, 6265). `closeGoldSheet` evaluates `if (goldSheetMutated) renderInventory()` at line
+5431. If the user closes the gold sheet before the round-trip returns (i.e. taps **Done**
+or a nav tab), `goldSheetMutated` is still `false` → no `renderInventory()` → the inventory
+dashboard `Gold = X gp` total stays stale. The writer's own sync-skip (`by === syncClientId`)
+also prevents the 20 s poll from correcting it. Also: `receivedGold` and `confirmPayWithReason`
+never called `renderInventory()` in their success handlers even when the sheet was still open,
+so the dashboard wasn't refreshed on-screen either. Fix applied: set `goldSheetMutated = true`
+synchronously right after the optimistic render in all three functions; add `renderInventory()`
+to `receivedGold` and `confirmPayWithReason` success handlers.
+
+#### ~~BUG · Index.html:6154 · Pay→Purchase from the gold sheet never offers Undo~~ FIXED
+Story **Pay gold → Purchase → Undo last pay**. `confirmPayWithReason`'s `onSuccess` only
+sets `lastResourceUndo['gold']` when `isTreasurer && res.poolDeduct` (line 6188). A
+Purchase routes to `apiDepleteResource`, which returns `res.item` (the negative deduct row)
+but no `res.poolDeduct` — so the condition is always false for purchases and the undo token
+is never armed. `renderGoldSheetButtons` gates the "↩ Undo Last Pay" button on
+`lastResourceUndo['gold']` → button never appears for the most common pay type. Additionally,
+success handlers called only `renderGoldSheetBody()` not `renderGoldSheetButtons()`, so even
+member-routed pays (where undo WAS set) wouldn't show the button until scope toggle / reopen.
+Fix applied: extended the undo-token gate to also handle `!isMember && res.item`; added
+`renderGoldSheetButtons()` call in `onSuccess` after setting the token.
+
+#### RISK · Index.html:5427 · Gold-sheet write buttons render in the DM "grand-total" scope, letting gold be mis-attributed to the DM as a holder
+Stories **Receive gold / Pay gold**. `renderGoldSheetBody` (5387) frames the DM-in-character-scope
+view as an all-rows read-only grand total (`isDMGoldScope`, 5393). But `renderGoldSheetButtons`
+(5427) renders Got Paid / Pay unconditionally and Split whenever `isTreasurer && (party ||
+isDMUser)` — all three show in DM scope. In that scope `goldSheetScope` equals the DM character
+name, so `receivedGold` sends `holder: goldSheetScope` and `confirmPayWithReason`/`splitGold`
+deduct `fromHolder: goldSheetScope`. A DM tapping Got Paid while viewing the grand total
+therefore creates a "DM-held" gold row instead of the party pool — misattributed and invisible
+to the party-pool treasurer view (though not lost). Fix: in DM character scope either hide the
+write buttons or force `holder`/`fromHolder` to `''` (party pool) for DM gold writes.
+
 #### RISK · Index.html:4810 · Party Notes tab is revealed to every user, contradicting the documented treasurer-only beta gate
 `applyIdentity` unconditionally un-hides the notes tab — `notesTabEl.style.display = ''`
 plus the 3-column nav (4810–4812) — with **no `isTreasurer` check**, and `setCommandMode`
