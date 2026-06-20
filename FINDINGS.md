@@ -1,9 +1,93 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 13. Index.html lines 7501–end (add item flow, custom item, form handling)
+Next section: 1. Code.js lines 1–500 (config, helpers, validation)
 
 ## Sessions
+
+### 2026-06-20 (run 52) — Sections audited: 13
+
+Section 13 = Index.html lines 7501–end (add item flow, custom item, form handling).
+Composition: swipe delete/remove tail (`deleteSelectedInventory` 7501–7560), equipment
+index load/cache (`loadEquipmentIndex` 7567, `searchEquipment` 7662, `getQuickAddMatches`
+7702, `renderEquipmentResults` 7713), stat block render (`renderStatBlock_` 7733),
+select/fill (`selectEquipmentResult` 7753 → `fillAddFormFromEquipment` 7773), scroll/custom
+helpers (`setScrollMode_` 7860, `handleScrollSpellInput` 7867, `startCustomItem` 7932,
+`customizeSelectedItem` 7960), step visibility (`updateAddFlow` 7998), async description
+load (`loadSelectedDescription` 8023), the central add write path (`addInventoryItem` 8069)
+and form reset (`clearAddForm` 8222), plus the global resize/visibilitychange/boot tail.
+Read out to `primeInventoryCacheAfterAdd` (2931), `cacheInventoryRows` (2920),
+`findDuplicateInventoryCandidate`/`showCombineChoice`/`confirmCombineInventoryItem`
+(3337–3401) to close the add→confirm→combine trace.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus execution-trace +
+state-machine on every in-range write path):
+
+- **Add library item** (search → select → fill qty/holder/notes → Add → optimistic row →
+  server confirm → combine suggestion) — `selectEquipmentResult` →
+  `loadSelectedDescription` → `addInventoryItem` → `apiAddInventory` → `primeInventoryCacheAfterAdd`
+  → `findDuplicateInventoryCandidate`/`showCombineChoice`. Optimistic row + cache, snapshot
+  restore on both not-ok and failure, `_inFlightWrites` balanced (one ++ / exactly one -- per
+  outcome). **One BUG (holder wipe) and one RISK (failed-add clobber) below.**
+- **Add custom item** (Custom Item → fill → Add) — `startCustomItem` / `customizeSelectedItem`
+  → `addInventoryItem` → `apiAddCustomInventory`. Same write path; clean apart from the shared
+  clobber RISK.
+- **Combine duplicate** (duplicate detected → combine sheet → Confirm) —
+  `showCombineChoice` → `confirmCombineInventoryItem` → `apiCombineInventoryItems`. Execution-
+  trace + state-machine clean: `pendingCombineChoice` nulled before the call (double-tap
+  guarded — second tap hits the `if (!pendingCombineChoice) return`), restored on both error
+  branches, sheet stays open so retry works without reload. Note below.
+- **Delete / remove-one inventory item** (swipe → Delete/Remove) — tail of
+  `deleteSelectedInventory` (in range 7501–7560), already traced in full in run 51 (s12).
+  Re-confirmed: `previousRows` restored on both failure branches, `detailButton.disabled`
+  re-enabled on every outcome, `_inFlightWrites` balanced. Clean.
+
+#### BUG · Index.html:8045 · Async description load silently wipes user-selected holder
+Story: **Add library item**, at the select-then-fill step. `selectEquipmentResult` (7768)
+fires `loadSelectedDescription(true)` for any non-quick, non-scroll library item. On first
+selection of a given item (not yet in `itemCache`), this is an async `apiGetEquipmentItem`
+round-trip. Its success handler (8053–8055) sets `selectedEquipment = res.item` and calls
+`fillAddFormFromEquipment(selectedEquipment, true)`, which at line 7810 unconditionally does
+`document.getElementById('holder').value = ''`. If the user picks a holder from the dropdown
+during the ~hundreds-of-ms round-trip, their selection is silently reset to blank — the item
+is then added to the party pool instead of the intended character. qty and notes survive
+(fillAddForm doesn't touch them); only holder is clobbered. The cached path (8030–8037) runs
+synchronously inside `selectEquipmentResult` so it is safe — the bug only fires on the first
+selection of each library item. Fix: in `fillAddFormFromEquipment`, only blank `#holder` on
+the initial fill (e.g. guard with the `includeDescription` flag or skip when the field
+already holds a value), or capture/restore the current holder around the description refresh.
+
+#### RISK · Index.html:8142 · Failed add overwrites an in-progress new selection
+Story: **Add library/custom item**, failure-at-step + double-action race. `addInventoryItem`
+calls `clearAddForm()` synchronously (8127), setting `selectedEquipment = null`, then fires
+the async add. Because the form is cleared and focus moves to the search box, the user can
+immediately select a *different* item while the first add is in flight. If the first add then
+returns `{ok:false}` (8142–8157) or throws (8181–8197), the handler restores
+`selectedEquipment = selectedSnapshot` and rewrites every form field from `payloadSnapshot`,
+discarding whatever the user just selected/typed. The "no content loss" restore is correct
+when the form is still idle, but here it overwrites live in-progress input. Suggest guarding
+the restore on `selectedEquipment === null` (form untouched since the add) before clobbering,
+or surfacing the failed item via the status line without forcing it back into the form.
+
+#### RISK · Index.html:8122 · Optimistic `_opt_` row can be cached and resurface after a kill
+Story: **Add item**, iOS background/navigate-away. The optimistic row is written to
+localStorage (`cacheInventoryRows`, 8122–8123) while `_inFlightWrites` is still 0 (it is not
+incremented until 8133), so the synthetic `_opt_<ts>` row lands in the persistent cache. On
+success it is promptly replaced (`primeInventoryCacheAfterAdd` re-caches without it), so the
+window is small — but if the GAS webview is suspended/killed before the server responds and a
+later `loadInventory` falls back to cache (e.g. network failure on resume), a phantom
+`_opt_…` row appears whose Inventory ID is not real (its swipe/edit/delete actions would hit
+the server with a bogus id). Low likelihood; consider stripping `_opt_`-prefixed rows when
+reading the cache on boot.
+
+#### Note · Index.html:8133 · Add/combine in-flight bookkeeping and double-tap guards clean
+`addInventoryItem` increments `_inFlightWrites` exactly once and decrements once in each of
+the success and failure handlers (8136 / 8176), so the poll-deferral counter never leaks.
+Double-tap Add is implicitly guarded — `clearAddForm` blanks `#item` synchronously, so a
+second tap hits the `if (!rawName)` early return. `confirmCombineInventoryItem` nulls
+`pendingCombineChoice` before the call and restores it on error, giving a clean
+idle/in-flight/error/retry state machine. Traced: Add library item, Add custom item, Combine
+duplicate, Delete/remove inventory item.
 
 ### 2026-06-20 (run 51) — Sections audited: 12
 
