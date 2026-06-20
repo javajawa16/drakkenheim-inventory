@@ -1,9 +1,108 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 6. Code.js lines 2901–3500 (batch sell, give, remove)
+Next section: 7. Code.js lines 3501–end (sync, audit, utilities)
 
 ## Sessions
+
+### 2026-06-20 (run 45) — Sections audited: 6
+
+Section 6 = Code.js lines 2901–3500 (batch sell, give, remove). The range holds
+the tail of `apiSellInventoryItem` (2858), `apiSellDelerium` (2913),
+`apiSplitGold` (2998), `apiSendGoldToMember` (3136), `apiUpdateInventory` (3220),
+`apiDeleteInventory` (3311), `apiUndoMemberSend` (3384) and
+`apiCombineInventoryItems` (3422), plus the adjacent quick-edit writers
+`apiAdjustInventory` (3597) / `apiSetItemQuantity` (3717). Client handlers traced
+in full: `confirmCombineInventoryItem` (Index 3369), `giveItemToCharacter` (5609),
+`confirmPayWithReason` (5668), `splitGold` (5766), `undoResourcePay` (6326),
+`saveInventoryEdits` (7372) and `deleteSelectedInventory` (7464), plus
+`sellDelerium` (4812).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every write path):
+
+- **Pay gold → route to Purchase or character** (`apiSendGoldToMember` /
+  `apiDepleteResource`) via `confirmPayWithReason` — found the TDZ BUG below;
+  the entire pay flow throws synchronously before any server call.
+- **Split gold evenly** (`apiSplitGold`) via `splitGold` — clean. Optimistic
+  pending ledger entry added, removed on both success and failure, inputs saved
+  to `savedAmount`/`savedNote` and restored on `!ok` and on failure. Server
+  float math (`perMember` floor + rounded remainder) nets to zero. Double-tap is
+  not explicitly guarded but the second call just produces another valid split;
+  no state corruption. `_inFlightWrites` brackets the round-trip.
+- **Undo last pay** (`apiUndoMemberSend` member path / `apiDeleteInventory`
+  reverseLedgerEntry purchase path) via `undoResourcePay` — clean. Optimistic
+  row+ledger removal snapshotted to `previousRows`/`previousLedger`,
+  `rollback()` restores both and re-shows the Undo button on failure;
+  `resourcePayInFlight` guards double-tap; server deletes rows in descending
+  row order and reverses both ledger entries. README TODO about undo not
+  reversing the ledger appears stale for this path.
+- **Edit inventory item → Save** (`apiUpdateInventory`) via `saveInventoryEdits`
+  — clean. Buttons disabled during flight and re-enabled on both handlers;
+  local row updated only on success; failure leaves the form intact for retry.
+- **Delete / swipe-remove inventory item** (`apiDeleteInventory` /
+  `apiAdjustInventory` decrement) via `deleteSelectedInventory` — clean.
+  `previousRows` snapshot restored on `!ok` and failure; qty>1 confirm gate;
+  decrement vs full-delete branch correct; `_inFlightWrites` bracketed.
+- **Combine duplicate** (`apiCombineInventoryItems`) via
+  `confirmCombineInventoryItem` — clean. `pendingCombineChoice` nulled before
+  the call (double-tap returns early), restored on failure with the combine
+  sheet left open for retry; success filters source row + merges target.
+- **Give item to character** (`apiUpdateInventory` holder) via
+  `giveItemToCharacter` — clean. `item`/`idx`/`oldHolder` captured before
+  `closeInventoryPanels(false)` nulls the selection; optimistic holder change
+  reverted on both `!ok` and failure; `saving` pulse class removed on settle.
+  (Rollup-row limitation is a documented README TODO, not re-reported.)
+- **Sell crystals** (`apiSellDelerium`) via `sellDelerium` — clean.
+  `previousRows`/`previousLedger` snapshots, optimistic negative rows removed
+  on every outcome, `refreshDeleriumStateFromInventory_` recomputes counters so
+  a double-tap computes 0 qty and bails; 0 gp inline confirm path intact.
+
+#### BUG · Index.html:5695 · `confirmPayWithReason` references `const isPartyScope` before its declaration (TDZ) — Pay gold flow is dead
+
+Story: **Pay gold** (Gold tab → Pay → amount + note → route to Purchase or
+character → confirm). `confirmPayWithReason(reason)` (Index 5668) builds the
+optimistic pool-deduct inventory row at lines 5693–5697:
+
+```js
+inventoryRows = [{
+  'Inventory ID': optGoldPayId, ...
+  'Qty': String(-amount), 'Holder': isPartyScope ? '' : goldSheetScope,  // line 5695
+  ...
+}, ...inventoryRows];
+```
+
+but `isPartyScope` is declared with `const` only at line 5751
+(`const isPartyScope = goldSheetScope === 'party';`), 56 lines later. The single
+`const` binding in this function block is in the temporal dead zone at line
+5695, so reading it throws `ReferenceError: Cannot access 'isPartyScope' before
+initialization`. The GAS webview runs raw ES6 (IFRAME sandbox, no transpile), so
+the browser enforces TDZ.
+
+Effect: tapping **Purchase** or any **character** in the pay-reason sheet
+(`onclick="confirmPayWithReason(...)"`, Index 5116/5121) throws synchronously
+**before** the optimistic UI update and before either `apiSendGoldToMember` or
+`apiDepleteResource` is invoked. No ledger entry, no row, no server call, and no
+visible error — the sheet just sits open (the error is swallowed to the
+console). The entire Pay-gold story is unreachable. Failure-at-step,
+navigate-away and double-tap analysis are all moot because step 1 never fires.
+
+Note the sibling `receiveGold` flow declares `const isPartyScope` at line 5031
+*before* its first use (5046/5095) and works correctly — the fix is to move the
+`isPartyScope` declaration in `confirmPayWithReason` up to just after the
+`amount`/`note` reads (before line 5693), mirroring `receiveGold`.
+
+#### Note · Code.js:2858 · `apiSellInventoryItem` is an orphaned write path
+
+`apiSellInventoryItem` (single-item sell: appends a Gold row then deletes the
+source row) is not referenced anywhere in Index.html — the **Sell item** and
+**Remove item** description-sheet stories both route through
+`apiSellInventoryBatch` (Code.js 663, FIFO drain, audited in section 4). Traced
+for completeness: the function appends the gold row before deleting
+`found.rowNumber`, so the delete row number is unaffected by the append, and the
+lock is released on all paths. Behaviorally sound but dead from the client; not
+re-reportable as a bug, flagged only so a future reader doesn't assume the
+description-sheet Sell button hits it.
 
 ### 2026-06-20 (run 44) — Sections audited: 5
 
