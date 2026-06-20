@@ -1,9 +1,103 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 11. Index.html lines 4501–6000 (gold/delerium UI, sync)
+Next section: 12. Index.html lines 6001–7500 (inventory groups, description sheet, sell batch)
 
 ## Sessions
+
+### 2026-06-20 (run 50) — Sections audited: 11
+
+Section 11 = Index.html lines 4501–6000 (gold/delerium UI, sync). Composition:
+delerium sheet render + counters (`renderDeleriumSheetBody` 4544, `adjustDeleriumSell`
+4624, `adjustDeleriumReceive` 4671, `updateDeleriumButtonStates` 4691), delerium
+write paths (`receiveDelerium` 4712, `sellDelerium` 4812), gold sheet render
+(`renderGoldSheetBody` 4945, `renderGoldSheetButtons` 4985), gold write paths
+(`receivedGold` 5021, `openPayReasonSheet` 5101, `confirmPayWithReason` 5668,
+`splitGold` 5766, `undoGoldPay` 5016), give (`giveItemToCharacter` 5609), single-item
+sell (`confirmSellItem` 5189), batch sell (`openSellBatchSheet` 5267 →
+`confirmSellBatch` 5553), copy-inventory (`copyPartyPoolInventory` 5459), and the
+ledger note-edit machine (`selectLedgerRowForEdit` 5952, `cancelLedgerEdit` 5983,
+`updateLedgerNoteFromBottom` 6000). Read out to `pollSync`/`loadInventory` deferral
+(`_inFlightWrites > 0` guard at 2921 / 3643) and `isGoldItem_`/`getDeleriumBreakout`
+(6041/6070) to close traces.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every in-range write path):
+
+- **Pay gold** (Gold tab → Pay → reason → confirm) — `openPayReasonSheet` →
+  `confirmPayWithReason`. **BROKEN: TDZ ReferenceError, see BUG below.** Flow never
+  completes; a phantom pending ledger entry is leaked on every attempt.
+- **Receive gold** (Got Paid) — `receivedGold`. Execution-trace clean: optimistic
+  ledger + gold row prepended, `removePending` balanced on both handlers,
+  `_inFlightWrites` inc/dec balanced, inputs saved/restored on failure. Amount input
+  cleared before the async call doubles as a synchronous double-tap guard. No stuck
+  state.
+- **Split gold evenly** (treasurer) — `splitGold`. Clean: pending entry keyed by
+  `_pendingId`, removed on both handlers; inputs restored on failure; `renderInventory`
+  only on success.
+- **Undo last pay** — `undoGoldPay` → `undoResourcePay('gold')`. Confirmed the known
+  ledger-asymmetry TODO still holds (removes inventory rows, does not reverse
+  RESOURCE_LEDGER); not re-reported.
+- **Receive crystals / Sell crystals** — `adjustDeleriumReceive`/`adjustDeleriumSell`
+  → `receiveDelerium`/`sellDelerium`. Execution-trace clean: mixed-mode guard
+  (`updateDeleriumButtonStates` disables both buttons when for-sale and receiving
+  coexist) plus belt-and-suspenders `hasForSale`/`hasReceiving` early returns; optimistic
+  rows keyed by `'_opt(_rec)_'+size+Date.now()`; full snapshot revert on failure; 0 gp
+  sell inline-confirm re-enters `sellDelerium(true)` with no `_inFlightWrites` leak on
+  the confirm-prompt early return. No stuck state.
+- **Give item to character** — `giveItemToCharacter`. Index-based revert
+  (`inventoryRows[idx]`) is safe because `_inFlightWrites++` is set before the call and
+  `loadInventory(true)`'s foreign-reload path defers render while `_inFlightWrites > 0`
+  (3643), so the array is not reindexed mid-flight. Clean.
+- **Sell item (description sheet)** — `confirmSellItem`. `descActionInFlight` guards
+  double-tap; FIFO drain across rollup rows; `previousRows` snapshot reverts on
+  failure; `_inFlightWrites` balanced. Clean.
+- **Sell Items batch** (treasurer) — `openSellBatchSheet` → `confirmSellBatch`.
+  Generation-counter auto-close (5592) — the stale README TODO is now obsolete.
+  Friction IDEA below (non-optimistic, inconsistent with single-item sell).
+- **Edit ledger note** (gold + delerium) — `selectLedgerRowForEdit` → bottom edit bar
+  → `updateLedgerNoteFromBottom`. Reconciles by `entryId` else `Timestamp`; buttons
+  disabled during flight and re-enabled on both handlers; `cancelLedgerEdit` clears
+  `readOnly` + target. Clean (Timestamp-fallback ambiguity for ID-less entries is the
+  known DEFERRED limitation, not re-reported).
+
+#### BUG · Index.html:5695 · `confirmPayWithReason` throws TDZ ReferenceError — Pay gold flow completely broken
+Story: **Pay gold**, step "tap Purchase / character to confirm". `confirmPayWithReason`
+references `isPartyScope` at line 5695 (building the optimistic gold deduct row:
+`'Holder': isPartyScope ? '' : goldSheetScope`) but `isPartyScope` is declared as a
+block-scoped `const` at line 5751 — *after* the use. Per ES6 temporal-dead-zone rules
+the read at 5695 throws `ReferenceError: Cannot access 'isPartyScope' before
+initialization`, synchronously, every time. Because `openPayReasonSheet` already closed
+the reason sheet (5669) and the pending ledger entry was already prepended at 5690
+*before* the throw, the user sees: reason sheet closes, amount stays in the input,
+nothing else happens — and a phantom `_pending` ledger entry is leaked into
+`inventoryResourceLedger` that never resolves (`removePending` at 5705 is never reached),
+surfacing as a stuck "(saving…)" row the next time the gold body renders.
+`_inFlightWrites` is *not* leaked (the `++` at 5752 is past the throw), so the foreign
+reload still works — meaning the phantom can be cleared by a later `loadInventory(true)`,
+but the pay itself never reaches the server. Breaks both sub-routes (Purchase via
+`apiDepleteResource` and send-to-character via `apiSendGoldToMember`).
+Fix: move `const isPartyScope = goldSheetScope === 'party';` to the top of
+`confirmPayWithReason` (before line 5690), mirroring `receivedGold` (5031).
+
+#### IDEA · Index.html:5553 · Batch sell is non-optimistic — inconsistent with single-item sell
+Story: **Sell Items batch**. `confirmSellBatch` makes no optimistic mutation; it shows
+"Selling…", waits for the server, then calls `loadInventory(true)`. Sold rows stay
+visible until the round-trip completes (plus the 1.5 s auto-close), whereas the adjacent
+single-item `confirmSellItem` (5189) drains rows optimistically and reverts on failure,
+so the inventory updates instantly. The two sell flows feel inconsistent. Consider an
+optimistic FIFO drain in `confirmSellBatch` with a `previousRows` snapshot revert, the
+same pattern already proven in `confirmSellItem` — the rollup→row distribution is
+already computed in `items`.
+
+#### Note · Index.html:5766 · Gold/delerium/give/sell/ledger-edit write paths trace clean
+Traced **Receive gold**, **Split gold**, **Receive/Sell crystals**, **Give item**,
+**Sell item**, **Edit ledger note** end-to-end (happy + failure-at-step + navigate-away).
+All use balanced `_inFlightWrites`, `_pendingId`-keyed pending removal, full-snapshot or
+ID-keyed revert, and input save/restore on failure. The `_inFlightWrites > 0` deferral
+(2921 cache-skip, 3643 foreign-reload-skip) correctly protects index-based reverts and
+optimistic rows from being clobbered by the 20 s poll mid-write. Only `confirmPayWithReason`
+is broken (BUG above).
 
 ### 2026-06-20 (run 49) — Sections audited: 10
 
