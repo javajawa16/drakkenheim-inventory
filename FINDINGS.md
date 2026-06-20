@@ -127,6 +127,13 @@ back symmetrically on both `!res.ok` and `withFailureHandler`, counters self-res
 to block double submission, and the 0 gp inline-confirm prompt survives background
 sync because it renders into the actions area the poll never repaints.
 
+### 2026-06-19 (run 43+) — UX improvements applied
+
+- **Fix 1** (suppress identical-dupe combine prompt): after a successful add, `showCombineChoice` is now skipped when `res.item` and the matching candidate have the same Holder and Value GP. Same-value quick-adds (e.g. five Potions of Healing) no longer interrupt the flow.
+- **Fix 2** (Scrolls inventory group): `getInventoryGroupKey` routes items whose category contains "scroll" or whose name matches `/\bscroll\b/` to a new **Scrolls** group rendered between Accessories and Potions. Holy Water, Alchemist's Fire, Antitoxin, and Acid Flask are routed to Potions. `buildSellBatchGroups` and the party-pool copy function match.
+- **Fix 3** (optimistic gold balance): `receivedGold` and `confirmPayWithReason` now prepend a temporary Gold inventory row (positive/negative Qty) so `getGoldBreakout` and the "Gold = XXX gp" header update immediately — same as delerium. The row is removed on success (replaced by the real row) or failure (rollback).
+- **Fix 5** (server auto-combine on add): `findMatchingInventoryRow_` and `mergeIntoExistingRow_` added to `Code.js` after `writeInventoryRow_`. Both `apiAddInventory` and `apiAddCustomInventory` now check for an exact Item/Category/Rarity/Holder/Value GP match before appending; if found, Qty is incremented in-place and the merged row returned as `res.item` with `combined: true`. Client `primeInventoryCacheAfterAdd` already handles this by matching on `Inventory ID`.
+
 ### 2026-06-19 (run 43) — Sections audited: 4
 
 Section 4 = Code.js lines 1701–2300 (sell, combine, gold ops). The named range
@@ -348,7 +355,7 @@ second tap can land. Fix: give the mobile buttons the same IDs (or pass the
 clicked button via the onclick handler) so the disable applies where the user
 actually taps.
 
-#### IDEA · Index.html:7763 · Combine prompt fires after every duplicate add even though the list already shows them merged
+#### ~~IDEA · Index.html:7763 · Combine prompt fires after every duplicate add even though the list already shows them merged~~ FIXED (server auto-combine + identical-dupe suppression)
 Story: **Add library item / Combine duplicate**. After a successful add the
 list immediately rolls the new row into the existing one (one card, summed
 Qty) via `rollupInventoryRows`. The very next line still pops the combine
@@ -1348,7 +1355,7 @@ says "Failed." / shows the server error, but the amount the user typed is gone, 
 "try again" forces a full re-entry. Fix: snapshot amount/note before clearing and
 restore them in both failure paths (mirror `receivedGold`).
 
-#### IDEA · Index.html:5474 · Gold receive/pay balance lags behind the ledger entry
+#### ~~IDEA · Index.html:5474 · Gold receive/pay balance lags behind the ledger entry~~ FIXED (optimistic gold inventory row in receivedGold + confirmPayWithReason)
 Stories **Receive gold** and **Pay gold**. `receivedGold` and `confirmPayWithReason`
 optimistically insert only a *pending ledger entry*; they do **not** add an optimistic
 inventory row, so the header "Gold = XXX gp" total and the party-pool balance (both

@@ -5020,6 +5020,13 @@
         'Character': myCharacterName || ''
       }, ...inventoryResourceLedger].slice(0, 60);
 
+      const optGoldId = '_opt_gold_' + Date.now();
+      inventoryRows = [{
+        'Inventory ID': optGoldId, 'Item': 'Gold', 'Category': 'Currency', 'Rarity': '',
+        'Qty': String(amount), 'Holder': isPartyScope ? '' : goldSheetScope,
+        'Value GP': '1', 'Total Value GP': String(amount)
+      }, ...inventoryRows];
+
       const savedGoldAmount = amountInput ? amountInput.value : '';
       const savedGoldNote   = noteInput   ? noteInput.value   : '';
       if (amountInput) amountInput.value = '';
@@ -5030,6 +5037,7 @@
 
       const removePending = () => {
         inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
+        inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optGoldId);
       };
 
       _inFlightWrites++;
@@ -5060,6 +5068,7 @@
           if (noteInput)   noteInput.value   = savedGoldNote;
           if (status) status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
           renderGoldSheetBody();
+          renderInventory();
         })
         .apiReceiveResource({
           resource: 'gold', amount, note: recNote,
@@ -5280,6 +5289,7 @@
         weapons:     { key: 'weapons',     label: 'Murder Tools', rollups: [] },
         armor:       { key: 'armor',       label: 'Armor',        rollups: [] },
         accessories: { key: 'accessories', label: 'Accessories',  rollups: [] },
+        scrolls:     { key: 'scrolls',     label: 'Scrolls',      rollups: [] },
         potions:     { key: 'potions',     label: 'Potions',      rollups: [] },
         treasure:    { key: 'treasure',    label: 'Treasure',     rollups: [] },
         misc:        { key: 'misc',        label: 'Bonus Junk',   rollups: [] }
@@ -5443,8 +5453,8 @@
       const rollups = Object.values(rollupMap);
 
       // Group into inventory categories
-      const groupOrder = ['weapons','armor','accessories','potions','treasure','misc'];
-      const groupLabels = { weapons:'Murder Tools', armor:'Armor', accessories:'Accessories', potions:'Potions', treasure:'Treasure', misc:'Bonus Junk' };
+      const groupOrder = ['weapons','armor','accessories','scrolls','potions','treasure','misc'];
+      const groupLabels = { weapons:'Murder Tools', armor:'Armor', accessories:'Accessories', scrolls:'Scrolls', potions:'Potions', treasure:'Treasure', misc:'Bonus Junk' };
       const groupMap = {};
       groupOrder.forEach(k => { groupMap[k] = []; });
       rollups.forEach(ru => {
@@ -5658,6 +5668,14 @@
         'Character': myCharacterName || ''
       };
       inventoryResourceLedger = [pendingEntry, ...(inventoryResourceLedger || [])].slice(0, 60);
+
+      const optGoldPayId = '_opt_gold_' + Date.now();
+      inventoryRows = [{
+        'Inventory ID': optGoldPayId, 'Item': 'Gold', 'Category': 'Currency', 'Rarity': '',
+        'Qty': String(-amount), 'Holder': isPartyScope ? '' : goldSheetScope,
+        'Value GP': '1', 'Total Value GP': String(-amount)
+      }, ...inventoryRows];
+
       if (amountInput) amountInput.value = '';
       if (noteInput) noteInput.value = '';
       if (status) status.textContent = '';
@@ -5666,6 +5684,7 @@
 
       const removePending = () => {
         inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
+        inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optGoldPayId);
       };
       const restoreInputs = () => {
         if (amountInput) amountInput.value = amount;
@@ -5679,6 +5698,7 @@
           restoreInputs();
           if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Failed.')}</span>`;
           renderGoldSheetBody();
+          renderInventory();
           return;
         }
         if (res.poolDeduct) primeInventoryCacheAfterAdd(res.poolDeduct);
@@ -5705,6 +5725,7 @@
         restoreInputs();
         if (status) status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
         renderGoldSheetBody();
+        renderInventory();
       };
 
       const isPartyScope = goldSheetScope === 'party';
@@ -6062,12 +6083,13 @@
 
     function buildInventoryGroups(rows) {
       const groupMap = {
-        weapons: { key: 'weapons', label: 'Murder Tools', rows: [] },
-        armor: { key: 'armor', label: 'Armor', rows: [] },
-        accessories: { key: 'accessories', label: 'Accessories', rows: [] },
-        potions: { key: 'potions', label: 'Potions', rows: [] },
-        treasure: { key: 'treasure', label: 'Treasure', rows: [] },
-        misc: { key: 'misc', label: 'Bonus Junk', rows: [] }
+        weapons:     { key: 'weapons',     label: 'Murder Tools', rows: [] },
+        armor:       { key: 'armor',       label: 'Armor',        rows: [] },
+        accessories: { key: 'accessories', label: 'Accessories',  rows: [] },
+        scrolls:     { key: 'scrolls',     label: 'Scrolls',      rows: [] },
+        potions:     { key: 'potions',     label: 'Potions',      rows: [] },
+        treasure:    { key: 'treasure',    label: 'Treasure',     rows: [] },
+        misc:        { key: 'misc',        label: 'Bonus Junk',   rows: [] }
       };
 
       rows.forEach(row => {
@@ -6104,7 +6126,12 @@
         return 'treasure';
       }
 
-      if (category.includes('potion') || name.includes('potion')) {
+      if (category.includes('scroll') || /\bscroll\b/.test(name)) {
+        return 'scrolls';
+      }
+
+      if (category.includes('potion') || name.includes('potion') ||
+          /\b(holy water|alchemist.s fire|antitoxin|acid flask)\b/.test(name)) {
         return 'potions';
       }
 
@@ -7781,7 +7808,11 @@
           renderInventory();
           setMainStatus(`<span class="success">${escapeHtml(res.message || `${itemName} added.`)}</span>`);
           const duplicateCandidate = findDuplicateInventoryCandidate(res.item);
-          if (duplicateCandidate) showCombineChoice(res.item, duplicateCandidate);
+          if (duplicateCandidate) {
+            const sameHolder = (res.item['Holder'] || '') === (duplicateCandidate['Holder'] || '');
+            const sameValue  = String(res.item['Value GP'] || '') === String(duplicateCandidate['Value GP'] || '');
+            if (!sameHolder || !sameValue) showCombineChoice(res.item, duplicateCandidate);
+          }
         })
         .withFailureHandler(err => {
           _inFlightWrites--;

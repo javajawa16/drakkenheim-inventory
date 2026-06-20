@@ -1751,6 +1751,46 @@ function writeInventoryRow_(sheet, headers, rowNumber, rowObj) {
   sheet.getRange(rowNumber, 1, 1, row.length).setValues([row]);
 }
 
+function findMatchingInventoryRow_(sheet, headers, rowObj) {
+  if (sheet.getLastRow() < 2) return null;
+  const itemCol  = headers.indexOf('Item') + 1;
+  const catCol   = headers.indexOf('Category') + 1;
+  const rarCol   = headers.indexOf('Rarity') + 1;
+  const holdCol  = headers.indexOf('Holder') + 1;
+  const valCol   = headers.indexOf('Value GP') + 1;
+  if (itemCol < 1 || catCol < 1) return null;
+
+  const targetItem  = safeText_(rowObj['Item']).toLowerCase();
+  const targetCat   = safeText_(rowObj['Category']).toLowerCase();
+  const targetRar   = safeText_(rowObj['Rarity']).toLowerCase();
+  const targetHold  = safeText_(rowObj['Holder']).toLowerCase();
+  const targetVal   = String(rowObj['Value GP'] !== undefined ? rowObj['Value GP'] : '');
+
+  const numCols = sheet.getLastColumn();
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, numCols).getValues();
+  for (let i = 0; i < data.length; i++) {
+    const r = data[i];
+    const toIdx = c => r[c - 1];
+    if (safeText_(toIdx(itemCol)).toLowerCase() !== targetItem) continue;
+    if (safeText_(toIdx(catCol)).toLowerCase() !== targetCat) continue;
+    if (rarCol > 0 && safeText_(toIdx(rarCol)).toLowerCase() !== targetRar) continue;
+    if (holdCol > 0 && safeText_(toIdx(holdCol)).toLowerCase() !== targetHold) continue;
+    if (valCol > 0 && String(toIdx(valCol)) !== targetVal) continue;
+    return { rowNumber: i + 2, rowObj: inventoryRowToObject_(headers, r) };
+  }
+  return null;
+}
+
+function mergeIntoExistingRow_(sheet, headers, found, addQty) {
+  const existing = found.rowObj;
+  const newQty = Number(existing['Qty'] || 0) + addQty;
+  const valGp  = existing['Value GP'];
+  const newTotal = (valGp === '' || valGp === null || valGp === undefined) ? '' : newQty * Number(valGp);
+  const merged = Object.assign({}, existing, { 'Qty': newQty, 'Total Value GP': newTotal });
+  writeInventoryRow_(sheet, headers, found.rowNumber, merged);
+  return merged;
+}
+
 function classifyQuickEdit_(rowObj) {
   const name = safeText_(rowObj['Item']).toLowerCase();
   const category = safeText_(rowObj['Category']).toLowerCase();
@@ -2238,27 +2278,34 @@ function apiAddInventory(payload) {
       'Added By': safeText_(payload && payload.clientCharacter)
     };
 
-    const newRow = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
-
-    sheet.appendRow(newRow);
+    const existing = findMatchingInventoryRow_(sheet, headers, rowObj);
+    let resultObj;
+    if (existing) {
+      resultObj = mergeIntoExistingRow_(sheet, headers, existing, qty);
+    } else {
+      const newRow = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
+      sheet.appendRow(newRow);
+      resultObj = rowObj;
+    }
 
     auditWrite_({
       userEmail,
       action: 'ADD_INVENTORY',
-      itemId: rowObj['Inventory ID'],
-      itemName: rowObj['Item'],
+      itemId: resultObj['Inventory ID'],
+      itemName: resultObj['Item'],
       oldValue: null,
-      newValue: sanitizeInventoryForClient_(rowObj),
+      newValue: sanitizeInventoryForClient_(resultObj),
       delta: qty,
-      note: 'web app',
+      note: existing ? 'web app (auto-combined)' : 'web app',
       status: 'SUCCESS'
     });
 
     bumpSync_('inventory', payload && payload._syncClientId);
     return {
       ok: true,
-      message: `Added "${rowObj['Item']}" to inventory.`,
-      item: sanitizeInventoryForClient_(rowObj)
+      message: `Added "${resultObj['Item']}" to inventory.`,
+      item: sanitizeInventoryForClient_(resultObj),
+      combined: !!existing
     };
 
   } catch (err) {
@@ -2341,25 +2388,33 @@ function apiAddCustomInventory(payload) {
       'Added By': safeText_(payload && payload.clientCharacter)
     };
 
-    sheet.appendRow(headers.map(h => rowObj[h] !== undefined ? rowObj[h] : ''));
+    const existing = findMatchingInventoryRow_(sheet, headers, rowObj);
+    let resultObj;
+    if (existing) {
+      resultObj = mergeIntoExistingRow_(sheet, headers, existing, qty);
+    } else {
+      sheet.appendRow(headers.map(h => rowObj[h] !== undefined ? rowObj[h] : ''));
+      resultObj = rowObj;
+    }
 
     auditWrite_({
       userEmail,
       action: 'ADD_CUSTOM_INVENTORY',
-      itemId: rowObj['Inventory ID'],
-      itemName: rowObj['Item'],
+      itemId: resultObj['Inventory ID'],
+      itemName: resultObj['Item'],
       oldValue: null,
-      newValue: sanitizeInventoryForClient_(rowObj),
+      newValue: sanitizeInventoryForClient_(resultObj),
       delta: qty,
-      note: 'custom/homebrew',
+      note: existing ? 'custom/homebrew (auto-combined)' : 'custom/homebrew',
       status: 'SUCCESS'
     });
 
     bumpSync_('inventory', payload && payload._syncClientId);
     return {
       ok: true,
-      message: `Added "${rowObj['Item']}" to inventory.`,
-      item: sanitizeInventoryForClient_(rowObj)
+      message: `Added "${resultObj['Item']}" to inventory.`,
+      item: sanitizeInventoryForClient_(resultObj),
+      combined: !!existing
     };
   } catch (err) {
     log_('ERROR', 'apiAddCustomInventory failed', {
