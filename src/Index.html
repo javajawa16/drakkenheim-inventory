@@ -3526,12 +3526,11 @@
     }
 
     function handleAddTabClick() {
+      // The bottom-nav button is purely navigational. It must never submit —
+      // adding only happens via the explicit "Add to Inventory" button.
       if (commandMode === 'add') {
-        if (shouldSubmitAddFromNav()) {
-          addInventoryItem();
-          return;
-        }
-        clearAddForm();
+        // Already on Add: tapping again steps back to search (no data loss, no add).
+        if (selectedEquipment) changeSelectedItem();
         return;
       }
 
@@ -3624,33 +3623,6 @@
       document.getElementById('diceBreakdown').textContent = subExpr + ' =';
       document.getElementById('diceResultNum').textContent = String(total);
       document.getElementById('diceDisplay').classList.add('result-mode');
-    }
-
-    function shouldSubmitAddFromNav() {
-      if (commandMode !== 'add') return false;
-
-      const active = document.activeElement;
-      const activeId = active && active.id ? active.id : '';
-      const addFieldIds = new Set([
-        'item',
-        'qty',
-        'holder',
-        'category',
-        'rarity',
-        'valueGp',
-        'factionRelevance',
-        'notes',
-        'quickAddSize'
-      ]);
-
-      if (activeId === 'commandSearch' || activeId === 'equipmentSearch') return false;
-
-      const detailsCard = document.getElementById('addDetailsCard');
-      const detailsVisible = detailsCard && detailsCard.style.display !== 'none';
-      const hasItemContext = Boolean((document.getElementById('item').value || '').trim() || selectedEquipment);
-      const isActivelyInAddField = Boolean(activeId && addFieldIds.has(activeId));
-
-      return Boolean(detailsVisible && hasItemContext);
     }
 
     function updateAddFormInteractionState(target) {
