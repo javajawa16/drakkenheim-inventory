@@ -1,9 +1,95 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 7. Code.js lines 3501–end (sync, audit, utilities)
+Next section: 8. Index.html lines 1–1500 (HTML structure, CSS)
 
 ## Sessions
+
+### 2026-06-20 (run 46) — Sections audited: 7
+
+Section 7 = Code.js lines 3501–end. In-range write paths: the tail of
+`apiCombineInventoryItems` (audit + bumpSync), `apiGetCurrencyQuickEdit` (3545,
+read), `apiAdjustCurrency` (3587, thin wrapper), `apiAdjustInventory` (3597) and
+`apiSetItemQuantity` (3717) — the two quick-adjust writers — plus utilities
+`normalizeForClient_` (3828), `ensureInventoryHeaders_` (3843),
+`fillMissingInventoryRarity_` (3860), `findInventoryRowById_` (3920). The
+section's nominal sync/audit helpers (`bumpSync_` 2016, `apiGetSyncState` 2026,
+`auditWrite_` 1826, `appendResourceLedger_` 1856, `classifyQuickEdit_` 1794) live
+earlier in the file and were read for the traces below.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every write path):
+
+- **Quick-adjust currency/delerium** (tap gold/delerium card → quick-edit sheet
+  → add/remove/set → amount → Confirm). Client `openInventoryPrimaryAction`
+  (Index 6455) / `selectInventoryItem` (6471) gate on `getQuickEditType`;
+  `openQuickEditPanel` (7076) opens optimistically from the local row then fires
+  `apiGetCurrencyQuickEdit` to verify; `confirmQuickEdit` (7205) → `apiSetItemQuantity`
+  (set) or `apiAdjustInventory` (add/remove). The in-flight guard
+  (`quickEditInFlight`), `_inFlightWrites` bracketing on both handlers, double-tap
+  early-return, status-element capture, and the verify success-handler item-mismatch
+  guard (7120) are all correct — these were fixed in runs 22–45 and remain clean.
+  Navigate-away during the verify round-trip is harmless (guard + hidden sheet).
+  Three new findings below: a dropped ledger entry on the swipe tail, a size-change
+  conflation in both writers, and a client/server classifier divergence for potions.
+- **Delete / swipe-remove inventory item** (`apiAdjustInventory` decrement tail at
+  Index 7556) — re-traced for the ledger-entry handling; see BUG below.
+- **Combine duplicate** (`apiCombineInventoryItems` tail 3501–3543) — re-confirmed
+  clean: audit written, `bumpSync_` fired, lock released in `finally` on all paths.
+
+#### BUG · Index.html:7541 · Swipe-remove-one of a gold/delerium card silently drops the server's ADJUST ledger entry
+Story: *Quick-adjust currency/delerium* + *Delete inventory item* (swipe). Since the
+run-22 fix, `apiAdjustInventory` writes a RESOURCE_LEDGER `ADJUST` row and returns a
+sanitized `ledgerEntry` whenever the adjusted row is `currency` or `delerium crystal`
+(Code.js:3648–3665, 3684–3695). The swipe-decrement path
+(`runner.apiAdjustInventory({ delta: -1, … })`, Index.html:7556) reaches the success
+handler at 7530–7544, which calls `updateInventoryRowFromServer(res.item)` and
+`bustInventoryCache()` but **never consumes `res.ledgerEntry`** and never updates
+`inventoryResourceLedger`. So swiping one off a gold or delerium card decrements the
+on-card total optimistically, the server records the ledger line, but the Gold/Delerium
+tab's ledger list does not show it until the next full `loadInventory` reload — the
+ledger view and the sheet are transiently inconsistent (and a 1-gold/1-crystal change
+is left unexplained in the visible history). Fix: in the 7530 success handler, mirror
+`confirmQuickEdit`'s `finishSuccess` (7241–7243) — `if (res.ledgerEntry) inventoryResourceLedger = [res.ledgerEntry, ...(inventoryResourceLedger||[])].slice(0,60)` and re-cache. (No data loss; the entry is persisted server-side.)
+
+#### RISK · Code.js:3636 · Delerium quick-adjust size change merges two crystal sizes onto one row
+Story: *Quick-adjust currency/delerium*, delerium branch. When the quick sheet's size
+dropdown differs from the row's current size, `apiAdjustInventory` (3636–3639) and
+`apiSetItemQuantity` (3746–3751) rename the row to `Delerium <NewSize>` **while keeping
+`oldQty + delta` (or the set `qty`) as the quantity**. The row's pre-existing units were
+of the old size, so e.g. a row of 5 Delerium Chips + "add 2" with the dropdown switched
+to "shard" becomes "Delerium Shard ×7" — the 5 chips are silently reclassified as shards,
+and the ADJUST ledger entry's `subtype` is the new size (3655/3767), so the audit trail
+records only the delta, not the 5-unit reclassification. The size dropdown defaults to the
+current size, so this only fires on a deliberate change, but the editor presents
+"change size" and "add/remove N" as one Confirm with no warning. Consider: when the chosen
+size differs from current and `oldQty > 0`, either split into a new row of the new size
+(qty = delta) or block the combined operation and require an explicit move.
+
+#### IDEA · Index.html:7049 · Client never routes health potions to quick-edit despite full server support
+Story: *Quick-adjust currency/delerium*. Server `classifyQuickEdit_` (Code.js:1805) returns
+`'health potion'` for `health potion`/`potion of healing` rows, `apiGetCurrencyQuickEdit`
+surfaces that `editType`, and `openQuickEditPanel` even has a `'Quick Potion'` heading branch
+(Index.html:7102). But the client gate `getQuickEditType` (7049) has **no health-potion
+branch**, so `openInventoryPrimaryAction`/`selectInventoryItem` (6463/6479) send a
+healing-potion tap to the full description sheet instead of a quick +/- adjuster. The two
+classifiers are otherwise kept in lockstep (they share the platinum/gold/delerium regexes
+verbatim) — the potion case is the lone divergence. If quick-adjusting potion counts is
+desired (the server plumbing implies it was), add the `health potion` branch to
+`getQuickEditType`; otherwise the server branch + 'Quick Potion' heading are vestigial.
+
+#### Note · Code.js:3597 · Quick-adjust write path is otherwise sound
+Traced *Quick-adjust currency/delerium* end-to-end against `apiAdjustInventory` /
+`apiSetItemQuantity`: lock acquired with `tryLock(10000)` and released in `finally` on
+success/validation-failure/auth-failure; `requireAllowedUser_` gates before the lock;
+`validateId_`/`validateQuantity_`/`validateText_` run before any write; `Total Value GP`
+recomputed from the new qty; ledger written only for currency/delerium and only when qty
+actually changes (`apiSetItemQuantity` 3759); both return the sanitized row + ledger entry
+which `confirmQuickEdit.finishSuccess` correctly applies. Client-side `_inFlightWrites`
+bracketing defers the 20s sync poll across the round-trip; the double-tap guard and the
+verify-handler item-mismatch guard hold. Utilities `ensureInventoryHeaders_`,
+`fillMissingInventoryRarity_`, `findInventoryRowById_`, `normalizeForClient_` reviewed — no
+behavioral issues.
 
 ### 2026-06-20 (run 45) — Sections audited: 6
 
