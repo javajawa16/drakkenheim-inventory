@@ -1,9 +1,124 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 2. Code.js lines 501–1100 (auth, character, inventory read)
+Next section: 3. Code.js lines 1101–1700 (inventory write — add, edit, delete)
 
 ## Sessions
+
+### 2026-06-20 (run 54) — Sections audited: 2
+
+Section 2 = Code.js lines 501–1100 (auth, character, inventory read). In-range
+content: tail of `continueCleanEquipmentLibrary`, then the WEB APP API block —
+`apiSearchEquipment` (587), `apiGetEquipmentIndex` (624), `apiGetEquipmentItem`
+(647), `apiSellInventoryBatch` (663, the one user-facing write path physically
+in range), `apiGetCharacters` (754), `apiGetInventorySummary` (805),
+`apiGetMyCharacter` (822), `apiSetMyCharacter` (851), `apiForgetMyCharacter`
+(860), `apiGetItemDetails` (870), `apiGetCategories` (874), `apiGetQuickAddItems`
+(883), `apiLogUse` (901), `createEquipmentCsvDownload` (925) and the
+classification/salvage helpers (957–1096). Read out to identity helpers
+(`resolveIdentityForCharacter_` 1274, `resolveIdentityForEmail_` 1268,
+`getUserProfileForKey_` 1299, `saveUserProfile_` 1323, `getCharacterForEmail_`
+1393, `requireAllowedUser_` 1486, `requireTreasurer_` 1426), `apiGetInventory`
+(1978), `bumpSync_` (2016), and client-side `applyIdentity`/`loadMyIdentity`/
+`loadFallbackCharacterIdentity`/`showIdentitySheet`/`confirmIdentity`
+(Index.html 4307–4440), `loadCharacters` (2908), `loadInventory` (3588),
+equipment index/search (7600–7700), and the description-sheet Remove/Sell
+callers of `apiSellInventoryBatch` (6630–6696).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on the in-range write path):
+
+- **Identity / first open (cross-cutting, every story)** — boot fires
+  `loadCharacters()` + `loadMyIdentity()` in parallel; `apiGetMyCharacter`
+  resolves via temp-key profile → email → client hint; first-timers get
+  `character:null` → `showIdentitySheet()`. Happy path and the slow-characters
+  case self-heal (`loadCharacters` re-calls `showIdentitySheet` when the sheet
+  is active). See BUG below for the failure/empty case.
+- **Set character (`confirmIdentity` → `apiSetMyCharacter`)** — double-tap
+  guarded by `identityChoiceSaving`; optimistic `applyIdentity` + localStorage
+  write; success re-applies canonical identity. Navigate-away safe (closure
+  captures `character`, app already usable). Failure path is self-healing on
+  reload via localStorage hint but shows a scary error — see IDEA.
+- **Inventory read (`loadInventory` → `apiGetInventory`)** — in-memory →
+  localStorage → server; `_inFlightWrites > 0` guard in the success handler
+  drops poll-forced fetches mid-write; signature compare avoids scroll-reset
+  re-render. Clean.
+- **Add library item: search** — client loads full index once via
+  `apiGetEquipmentIndex` and filters client-side; `apiSearchEquipment` is not
+  on the live path. Index load has cached-fallback on failure. Clean.
+- **Sell item / Remove item (description sheet → `apiSellInventoryBatch`)** —
+  optimistic drain with `previousRows` snapshot, `_inFlightWrites` bump, rollback
+  on both `!ok` and failure handlers, `loadInventory(true)` on success. Clean
+  client-side; server-side partial-failure exposure noted as RISK below.
+
+#### BUG · Index.html:2915 · First-open identity sheet stuck on "Loading characters…" when apiGetCharacters fails or returns empty
+
+Story: **Identity / first open** (cross-cutting — blocks every other story for a
+new user). Boot runs `loadCharacters()` (2908) and `loadMyIdentity()` (2942) in
+parallel. For a first-time user with no cached identity, `apiGetMyCharacter`
+returns `character:null` and `loadFallbackCharacterIdentity` calls
+`showIdentitySheet()` (4357). If `characterOptions` is still empty at that moment,
+the sheet body renders the placeholder `"Loading characters…"` (4377).
+
+Recovery depends entirely on `loadCharacters`' **success** handler re-calling
+`showIdentitySheet()` (2914). But:
+1. On `apiGetCharacters` **failure** the handler only `console.error`s (2915–2916)
+   — it never updates the sheet. The user is stranded on "Loading characters…"
+   with no cards, no error, and no retry. They cannot pick a character, so they
+   cannot enter the app at all (only a manual page reload escapes, and only if
+   the retry succeeds).
+2. On a **successful-but-empty** response (`rows: []` — CHARACTERS sheet missing,
+   all inactive, or header mismatch) `showIdentitySheet` re-runs but
+   `chars.length === 0` so it re-renders the same "Loading characters…"
+   placeholder permanently — a success that looks identical to a hang.
+
+Fix: give `showIdentitySheet` a terminal empty/error state with a Retry button
+when `chars.length === 0`, and have `loadCharacters`' failure handler re-render
+the identity sheet (if active) into that error state instead of only logging.
+
+#### RISK · Code.js:703 · apiSellInventoryBatch partial failure mutates the sheet but reports total failure → silent data loss on next sync
+
+Stories: **Sell item / Remove item** (description sheet) and **Sell Items batch**.
+The write loop (703–714) deletes/updates resolved rows one at a time, then appends
+the gold row (733) and ledger entry (734) and finally audits/bumps sync. There is
+no transaction and no rollback: if any step after the first row mutation throws
+(e.g. `sheet.appendRow` for the gold credit, or a `deleteRow` hitting a protected/
+frozen row mid-loop), the `catch` returns `{ok:false}`. The client treats that as
+a clean failure and restores its optimistic `inventoryRows` to `previousRows`
+(Index.html 6672/6684), so the UI shows the items still present — but the server
+has already removed some of them. The discrepancy stays invisible until the next
+`loadInventory`/poll, at which point rows vanish with no explanation, and in the
+gold-append-throws case no gold was ever credited for the rows that were deleted.
+
+Note this compounds with the documented `appendResourceLedger_` error-swallowing
+TODO: the ledger won't throw, but the gold-row `appendRow` and the per-row
+`deleteRow` calls can. Suggested mitigation: compute all deletions/updates, append
+the gold row first (so a credit failure aborts before any inventory is destroyed),
+or return a partial-success payload listing which `inventoryId`s were actually
+processed so the client can reconcile instead of blanket-rolling-back.
+
+#### IDEA · Index.html:4435 · confirmIdentity failure shows an alarming error for an operation that actually persisted locally
+
+Story: **Set character**. On `apiSetMyCharacter` failure (4435–4438) the optimistic
+identity has already been applied and `drakkenheim_character` written to
+localStorage, so the user is correctly logged in and will resolve via the client
+hint on every future load — the only thing lost is the server-side User Profiles
+row (Last Seen tracking). Yet `setMainStatus` flashes
+`"Could not remember character: …"`, implying the choice didn't take. Friction:
+the message contradicts the working state. Suggest downgrading to a silent retry
+or a softer "Saved on this device; couldn't sync to the server" note, since
+identity is functionally intact.
+
+#### Note · Code.js:1486 · Auth gate + identity-resolution chain traced clean
+
+`requireAllowedUser_` correctly handles the `USER_DEPLOYING` empty-email case
+(returns `url-authenticated-user` placeholder only when the app is configured,
+denies otherwise) and `requireTreasurer_`/`getEmailForCharacter_` reverse-lookup
+fallback is consistent with the documented identity model. `apiSellInventoryBatch`
+releases the document lock on all paths via `finally` (including the pre-lock
+auth-throw, guarded by an inner try/catch) and processes rows highest-rowNumber-
+first so deletions don't invalidate not-yet-processed row numbers. Traced for the
+Identity, Inventory-read, Add-library-search, and Sell/Remove stories.
 
 ### 2026-06-20 (run 53) — Sections audited: 1
 
