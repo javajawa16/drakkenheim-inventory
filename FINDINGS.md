@@ -1,9 +1,115 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 12. Index.html lines 6001–7500 (inventory groups, description sheet, sell batch)
+Next section: 13. Index.html lines 7501–end (add item flow, custom item, form handling)
 
 ## Sessions
+
+### 2026-06-20 (run 51) — Sections audited: 12
+
+Section 12 = Index.html lines 6001–7500 (inventory groups, description sheet, sell
+batch). Composition: ledger note-edit tail (`updateLedgerNoteFromBottom` 6001),
+resource classifiers (`isGoldItem_` 6041, `getDeleriumBreakout` 6070,
+`buildInventoryGroups` 6104, `getInventoryGroupKey` 6133), rollup
+(`rollupInventoryRows` 6212, `renderInventoryGroup` 6188), dashboard pay/undo
+(`payResource` 6257, `undoResourcePay` 6326), description sheet
+(`openInventoryDescription` 6518, `getDescRemoveTotalQty_` 6592, desc-action sub-sheet
+`openDescActionSheet` 6705 → `_confirmDescActionAdd_` 6810 / `_confirmDescActionSell_`
+6890 / `_confirmDescActionRemove_` 6965, `descActionGiveTo` 6799), quick-edit
+(`openQuickEditPanel` 7076 → `confirmQuickEdit` 7205), full editor save
+(`saveInventoryEdits` 7372), and delete (`deleteSelectedInventory` 7464). Read out to
+`confirmPayWithReason` (5668, undo arming) and `apiSellInventoryBatch`/`apiAdjustInventory`
+callers to close traces.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every in-range write path):
+
+- **View item details** (tap card → description sheet → stat block + description loads)
+  — `openInventoryPrimaryAction` → `openInventoryDescription` → `apiGetEquipmentItem`.
+  Stale-fetch guard via `capturedId` is correct; navigate-away/close mid-fetch is
+  handled (handler bails when `selectedInventory` changed). **One RISK: success handler
+  caches `null` on `{ok:false}` — see below.**
+- **Sell item** (description sheet → Sell for Gold → stepper → confirm) —
+  `openDescActionSheet('sell')` → `_confirmDescActionSell_`. Execution-trace clean: FIFO
+  drain across rollup rows, optimistic decrement, `previousRows` restored on both
+  failure branches, `_inFlightWrites`/`descActionInFlight` balanced, `loadInventory(true)`
+  reconciles gold + ledger on success. No stuck state; double-tap guarded by
+  `descActionInFlight` + closed sheet.
+- **Remove item** (description sheet → Remove → stepper → confirm) —
+  `_confirmDescActionRemove_`. Clean: same FIFO/rollback pattern, goldAmount 0, no
+  optimistic ledger so ledger needs no restore. Balanced counters.
+- **Give item to character** (description sheet → Give to… → pick → confirm) —
+  `descActionGiveTo` → `giveItemToCharacter` (5609, traced in run 50). Representative-row
+  limitation already a documented Known TODO; no new defect in this section's wiring.
+- **Quick-adjust currency/delerium** (tap gold/delerium card → quick-edit sheet →
+  add/remove/set → Confirm) — `openQuickEditPanel` → `confirmQuickEdit`. Execution-trace
+  clean: `quickEditInFlight` set synchronously guards double-tap, `_inFlightWrites`
+  balanced on both handlers, server `res.item` merged via `updateInventoryRowFromServer`,
+  failure leaves sheet open with retryable error. Verification read
+  (`apiGetCurrencyQuickEdit`) guarded by `selectedQuickEdit.itemId` identity check —
+  survives navigate-away. Minor: a quick `set 0` leaves an in-memory 0-qty row until next
+  sync (busts cache but no `loadInventory`); not user-reachable for currency in practice.
+- **Edit inventory item** (swipe → Edit → Save) — `saveInventoryEdits`
+  → `apiUpdateInventory`. Clean: buttons re-enabled on both handlers, optimistic
+  `updateInventoryRowLocally` only applied on success, `_inFlightWrites` balanced.
+- **Delete inventory item** (swipe → Delete, confirm if qty>1) — `deleteSelectedInventory`.
+  Clean: extra-confirm gate for multi-qty rows, `previousRows` restored on both failure
+  branches, `_inFlightWrites` balanced, decrement-vs-delete branch correct.
+- **Undo last pay** (Undo after pay → reverse) — `confirmPayWithReason` arms
+  `lastResourceUndo['gold']`, `undoGoldPay` → `undoResourcePay('gold')`. **BROKEN on the
+  member-send branch — `_inFlightWrites` double-decrement, see BUG below.**
+
+#### BUG · Index.html:6364 · `undoResourcePay` double-decrements `_inFlightWrites` on member-send undo failure
+Story: **Undo last pay**, failure-at-step (member-send / "Pay → character" path). When a
+gold pay was a member send, `lastResourceUndo['gold'].creditItem` is set (armed at
+Index.html:5731), so `undoResourcePay` takes the `creditId` branch and calls
+`apiUndoMemberSend`. Its success handler runs:
+```
+.withSuccessHandler(res => {
+  resourcePayInFlight[resource] = false;
+  _inFlightWrites--;                         // (1) unconditional decrement
+  if (!res || !res.ok) { rollback(); return; }   // rollback() decrements AGAIN
+  ...
+})
+```
+`rollback()` (6345) also does `_inFlightWrites--`. So when the server returns `{ok:false}`
+(not a transport error — `withFailureHandler` handles those correctly with a single
+decrement), `_inFlightWrites` is decremented **twice** for one increment. Net effect:
+`_inFlightWrites` drifts to −1 (and further negative on repeats). Because the sync poll
+and several write paths defer `loadInventory(true)`/`loadNotes(true)` only while
+`_inFlightWrites > 0`, a negative counter permanently defeats that guard: a subsequent
+genuine in-flight write no longer blocks a poll-triggered reload, so a concurrent
+collaborator write can trigger `loadInventory(true)` mid-write and clobber the optimistic
+rows (the "Collaborative sync interference" cross-cutting story). The purchase-path branch
+at 6373 is written correctly (it calls `rollback()` and `return`s *before* its manual
+decrement), confirming the member-send branch's ordering is the defect. Fix: move the
+`_inFlightWrites--` / `resourcePayInFlight = false` below the `res.ok` check, mirroring the
+purchase branch — let `rollback()` own the cleanup on the failure path.
+
+#### RISK · Index.html:6568 · Description fetch caches `null` on `{ok:false}`, blanking the description for the session
+Story: **View item details**, failure-at-step. In `openInventoryDescription`:
+```
+const item = (res && res.ok && res.item) ? res.item : null;
+itemCache[libraryItemId] = item;   // caches null even when res.ok === false
+```
+The `withFailureHandler` deliberately does *not* cache (`// Don't cache null — let the next
+open retry the fetch`), but the success handler unconditionally writes `itemCache[id]`,
+including `null` when the server returns `{ok:false}`. Once cached, every later open of any
+item sharing that Library Item ID short-circuits on `itemCache[id] !== undefined` and shows
+"No description available." with no retry for the rest of the session. For genuinely
+missing/unimported items this caching is desirable (avoids refetch storms), but a transient
+`{ok:false}` (e.g. a momentary sheet read failure) is treated identically and permanently
+blanks a real description. Consider caching only on `res.ok` (or distinguishing "not found"
+from "error" in the server response) so transient failures stay retryable.
+
+#### Note · Index.html:6104 · Inventory grouping / rollup classifiers traced clean
+`buildInventoryGroups`/`getInventoryGroupKey`/`rollupInventoryRows`/`getDescRemoveTotalQty_`
+are pure read-side helpers (no writes, no async). Rollup math (qty sum, Holder→"Multiple",
+adder de-dup) and the multi-holder FIFO target selection used by sell/remove are internally
+consistent across `_confirmDescActionSell_`, `_confirmDescActionRemove_`, and the
+`getDescRemoveTotalQty_` max. No state-machine or data-loss defect found in the grouping
+layer. (`confirmDescRemove` at 6621 appears orphaned — Remove routes through
+`openDescActionSheet('remove')`; not reported per dead-code exclusion.)
 
 ### 2026-06-20 (run 50) — Sections audited: 11
 
