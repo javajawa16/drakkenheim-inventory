@@ -1,9 +1,150 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 3. Code.js lines 1101–1700 (inventory write — add, edit, delete)
+Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
 
 ## Sessions
+
+### 2026-06-20 (run 55) — Sections audited: 3
+
+Section 3 = Code.js lines 1101–1700 (inventory write — add, edit, delete). The
+physical 1101–1700 range is the helper/validation/identity layer that every
+inventory write consumes: spreadsheet/sheet helpers (`getOrCreateSheet_`,
+`ensureSheetSize_`, `ensureHeaderRow_`), row mappers (`equipmentRowToClientItem_`,
+`inventoryRowToObject_`), ID/hash helpers (`makeInventoryId_`,
+`makeStableItemId_`), identity (`resolveIdentityForCharacter_` 1274,
+`getUserProfileForKey_` 1299, `saveUserProfile_` 1323, `validateCharacterChoice_`
+1368, `getCharacterForEmail_`/`getEmailForCharacter_` 1393/1441,
+`requireTreasurer_` 1426, `requireAllowedUser_` 1486, `requireAdminUser_` 1518),
+public-error mappers (`publicApiError_` 1536, `publicValidationError_` 1548) and
+the validators (`validateId_` 1561, `validateText_` 1571, `validateQuantity_`
+1581, `validateMoney_` 1599, `normalizeOptionalMoney_` 1611), plus the
+client-sanitizers (`sanitizeInventoryForClient_` 1654) and ledger helpers
+(`getResourceLedgerForClient_` 1686). Traced out to the write endpoints that
+consume them — `apiAddInventory` (2221), `apiAddCustomInventory` (2337),
+`apiQuickAddInventory` (2444), `apiUpdateInventory` (3220), `apiDeleteInventory`
+(3311), `apiCombineInventoryItems` (3422), `apiAdjustInventory` (3597) and the
+merge/find helpers `findMatchingInventoryRow_` (1754), `mergeIntoExistingRow_`
+(1784), `getInventoryRowObjectById_` (1736), `writeInventoryRow_` (1749),
+`deleteResourceLedgerRowsForInventory_` (1883) — and the client callers in
+Index.html: add flow `addInventoryItem` (8085–8219), optimistic/cache helpers
+(`cacheInventoryRows` 2920, `primeInventoryCacheAfterAdd` 2931,
+`findDuplicateInventoryCandidate` 3337, `showCombineChoice`/`confirmCombineInventoryItem`
+3346–3401), edit `saveInventoryEdits` (7372), swipe/stepper delete
+`deleteSelectedInventory` (7464–7560), `loadInventory` (3588) and `pollSync` (3868).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every write path):
+
+- **Add library item / Add custom item / Quick-add** — happy path is optimistic:
+  a temp `_opt_<ts>` row is prepended, form cleared, `_inFlightWrites++`, server
+  call. Server validates (`validateId_`/`validateQuantity_`/`validateMoney_`),
+  resolves the library item, and either appends or auto-merges via
+  `findMatchingInventoryRow_` (matches on Item/Category/Rarity/Holder/Value GP).
+  Success removes the temp row and reconciles by **Inventory ID** through
+  `primeInventoryCacheAfterAdd` (updates the pre-existing row if present, else
+  prepends) — verified this does not double-count on auto-combine and works even
+  when the client never had the merged server row. Failure (`res.ok===false` or
+  `withFailureHandler`) removes the temp row, restores every form field from
+  `payloadSnapshot` + re-selects `selectedSnapshot` (incl. scroll-mode + size),
+  decrements the flag, and re-opens the add flow — clean retry, no data loss.
+  Navigate-away during the round-trip: see IDEA below (combine sheet can surface
+  over an unrelated tab). No stuck in-flight flag (google.script.run always fires
+  exactly one handler; inc/dec balanced).
+
+- **Combine duplicate** — after a successful add, `findDuplicateInventoryCandidate`
+  (rollup key = Item|Category|Rarity, holder/value excluded) finds a sibling row;
+  the combine sheet only opens when holder OR value differs (the equal-on-both
+  case was already auto-merged server-side, so the gate is consistent).
+  `apiCombineInventoryItems` re-validates both IDs, requires matching
+  Item/Category/Rarity, sums qty, deletes source (descending-row-safe via
+  `adjustedTargetRow`), and merges holder→'Multiple'/faction/notes. Client
+  reconciles by ID (filter source, map target) so it survives an intervening
+  foreign reload. Double-tap on Confirm guarded by nulling `pendingCombineChoice`.
+  Failure restores `pendingCombineChoice` and leaves the sheet open for retry.
+
+- **Edit inventory item** — non-optimistic: button disabled, "Saving…",
+  `apiUpdateInventory` patches only provided fields (qty floored at 1 by
+  `validateQuantity_`), then `updateInventoryRowLocally` + cache + render + close.
+  Failure re-enables the button and keeps the form open. Navigate-away is safe
+  (close acts on a now-hidden sheet). Clean.
+
+- **Delete inventory item** — optimistic with `previousRows` rollback. qty>1
+  full-delete is gated behind an inline "Confirm delete all" tap; the stepper
+  path uses `apiAdjustInventory(delta:-1)`. Both restore `previousRows` on any
+  failure and `bustInventoryCache()` on success (forces a clean server refetch).
+  See RISK on the unguarded confirm button.
+
+- **Cross-cutting: collaborative sync interference / tab-switch / iOS** — verified
+  `cacheInventoryRows` no-ops while `_inFlightWrites>0`, `loadInventory`'s handler
+  bails on `_inFlightWrites>0`, and `pollSync` defers a foreign reload via
+  `pendingForeignReload`. One real gap found — see BUG below.
+
+#### BUG · Index.html:3643 · Foreign inventory change silently dropped when a local write starts mid-reload
+Collaborative-sync-interference story. `pollSync` only sets
+`pendingForeignReload` when it detects a foreign write **while** `_inFlightWrites>0`
+(line 3873). In the race where the poll fires with `_inFlightWrites===0`, it takes
+the else branch: it commits `syncState.inventory = res.inventory` (3876) and
+dispatches `loadInventory(true)`. If the user then starts a write (e.g. taps Add)
+during that `apiGetInventory` round-trip, the load's success handler hits
+`if (_inFlightWrites > 0) { markInventoryReady(); return; }` (3643) and **bails
+without applying the foreign rows** — but `syncState.inventory.ts` was already
+advanced. When the local write completes it bumps the sync ts to its own
+(by===me) value, so the next poll sees `res.ts === syncState.ts`-mismatch resolve
+to the local writer and never re-triggers a reload. Net effect: the other
+player's concurrent change is lost from this client until some *future* unrelated
+write bumps sync again. Self-heals eventually but can show a stale party
+inventory for an arbitrarily long time during active play.
+Fix: when `loadInventory`'s handler bails on `_inFlightWrites>0`, set
+`pendingForeignReload = true` (and don't pre-commit `syncState` until the load
+actually applies), so the deferred reload fires once the write settles. The same
+pattern applies to `loadNotes`/`pendingForeignNoteReload`.
+
+#### RISK · Index.html:7479 · Double-tap on inline "Confirm delete all" shows a spurious "Delete failed."
+Delete-inventory story, qty>1 path. The inline `Confirm delete all` button
+created at 7487 is never disabled and is only torn down on the next
+`renderInventory()`. A fast double-tap re-enters `deleteSelectedInventory`: the
+first tap has already optimistically filtered the row out of `inventoryRows`, so
+on the second tap `existingRow` is undefined, the qty>1 confirm gate is skipped,
+and a second `apiDeleteInventory(inventoryId)` is dispatched. The server returns
+`Inventory item not found.` (row already gone), the handler restores
+`previousRows` and surfaces `Delete failed.` even though the delete succeeded.
+Narrow window (the confirm button is removed on the first render) but reachable.
+Fix: disable/remove the confirm button on first tap, or guard
+`deleteSelectedInventory` with a per-id in-flight set like the notes
+`_notesActionInFlight`.
+
+#### Note · Code.js:1754 · Add/auto-combine execution-trace is sound — no double-count
+`apiAddInventory`/`apiAddCustomInventory` auto-combine via
+`findMatchingInventoryRow_` (full Item/Category/Rarity/Holder/Value GP match) and
+return the merged existing row by its real Inventory ID. Client-side
+`primeInventoryCacheAfterAdd` reconciles strictly by Inventory ID, so the
+optimistic temp row is removed and the merged qty lands on exactly one row
+whether or not the client previously held the original — traced both branches,
+no duplicate display and no qty double-count. `validateQuantity_`/`validateMoney_`
+guards on every quantity/value boundary; locks released in `finally` on all
+paths.
+
+#### Note · Code.js:3311 · Swipe-delete of a quick-added currency/delerium row leaves its ledger entry (matches documented limitation)
+`apiDeleteInventory` only reverses RESOURCE_LEDGER rows when
+`payload.reverseLedgerEntry` is set (used by `apiUndoMemberSend` and the
+member-send delete). Normal swipe-delete of a delerium/currency row removes the
+inventory row but not its RECEIVE/ADD ledger entry. Because gold/delerium totals
+are inventory-derived (Index.html:5485, `isGoldItem_` sum of Qty), the headline
+total stays correct — only the ledger *history* keeps a phantom entry. Same class
+as the documented "Undo Last Pay does not reverse RESOURCE_LEDGER" TODO; recorded
+for completeness, not a new behavioral total-desync.
+
+#### IDEA · Index.html:8168 · Combine-suggestion sheet can pop over an unrelated tab after navigate-away
+Add-then-combine story, navigate-away case. If the user taps Add and switches to
+the Gold/Notes tab before the round-trip returns, the success handler still runs
+`findDuplicateInventoryCandidate` → `showCombineChoice`, which adds `.active` to
+`#combineSheet` unconditionally — a combine modal about an inventory item appears
+over whatever tab the user is now on. Recoverable (tap "keep"), but jarring and
+inconsistent with the otherwise tab-aware handlers (the failure branch already
+guards `renderInventory` with `commandMode === 'inventory'`). Suggest gating the
+`showCombineChoice` call on `commandMode === 'inventory'`/`'add'`, or queuing it
+until the user returns to inventory.
 
 ### 2026-06-20 (run 54) — Sections audited: 2
 
