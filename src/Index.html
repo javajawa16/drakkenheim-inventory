@@ -500,6 +500,15 @@
 
     button:disabled { opacity: .5; cursor: not-allowed; }
 
+    @keyframes btn-spin { to { transform: rotate(360deg); } }
+    button.primary:disabled::after,
+    button.success:disabled::after {
+      content: ''; display: inline-block; vertical-align: middle;
+      width: 13px; height: 13px; margin-left: 8px;
+      border: 2px solid rgba(255,255,255,.35); border-top-color: #fff;
+      border-radius: 50%; animation: btn-spin .7s linear infinite;
+    }
+
     /* ─── Status ─────────────────────────────────────────────────── */
     .status {
       margin-top: 10px;
@@ -2563,6 +2572,7 @@
     <div class="mobile-sheet-panel">
       <div class="mobile-sheet-header">
         <div class="mobile-sheet-title" id="goldSheetTitle">Gold</div>
+        <button class="secondary mobile-sheet-close" onclick="closeGoldSheet()">Done</button>
       </div>
       <div id="goldScopeStatic" class="gold-scope-static"></div>
       <div id="goldSheetBody" class="mobile-sheet-body"></div>
@@ -2588,6 +2598,7 @@
     <div class="mobile-sheet-panel">
       <div class="mobile-sheet-header">
         <div class="mobile-sheet-title" id="deleriumSheetTitle">Purple Rocks</div>
+        <button class="secondary mobile-sheet-close" onclick="closeDeleriumSheet()">Done</button>
       </div>
       <div id="deleriumCountersStatic" class="delerium-counters-static"></div>
       <div id="deleriumSheetBody" class="mobile-sheet-body"></div>
@@ -2625,7 +2636,10 @@
     <div class="mobile-sheet-panel">
       <div class="mobile-sheet-header">
         <div class="mobile-sheet-title">Sell Items</div>
-        <button class="secondary mobile-sheet-close" id="copyInventoryBtn" onclick="copyPartyPoolInventory()">Copy</button>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="secondary mobile-sheet-close" id="copyInventoryBtn" onclick="copyPartyPoolInventory()">Copy</button>
+          <button class="secondary mobile-sheet-close" onclick="closeSellBatchSheet()">Done</button>
+        </div>
       </div>
       <div class="mobile-sheet-body" id="sellBatchBody"></div>
       <div class="mobile-sheet-actions" id="sellBatchActions"></div>
