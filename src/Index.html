@@ -1480,10 +1480,6 @@
       display: inline-flex;
     }
 
-    .legacy-search-card {
-      display: none;
-    }
-
     #addSearchCard .section-heading,
     #addSearchCard > .field:first-of-type {
       display: none;
@@ -2114,21 +2110,6 @@
     <!-- ── Inventory tab ────────────────────────────────────────── -->
     <section id="inventorySection" class="section active">
       <div class="section-stack">
-
-        <div class="card featured search-panel legacy-search-card">
-          <h2 class="section-heading">Inventory</h2>
-          <div class="field">
-            <label class="sr-only" for="inventoryFilter">Filter inventory</label>
-            <div class="search-control">
-              <input id="inventoryFilter" class="search-input"
-                     placeholder="Filter cloak, potion, shield…"
-                     oninput="handleSearchInput('inventoryFilter'); debouncedRenderInventory()">
-              <button id="inventoryFilterClear" class="search-clear" type="button"
-                      aria-label="Clear inventory filter"
-                      onclick="clearSearchField('inventoryFilter', renderInventory)">×</button>
-            </div>
-          </div>
-        </div>
 
         <div id="inventoryStatus" class="status centered">Loading…</div>
         <div id="inventoryList"></div>
@@ -3294,11 +3275,6 @@
         if (nfs && nfs.classList.contains('active')) { nfs.classList.remove('active'); syncModalOpenState(); }
       }
 
-      // Always clear the inventory filter on any tab switch so the user
-      // returns to (or leaves) a clean, unfiltered view.
-      document.getElementById('inventoryFilter').value = '';
-      handleSearchInput('inventoryFilter');
-
       if (!notesActive) {
         commandSearch.placeholder = inventoryActive
           ? 'Filter inventory…'
@@ -3342,7 +3318,6 @@
       const value = document.getElementById('commandSearch').value;
 
       if (commandMode === 'inventory') {
-        document.getElementById('inventoryFilter').value = value;
         handleSearchInput('commandSearch');
         clearTimeout(searchTimer);
         searchTimer = setTimeout(renderInventory, 150);
@@ -3366,7 +3341,6 @@
       document.getElementById('commandSearch').value = '';
 
       if (commandMode === 'inventory') {
-        document.getElementById('inventoryFilter').value = '';
         handleSearchInput('commandSearch');
         renderInventory();
       } else {
@@ -3788,7 +3762,7 @@
     }
 
     function renderInventory() {
-      const filter = document.getElementById('inventoryFilter').value.trim().toLowerCase();
+      const filter = (document.getElementById('commandSearch').value || '').trim().toLowerCase();
       const status = document.getElementById('inventoryStatus');
       const list   = document.getElementById('inventoryList');
 
@@ -3835,8 +3809,16 @@
         return;
       }
 
-      status.textContent = `${rows.length} result${rows.length === 1 ? '' : 's'}`;
-      list.innerHTML = rows.map(row => renderInventoryRowCard(row, { showMeta: true })).join('');
+      // Filter path: use the same group+rollup pipeline so items combine correctly.
+      // Temporarily expand all groups so results are visible without needing a tap.
+      const groups = buildInventoryGroups(rows);
+      const savedExpanded = inventoryExpandedGroups;
+      inventoryExpandedGroups = {};
+      groups.forEach(g => { inventoryExpandedGroups[g.key] = true; });
+      const rollupCount = groups.reduce((s, g) => s + rollupInventoryRows(g.rows).length, 0);
+      status.textContent = `${rollupCount} item${rollupCount !== 1 ? 's' : ''}`;
+      list.innerHTML = groups.map(g => renderInventoryGroup(g)).join('');
+      inventoryExpandedGroups = savedExpanded;
     }
 
     function renderInventoryRowCard(row, options) {
