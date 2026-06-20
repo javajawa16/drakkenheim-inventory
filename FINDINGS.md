@@ -1,9 +1,131 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
+Next section: 6. Code.js lines 2901–3500 (batch sell, give, remove)
 
 ## Sessions
+
+### 2026-06-20 (run 44) — Sections audited: 5
+
+Section 5 = Code.js lines 2301–2900 (delerium, custom inventory, notes). The
+range holds `apiAddCustomInventory` (2290), `apiQuickAddInventory` (2389),
+`apiDepleteResource` (2530), `apiUpdateLedgerNote` (2662), `apiReceiveResource`
+(2718, gold + delerium branches), `apiSellInventoryItem` (2803) and
+`apiSellDelerium` (2858). Client handlers traced in full: `receiveDelerium`
+(Index 4692), `sellDelerium` (4792), `addInventoryItem` unified add/quick/custom
+(7684), `confirmQuickEdit` quick-edit sheet (6820), `payResource` dashboard pay
+(6210), `updateLedgerNoteFromBottom` (5959), plus the sync poll (3848) and
+`loadInventory` (3568) for the cross-cutting traces.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every write path):
+
+- **Add custom item** — `addInventoryItem` (isCustomAdd) → optimistic row +
+  `clearAddForm` → `apiAddCustomInventory`. Happy: opt row removed, real row
+  primed (dedup by ID), duplicate-combine suggestion offered. Failure (both
+  `!ok` and failure handler): opt row pulled, full form restored from
+  `payloadSnapshot`/`selectedSnapshot`, retry works. Clean.
+- **Add custom/library/quick item — scroll + delerium-size restore** —
+  verified the failure path re-runs `fillAddFormFromEquipment(selectedSnapshot)`
+  which re-activates `quickAddSizeField` for delerium and re-derives the size,
+  then line 7769/7806 overrides with `capturedSize`; scroll mode restored at
+  7770/7807. No content loss on retry. Clean.
+- **Quick-adjust currency/delerium** — `openQuickEditPanel` (6691) →
+  `confirmQuickEdit` (6820) → `apiAdjustInventory`/`apiSetItemQuantity` (outside
+  range). Found the cross-item stale-handler BUG below.
+- **Quick-add from library (currency/delerium)** — `apiQuickAddInventory`:
+  ledger entry written before inventory row; returns `item` + `ledgerEntry`.
+  Client prepends ledger, primes row. See ordering RISK below.
+- **Receive crystals** — `receiveDelerium` → optimistic +qty rows + pending
+  ledger → counters reset via `refreshDeleriumStateFromInventory_` (blocks
+  double-tap: 2nd tap computes 0 items → returns) → `apiReceiveResource`
+  (delerium branch). Success removes opt rows + pending, primes server rows,
+  prepends `ledgerEntries`. Both failure handlers restore `previousRows`/
+  `previousLedger` and the saved note. Navigate-away (close sheet mid-flight):
+  handlers mutate global state + hidden DOM only; on return counters re-derive
+  from inventory. Clean.
+- **Sell crystals** — `sellDelerium` → optimistic −qty rows + pending ledger →
+  `apiSellDelerium` (treasurer-gated). 0 gp inline confirm (4807) re-invokes
+  `sellDelerium(true)`; confirm prompt lives in `deleriumSheetActions`, which the
+  sync poll does not re-render, so it survives a background reload. Rollback
+  symmetric on both error branches. Double-tap blocked (counters reset to
+  reduced stock). Clean.
+- **Receive gold** — `apiReceiveResource` gold branch: appends row then ledger,
+  returns single-element `ledgerEntries` + `addedItems`. Traced previously
+  (run 43); re-confirmed server side here.
+- **Pay gold (dashboard breakout)** — `payResource` (6210) → `apiDepleteResource`.
+  Non-optimistic; double-tap guarded by `resourcePayInFlight`. Found the
+  `_inFlightWrites` omission RISK below.
+- **Edit ledger note (gold/delerium)** — `updateLedgerNoteFromBottom` (5959) →
+  `apiUpdateLedgerNote` (2662). Match by Inventory ID (entryId) preferred,
+  Timestamp fallback (known deferred limitation for same-second multi-size
+  delerium sells). On success the in-memory entry's `Notes` is patched by the
+  same ID/timestamp key. Navigate-away: `closeGoldSheet`/`closeDeleriumSheet`
+  call `cancelLedgerEdit`; handler re-runs it harmlessly. Clean.
+- **Sell item (description sheet, single)** — `apiSellInventoryItem` (2803):
+  validates ID, appends gold row + ledger ADD when goldAmount>0, deletes source
+  row. Clean read-before-delete via `getInventoryRowObjectById_`.
+
+#### BUG · Index.html:6844 · Stale quick-edit success handler closes/corrupts a reopened panel for a different item
+Story: **Quick-adjust currency/delerium**, at the Confirm step. `confirmQuickEdit`'s
+`finishSuccess` unconditionally calls `updateInventoryRowFromServer(res.item)`,
+writes its status message into `getQuickStatusElement()`, and calls
+`closeQuickEditPanel()` — with no check that the panel still belongs to the item
+that was submitted. This is reachable because `closeQuickEditPanel` (6797) clears
+`quickEditInFlight = false`, which re-opens the `if (quickEditInFlight) return;`
+gate in `openQuickEditPanel` (6692). Sequence: tap Gold card → Confirm (write in
+flight, `quickEditInFlight=true`) → tap backdrop/Done to close (`quickEditInFlight`
+→ false, `selectedQuickEdit=null`) → tap Delerium card → panel B opens for the new
+item → the first write's `finishSuccess` fires and (a) applies the gold update to
+item A's row [fine], (b) writes a green "Saved" into panel B's status element, and
+(c) force-closes panel B via `closeQuickEditPanel()`, discarding the user's
+in-progress edit on item B. Panel B's own `apiGetCurrencyQuickEdit` handler then
+no-ops because `selectedQuickEdit` is now null. Contrast: `openQuickEditPanel`'s
+verify handler (6735) DOES guard with `selectedQuickEdit.itemId !== row['Inventory ID']`.
+Fix: add the same identity guard to `finishSuccess`/`fail` (capture the submitted
+`itemId` in a closure and bail if `selectedQuickEdit?.itemId` no longer matches),
+or stop clearing `quickEditInFlight` inside `closeQuickEditPanel` so a panel cannot
+be reopened while a confirm is still in flight.
+
+#### RISK · Index.html:6210 · `payResource` is the only write path that omits the `_inFlightWrites` guard
+Story: **Pay gold** (dashboard `renderResourceBreakout` Pay button, 5821; also the
+delerium dashboard pay). Every other write path in the app brackets its
+`google.script.run` call with `_inFlightWrites++ … _inFlightWrites--`
+(receiveDelerium 4739, sellDelerium 4851, confirmQuickEdit 6842, addInventoryItem
+7748, updateLedgerNoteFromBottom 5973, etc.). `payResource` (6210) never touches
+the counter. That counter is the documented in-flight protection: the sync poll
+defers a foreign reload only when `_inFlightWrites > 0` (3853) and `loadInventory`
+discards a fetch result mid-write only when `_inFlightWrites > 0` (3623). With
+`payResource` in flight the counter is 0, so a teammate's inventory write arriving
+during the pay round-trip triggers an immediate `loadInventory(true)` instead of
+being deferred. It currently converges (the path is non-optimistic and
+`primeInventoryCacheAfterAdd` dedups by Inventory ID), so no corruption is
+observed today — but it defeats a stated invariant and would silently lose state
+the moment this path gains an optimistic row or runs alongside another foreign
+write. Fix: bump/decrement `_inFlightWrites` symmetrically in `payResource`'s
+success and failure handlers, matching every sibling write.
+
+#### RISK · Code.js:2470 · Ledger-before-row append order can strand a phantom ledger entry
+`apiQuickAddInventory` (appendResourceLedger_ 2470 → sheet.appendRow 2473) and
+`apiDepleteResource` (appendResourceLedger_ 2604 → sheet.appendRow 2605) write the
+RESOURCE_LEDGER entry *before* the inventory row. Because `appendResourceLedger_`
+swallows its own errors (noted TODO) and the gold/delerium balances are computed
+from inventory rows — not the ledger — an `appendRow` failure leaves a committed
+ADD/PAY ledger entry with no matching inventory row. After the next reload the
+ledger shows the transaction but the balance does not reflect it (balance ends up
+*higher* than the ledger implies for a PAY). `apiReceiveResource` does the safe
+order (row first, then ledger). Fix: append the inventory row first in
+`apiQuickAddInventory` and `apiDepleteResource`, or make `appendResourceLedger_`
+surface failures so the whole op can be rolled back/reported.
+
+#### Note · Code.js:2718 · Delerium/custom/quick-add/ledger-note write paths trace clean
+Stories **Add custom item**, **Receive crystals**, **Sell crystals**, **Receive
+gold**, **Edit ledger note (gold & delerium)**, and **Sell item (single)** were
+traced end-to-end (happy/failure/navigate-away) with no rollback, stuck-state, or
+double-tap defects beyond the items above. Optimistic delerium receive/sell roll
+back symmetrically on both `!res.ok` and `withFailureHandler`, counters self-reset
+to block double submission, and the 0 gp inline-confirm prompt survives background
+sync because it renders into the actions area the poll never repaints.
 
 ### 2026-06-19 (run 43) — Sections audited: 4
 
