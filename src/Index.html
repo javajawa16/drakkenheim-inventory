@@ -2355,7 +2355,6 @@
 
       <div class="mobile-sheet-header">
         <div class="mobile-sheet-title" id="sheetEditTitle">Edit Item</div>
-        <button class="secondary mobile-sheet-close" onclick="closeInventoryPanels()">Done</button>
       </div>
 
       <div class="mobile-sheet-body">
@@ -2414,6 +2413,7 @@
         <button class="secondary" onclick="openGiveItemSheet()">Give to…</button>
         <button class="secondary" onclick="openSelectedInventoryDescription()">Open Description</button>
         <button id="mobileInventoryDeleteButton" class="danger"   onclick="deleteSelectedInventory()">Delete Item</button>
+        <button class="secondary" style="width:100%;margin-top:8px;" onclick="closeInventoryPanels()">Cancel</button>
       </div>
 
     </div>
@@ -2424,7 +2424,6 @@
     <div class="mobile-sheet-panel">
       <div class="mobile-sheet-header">
         <div class="mobile-sheet-title" id="descriptionTitle">Description</div>
-        <button class="secondary mobile-sheet-close" onclick="closeDescriptionSheet()">Close</button>
       </div>
       <div class="mobile-sheet-body">
         <div class="description-meta">
@@ -2450,6 +2449,7 @@
           <button class="secondary" style="flex:1;width:auto;" onclick="openGiveItemSheet()">Give to…</button>
           <button class="danger" style="flex:1;width:auto;" type="button" onclick="confirmDescRemove()">Remove</button>
         </div>
+        <button class="secondary" style="width:100%;margin-top:8px;" onclick="closeDescriptionSheet()">Done</button>
       </div>
     </div>
   </div>
@@ -2460,7 +2460,6 @@
 
       <div class="mobile-sheet-header">
         <div class="mobile-sheet-title" id="quickSheetHeading">Quick Edit</div>
-        <button class="secondary mobile-sheet-close" onclick="closeQuickEditPanel()">Cancel</button>
       </div>
 
       <div class="mobile-sheet-body">
@@ -2502,7 +2501,7 @@
         <button class="secondary" onclick="clearQuickEditFields()">Clear</button>
         <button class="secondary" onclick="openSelectedInventoryDescription()">Open Description</button>
         <button class="secondary" onclick="openFullEditorFromQuick()">Change Item</button>
-        <button class="secondary" onclick="closeQuickEditPanel()">Cancel</button>
+        <button class="secondary" style="width:100%;margin-top:8px;" onclick="closeQuickEditPanel()">Cancel</button>
       </div>
 
     </div>
@@ -2513,7 +2512,6 @@
     <div class="mobile-sheet-panel">
       <div class="mobile-sheet-header">
         <div class="mobile-sheet-title" id="noteFormSheetTitle">New Note</div>
-        <button class="secondary mobile-sheet-close" type="button" onclick="closeNoteForm()">Cancel</button>
       </div>
       <div class="mobile-sheet-body">
         <div class="field">
@@ -2541,8 +2539,8 @@
       <div class="mobile-sheet-actions">
         <div id="noteFormStatus" class="status"></div>
         <button class="success" style="width:100%;" type="button" onclick="saveNoteForm()">Save Note</button>
-        <button class="secondary" style="width:100%;margin-top:8px;" type="button" onclick="closeNoteForm()">Cancel</button>
         <button id="noteFormDeleteBtn" class="danger" style="width:100%;margin-top:8px;display:none;" type="button" onclick="deleteNoteFromForm()">Archive Note</button>
+        <button class="secondary" style="width:100%;margin-top:8px;" type="button" onclick="closeNoteForm()">Cancel</button>
       </div>
     </div>
   </div>
@@ -2551,7 +2549,6 @@
     <div class="mobile-sheet-panel">
       <div class="mobile-sheet-header">
         <div class="mobile-sheet-title">Duplicate Item</div>
-        <button class="secondary mobile-sheet-close" onclick="keepDuplicateInventoryItem()">Later</button>
       </div>
       <div class="mobile-sheet-body">
         <div id="combineStatus" class="status">This item already exists in inventory.</div>
@@ -2572,7 +2569,6 @@
     <div class="mobile-sheet-panel">
       <div class="mobile-sheet-header">
         <div class="mobile-sheet-title" id="goldSheetTitle">Gold</div>
-        <button class="secondary mobile-sheet-close" onclick="closeGoldSheet()">Done</button>
       </div>
       <div id="goldScopeStatic" class="gold-scope-static"></div>
       <div id="goldSheetBody" class="mobile-sheet-body"></div>
@@ -2598,7 +2594,6 @@
     <div class="mobile-sheet-panel">
       <div class="mobile-sheet-header">
         <div class="mobile-sheet-title" id="deleriumSheetTitle">Purple Rocks</div>
-        <button class="secondary mobile-sheet-close" onclick="closeDeleriumSheet()">Done</button>
       </div>
       <div id="deleriumCountersStatic" class="delerium-counters-static"></div>
       <div id="deleriumSheetBody" class="mobile-sheet-body"></div>
@@ -2611,7 +2606,6 @@
     <div class="mobile-sheet-panel">
       <div class="mobile-sheet-header">
         <div class="mobile-sheet-title" id="sellItemTitle">Sell Item</div>
-        <button class="secondary mobile-sheet-close" onclick="closeSellItemSheet()">Cancel</button>
       </div>
       <div class="mobile-sheet-body">
         <div class="field">
@@ -2626,7 +2620,7 @@
       </div>
       <div class="mobile-sheet-actions">
         <button class="primary" type="button" onclick="confirmSellItem()">Sell</button>
-        <button class="secondary" type="button" onclick="closeSellItemSheet()">Cancel</button>
+        <button class="secondary" style="width:100%;margin-top:8px;" type="button" onclick="closeSellItemSheet()">Cancel</button>
       </div>
     </div>
   </div>
@@ -2636,10 +2630,7 @@
     <div class="mobile-sheet-panel">
       <div class="mobile-sheet-header">
         <div class="mobile-sheet-title">Sell Items</div>
-        <div style="display:flex;gap:8px;align-items:center;">
-          <button class="secondary mobile-sheet-close" id="copyInventoryBtn" onclick="copyPartyPoolInventory()">Copy</button>
-          <button class="secondary mobile-sheet-close" onclick="closeSellBatchSheet()">Done</button>
-        </div>
+        <button class="secondary mobile-sheet-close" id="copyInventoryBtn" onclick="copyPartyPoolInventory()">Copy</button>
       </div>
       <div class="mobile-sheet-body" id="sellBatchBody"></div>
       <div class="mobile-sheet-actions" id="sellBatchActions"></div>
@@ -2651,9 +2642,11 @@
     <div class="mobile-sheet-panel">
       <div class="mobile-sheet-header">
         <div class="mobile-sheet-title" id="giveItemTitle">Give Item To…</div>
-        <button class="secondary mobile-sheet-close" onclick="closeGiveItemSheet()">Cancel</button>
       </div>
       <div id="giveItemBody" class="mobile-sheet-body"></div>
+      <div class="mobile-sheet-actions">
+        <button class="secondary" style="width:100%;" onclick="closeGiveItemSheet()">Cancel</button>
+      </div>
     </div>
   </div>
 
@@ -2662,9 +2655,11 @@
     <div class="mobile-sheet-panel">
       <div class="mobile-sheet-header">
         <div class="mobile-sheet-title" id="payReasonTitle">Pay Gold — Reason</div>
-        <button class="secondary mobile-sheet-close" onclick="closePayReasonSheet()">Cancel</button>
       </div>
       <div id="payReasonBody" class="mobile-sheet-body"></div>
+      <div class="mobile-sheet-actions">
+        <button class="secondary" style="width:100%;" onclick="closePayReasonSheet()">Cancel</button>
+      </div>
     </div>
   </div>
 
