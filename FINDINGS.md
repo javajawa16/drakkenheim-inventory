@@ -1,9 +1,94 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 9. Index.html lines 1501–3000 (CSS continued, early JS)
+Next section: 10. Index.html lines 3001–4500 (inventory render, search)
 
 ## Sessions
+
+### 2026-06-20 (run 48) — Sections audited: 9
+
+Section 9 = Index.html lines 1501–3000. Composition: phone/dice/notes CSS
+(1501–2055), the entire `<body>` markup for every mobile-sheet and the two app
+sections (2058–2740), and the first ~260 lines of client JS — state declarations
+and the localStorage cache + character-selector helpers (2742–3000). The only
+server calls in range are `loadQuickAddItems` (2900) and `loadCharacters` (2908);
+the cache helpers (`cacheInventoryRows` 2920, `primeInventoryCacheAfterAdd` 2931)
+and `populateCharacterSelectors` (2888) underpin nearly every write story, so each
+write story was traced through them and out into its handler.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every in-range component):
+
+- **Add library item / Add custom item** — markup (`addDetailsCard`,
+  `selectedItemCard`, holder `<select>` 2296), optimistic path through
+  `primeInventoryCacheAfterAdd` → `cacheInventoryRows`, holder dropdown via
+  `populateCharacterSelectors`.
+- **Edit inventory item** — `inventorySheet` markup (2354), `sheetEditHolder`
+  populated by `populateCharacterSelectors` (value-preserving rebuild).
+- **Give item to character** — `giveItemSheet` markup (2635) → `giveItemToCharacter`
+  (5609). Confirmed clean optimistic revert on both failure handlers.
+- **Receive crystals / Sell crystals** — `deleriumSheet` markup (2587) →
+  `receiveDelerium` (4756). One RISK below (optimistic `_pending` persistence).
+- **Quick-adjust currency/delerium** — `quickEditSheet` markup (2452).
+- **View details → Sell / Give / Remove** — `descriptionSheet` (2424) +
+  `descActionSheet` (2661) markup, stepper-driven actions.
+- **Create/Edit note, Pin, Archive** — `noteFormSheet` markup (2505); state vars
+  `_inFlightNoteWrites`, `_notesActionInFlight` (2779–2782).
+- **First-open identity** (prerequisite to every story) — `identitySheet` markup
+  (2676), `showIdentitySheet` (4371), `loadCharacters` (2908). One RISK below.
+- **Dice calculator** — fully in range (markup 2686–2733, CSS 1818–1927); client-only,
+  no server calls, no inventory state — confirmed not a write path.
+
+#### RISK · Index.html:2915 · loadCharacters failure permanently bricks the first-open identity picker
+`loadCharacters()` is called exactly once at boot (8340) and its failure handler
+(2915–2917) only does `console.error` — no retry, no user-visible error. The
+identity picker (`showIdentitySheet`, 4371) renders its character cards from
+`characterOptions`; when that array is empty it shows the placeholder
+`<div class="status centered">Loading characters…</div>` (4377). `loadCharacters`
+success re-calls `showIdentitySheet` if the sheet is active (2914), which is the
+only thing that ever replaces that placeholder with tappable cards. So on a true
+first open (no cached identity, and `apiGetMyCharacter` doesn't resolve a name →
+`loadFallbackCharacterIdentity` calls `showIdentitySheet`, 4357/4366), if the single
+`apiGetCharacters` call fails (transient GAS/network error), the picker is stuck on
+"Loading characters…" forever — no cards, no error, no retry button. The user
+cannot select a character and is blocked from the entire app; the only escape is a
+manual page reload. Breaks the identity prerequisite at its first step. Suggested
+fix: give `loadCharacters`'s failure handler a user-visible error + retry affordance
+(e.g. render a "Couldn't load characters — Tap to retry" button into
+`identitySheetBody` when the sheet is active), or auto-retry with backoff.
+
+#### RISK · Index.html:2921 · cacheInventoryRows in-flight guard is order-dependent; receiveDelerium persists an optimistic `_pending` ledger entry
+The guard `if (_inFlightWrites > 0) return;` (2921) is designed to keep optimistic,
+unconfirmed state out of the localStorage cache so a mid-flight reload paints the
+last *confirmed* state. Its effectiveness depends entirely on call ordering, and
+the write paths are inconsistent: `giveItemToCharacter` (5622→5623) and
+`sellDelerium`/others increment `_inFlightWrites` *before* calling
+`cacheInventoryRows`, so the guard correctly suppresses the optimistic write —
+whereas `receiveDelerium` calls `cacheInventoryRows(inventoryRows,
+inventoryResourceLedger)` at 4756 *before* `_inFlightWrites++` at 4759. That
+persists the optimistic rows **and** the synthetic `_pending` "Saving…" ledger
+entry (built at 4744) to localStorage. Navigate-away/return trace: if the user
+reloads during the receive round-trip, the cache paints the `_pending` "Saving…"
+entry, but no handler survives the reload to clear it — it lingers as a phantom
+(potentially duplicating the real entry) until the startup `loadInventory` fetch
+returns and overwrites `inventoryResourceLedger` (3646–3648). Because
+`lastInventoryLoadAt` is 0 at boot the revalidate always fires, so the window is
+short (~1–2s), keeping this low-severity — but it is a real inconsistency and a
+footgun: the guard reads as "optimistic state is never cached," which isn't true
+for this path. Suggested fix: move `receiveDelerium`'s pre-flight
+`cacheInventoryRows` to after `_inFlightWrites++` (matching every other write
+path), or have the guard also strip `_pending` entries before persisting.
+
+#### Note · Index.html:5641 · Give / receive optimistic reverts confirmed clean
+`giveItemToCharacter` (5609) and `receiveDelerium` (4760) both fully restore prior
+state on the `!res.ok` and failure branches (holder reverts at 5646/5659;
+`previousRows`/`previousLedger` restore at 4766/4789), clear the `saving` row
+class, re-cache, and re-render — no stuck in-flight flag (`_inFlightWrites--` runs
+on every branch) and no orphaned optimistic row. Tab-switch-during-in-flight is
+safe: handlers operate on in-memory arrays by `Inventory ID`/`_pendingId`, not on
+DOM/index, so a tab switch before the handler fires still resolves state correctly.
+Traced: Give item to character, Receive crystals, Sell crystals.
+
 
 ### 2026-06-20 (run 47) — Sections audited: 8
 
