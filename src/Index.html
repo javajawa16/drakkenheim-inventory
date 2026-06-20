@@ -1121,21 +1121,13 @@
        "Show more" just grows the box — it stays scrollable either way. */
     .add-desc-collapse {
       position: relative;
-      max-height: 220px;
+      max-height: 440px;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
     }
-    .add-desc-collapse.expanded { max-height: 460px; }
-    .add-desc-toggle {
-      background: rgba(94,118,164,.15);
-      border: 1px solid rgba(94,118,164,.35);
-      color: var(--text-secondary);
-      font-size: 13px; font-weight: 700;
-      padding: 8px; border-radius: 10px; min-height: 0;
-    }
-    html.is-phone .add-desc-collapse { max-height: 260px; }
-    html.is-phone .add-desc-collapse.expanded { max-height: 56vh; }
-    html.is-phone .add-desc-toggle { font-size: var(--phone-font-label, 18px); padding: 10px; }
+    .add-desc-collapse.expanded { max-height: 700px; }
+    html.is-phone .add-desc-collapse { max-height: 520px; }
+    html.is-phone .add-desc-collapse.expanded { max-height: 80vh; }
 
     /* ─── Add Item: empty-search custom CTA ──────────────────────── */
     .search-empty {
@@ -2407,7 +2399,7 @@
           <!-- Customize (left) + Show more (right) share one row to save vertical space -->
           <div class="add-desc-actions">
             <button class="secondary customize-item-btn" type="button" onclick="customizeSelectedItem()">Customize Item</button>
-            <button id="addDescToggle" type="button" class="secondary add-desc-toggle" style="display:none;" onclick="toggleAddDescCollapse()">Show more</button>
+            <button id="addDescToggle" type="button" class="secondary customize-item-btn" style="display:none;" onclick="toggleAddDescCollapse()">Show more</button>
           </div>
 
           <!-- Notes: shown for library and custom, hidden for quick-add -->
@@ -3483,13 +3475,15 @@
       if (commandMode !== 'add') return;
       if (!selectedEquipment) return;
 
-      // Returning to search from a selected item: reset to the starting state
-      // (blank query + curated default list) so the user begins fresh.
+      // Returning to search from a selected item: keep the typed query so filtering
+      // picks up where the user left off (header text + results stay in sync).
       clearAddForm({
-        preserveCommandSearch: false,
+        preserveCommandSearch: true,
         skipSearchReload: true,
         skipScrollReset: true
       });
+      document.getElementById('equipmentSearch').value = document.getElementById('commandSearch').value;
+      handleSearchInput('commandSearch');
       searchEquipment();
     }
 
@@ -3979,7 +3973,9 @@
 
     function renderInventoryDashboard(rows) {
       // Always compute resource totals from the full list so the card numbers match what the sheets open to.
-      const totals = (inventoryRows || rows).reduce((acc, row) => {
+      // Use the scope-filtered rows so the Party/Character slider actually filters
+      // the Gold/Delerium dashboard totals.
+      const totals = rows.reduce((acc, row) => {
         const name = String(row['Item'] || '').toLowerCase();
         const qty = toNumber(row['Qty'] || 0);
 
@@ -8262,10 +8258,8 @@
       document.getElementById('quickAddSizeField').classList.remove('active');
       document.getElementById('addDetailsCard').classList.remove('quick-add-mode');
       document.getElementById('addDetailsCard').classList.remove('custom-mode');
-      // Revert to the starting search state: blank query + curated default list,
-      // not the last filtered result set.
-      document.getElementById('equipmentSearch').value = '';
-      document.getElementById('commandSearch').value = '';
+      // Keep the typed query so filtering resumes from where the user left off.
+      document.getElementById('equipmentSearch').value = document.getElementById('commandSearch').value;
       handleSearchInput('commandSearch');
       updateAddFlow();
       searchEquipment();
