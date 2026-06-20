@@ -1037,6 +1037,69 @@
       margin-top: 10px;
     }
 
+    /* ─── Add Item: informational step indicator ─────────────────── */
+    .add-stepper {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      padding: 0 2px;
+    }
+    .add-step {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-muted);
+      letter-spacing: .01em;
+      white-space: nowrap;
+    }
+    .add-step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px; height: 22px;
+      border-radius: 999px;
+      background: rgba(94,118,164,.18);
+      border: 1px solid rgba(94,118,164,.4);
+      font-size: 12px; font-weight: 800;
+      color: var(--text-secondary);
+    }
+    .add-step.active { color: var(--text); }
+    .add-step.active .add-step-num {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .add-step.done .add-step-num {
+      background: rgba(134,239,172,.18);
+      border-color: rgba(134,239,172,.55);
+      color: #86efac;
+    }
+    .add-step-sep {
+      flex: 1; height: 2px; border-radius: 2px;
+      background: rgba(94,118,164,.25);
+      transition: background .2s;
+    }
+    .add-step-sep.active { background: var(--accent); }
+    html.is-phone .add-step { font-size: var(--phone-font-label, 20px); }
+    html.is-phone .add-step-num { width: 28px; height: 28px; font-size: var(--phone-font-label, 18px); }
+
+    /* ─── Add Item: empty-search custom CTA ──────────────────────── */
+    .search-empty {
+      text-align: center;
+      padding: 22px 14px;
+    }
+    .search-empty-text {
+      color: var(--text-secondary);
+      font-size: 15px;
+      margin-bottom: 14px;
+      line-height: 1.4;
+    }
+    .search-empty .search-empty-q { color: var(--text); font-weight: 700; }
+    html.is-phone .search-empty-text { font-size: var(--phone-font-meta, 22px); }
+
     .add-details-card.custom-mode .custom-name-field {
       position: static;
       width: 100%;
@@ -2228,6 +2291,13 @@
     <section id="addSection" class="section">
       <div class="section-stack">
 
+        <!-- Informational step indicator (non-interactive — reflects current state) -->
+        <div id="addStepper" class="add-stepper" aria-hidden="true">
+          <div class="add-step active" id="addStep1"><span class="add-step-num">1</span> Find</div>
+          <div class="add-step-sep" id="addStepSep"></div>
+          <div class="add-step" id="addStep2"><span class="add-step-num">2</span> Details</div>
+        </div>
+
         <!-- Step 1: Search (shown first on mobile; hidden after selection) -->
         <div id="addSearchCard" class="card featured search-panel">
           <h2 class="section-heading">Find Item</h2>
@@ -2245,12 +2315,13 @@
           <div id="searchStatus" class="status centered"></div>
           <div id="searchResults" class="results-list"></div>
           <div class="custom-actions">
-            <button class="secondary" type="button" onclick="startCustomItem()">Custom / Homebrew Item</button>
+            <button class="secondary" type="button" onclick="startCustomItem()">+ Create a custom item</button>
           </div>
         </div>
 
         <div id="selectedItemCard" class="card selected-item-card">
           <div class="selected-item-actions">
+            <button class="secondary" type="button" onclick="changeSelectedItem()">‹ Change item</button>
             <button class="secondary customize-item-btn" type="button" onclick="customizeSelectedItem()">Customize Item</button>
           </div>
         </div>
@@ -7898,9 +7969,14 @@
       equipmentResults = quickMatches.concat(libraryMatches);
 
       if (!equipmentResults.length) {
-        status.classList.add('centered');
-        status.textContent = 'No matches.';
-        document.getElementById('searchResults').innerHTML = '';
+        status.classList.remove('centered');
+        status.textContent = '';
+        const rawQ = document.getElementById('equipmentSearch').value.trim();
+        document.getElementById('searchResults').innerHTML = `
+          <div class="search-empty">
+            <div class="search-empty-text">No library matches for <span class="search-empty-q">"${escapeHtml(rawQ)}"</span>.</div>
+            <button class="primary" type="button" onclick="startCustomFromSearch()">+ Add "${escapeHtml(rawQ)}" as a custom item</button>
+          </div>`;
         return;
       }
 
@@ -8135,24 +8211,37 @@
       document.getElementById('addDetailsCard').classList.remove('quick-add-mode');
       document.getElementById('addDetailsCard').classList.remove('custom-mode');
       updateAddFlow();
+      // Repaint the result list for the current query and return focus to search.
+      searchEquipment();
+      window.scrollTo(0, 0);
+      const searchEl = isMobileLayout()
+        ? document.getElementById('commandSearch')
+        : document.getElementById('equipmentSearch');
+      if (searchEl) searchEl.focus();
     }
 
-    function startCustomItem() {
+    function startCustomFromSearch() {
+      const q = (document.getElementById('equipmentSearch').value || '').trim();
+      startCustomItem(q);
+    }
+
+    function startCustomItem(prefillName) {
+      const name = (prefillName && prefillName.trim()) || 'Custom Item';
       selectedEquipment = {
         custom: true,
-        name: 'Custom Item',
+        name,
         category: 'Other',
         rarity: ''
       };
 
       document.getElementById('libraryItemId').value = '';
       document.getElementById('quickAddKey').value = '';
-      document.getElementById('item').value = 'Custom Item';
+      document.getElementById('item').value = name;
       document.getElementById('category').value = 'Other';
       document.getElementById('rarity').value = '';
       document.getElementById('valueGp').value = '';
       document.getElementById('notes').value = '';
-      document.getElementById('selectedName').textContent = 'Custom Item';
+      document.getElementById('selectedName').textContent = name;
       document.getElementById('selectedMeta').textContent = 'Homebrew';
       const _cardName = document.getElementById('selectedCardName');
       const _cardMeta = document.getElementById('selectedCardMeta');
@@ -8225,6 +8314,19 @@
         searchCard.style.display = 'block';
         if (submitBtn) submitBtn.style.display = 'none';
       }
+      updateAddStepper_();
+    }
+
+    function updateAddStepper_() {
+      const onDetails = Boolean(selectedEquipment);
+      const step1 = document.getElementById('addStep1');
+      const step2 = document.getElementById('addStep2');
+      const sep   = document.getElementById('addStepSep');
+      if (!step1 || !step2 || !sep) return;
+      step1.classList.toggle('active', !onDetails);
+      step1.classList.toggle('done', onDetails);
+      step2.classList.toggle('active', onDetails);
+      sep.classList.toggle('active', onDetails);
     }
 
     /* ── Add Item: description load & submit ─────────────────────── */
