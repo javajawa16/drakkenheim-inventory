@@ -1041,50 +1041,62 @@
     .add-stepper {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       margin-bottom: 14px;
-      padding: 0 2px;
+      padding: 10px 12px;
+      background: rgba(17,25,44,.72);
+      border: 1px solid rgba(94,118,164,.3);
+      border-radius: 14px;
     }
     .add-step {
       display: flex;
       align-items: center;
-      gap: 7px;
+      gap: 8px;
       font-size: 14px;
       font-weight: 700;
       color: var(--text-muted);
       letter-spacing: .01em;
       white-space: nowrap;
+      padding: 4px 10px;
+      border-radius: 999px;
+      transition: background .2s, color .2s;
+    }
+    .add-step.active {
+      color: #fff;
+      background: rgba(168,85,247,.18);
     }
     .add-step-num {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 22px; height: 22px;
+      width: 24px; height: 24px;
       border-radius: 999px;
-      background: rgba(94,118,164,.18);
-      border: 1px solid rgba(94,118,164,.4);
-      font-size: 12px; font-weight: 800;
+      background: rgba(94,118,164,.25);
+      border: 1px solid rgba(94,118,164,.5);
+      font-size: 13px; font-weight: 800;
       color: var(--text-secondary);
     }
-    .add-step.active { color: var(--text); }
     .add-step.active .add-step-num {
       background: var(--accent);
       border-color: var(--accent);
       color: #fff;
+      box-shadow: 0 0 10px rgba(168,85,247,.5);
     }
     .add-step.done .add-step-num {
-      background: rgba(134,239,172,.18);
-      border-color: rgba(134,239,172,.55);
+      background: rgba(134,239,172,.22);
+      border-color: rgba(134,239,172,.6);
       color: #86efac;
     }
     .add-step-sep {
-      flex: 1; height: 2px; border-radius: 2px;
-      background: rgba(94,118,164,.25);
+      flex: 1; height: 3px; border-radius: 3px;
+      background: rgba(94,118,164,.3);
       transition: background .2s;
     }
-    .add-step-sep.active { background: var(--accent); }
+    .add-step-sep.active {
+      background: linear-gradient(90deg, var(--accent), rgba(168,85,247,.35));
+    }
     html.is-phone .add-step { font-size: var(--phone-font-label, 20px); }
-    html.is-phone .add-step-num { width: 28px; height: 28px; font-size: var(--phone-font-label, 18px); }
+    html.is-phone .add-step-num { width: 30px; height: 30px; font-size: var(--phone-font-label, 18px); }
 
     /* ─── Add Item: empty-search custom CTA ──────────────────────── */
     .search-empty {
@@ -1639,8 +1651,6 @@
       }
 
       .bottom-nav button { font-size: 16px; }
-
-      .add-details-card { display: block !important; }
     }
 
     /* ─── Phone override — driven by DPR-scaled JS custom props ─── */
@@ -7918,18 +7928,15 @@
       if (!equipmentIndexLoaded) { if (!equipmentIndexLoading) loadEquipmentIndex(); return; }
 
       if (q.length < 2) {
-        const PRIORITY_KEYS = [
-          'health_potion', 'greater_health_potion'
-        ];
+        // Curated quick-add shortcuts only — no padding with arbitrary library rows.
+        // Typing 2+ chars searches the full library.
+        const PRIORITY_KEYS = ['health_potion', 'greater_health_potion'];
         const priorityItems = PRIORITY_KEYS
           .map(k => QUICK_ADD_ITEMS.find(i => i.quickKey === k))
           .filter(Boolean);
         const otherQuickItems = QUICK_ADD_ITEMS.filter(i => !PRIORITY_KEYS.includes(i.quickKey));
-        const defaultItems = [...priorityItems, ...otherQuickItems].slice(0, limit);
-        equipmentResults = defaultItems.concat(
-          equipmentIndex.slice(0, Math.max(0, limit - defaultItems.length))
-        );
-        renderEquipmentResults(`Showing first ${equipmentResults.length} of ${equipmentIndex.length}`);
+        equipmentResults = [...priorityItems, ...otherQuickItems].slice(0, limit);
+        renderEquipmentResults(`Quick add — or type to search ${equipmentIndex.length.toLocaleString()} items`);
         return;
       }
 
@@ -8269,20 +8276,23 @@
       const detailsCard   = document.getElementById('addDetailsCard');
       const searchCard    = document.getElementById('addSearchCard');
       const submitBtn     = document.getElementById('addSubmitBtn');
-      const mobile        = isMobileLayout();
 
+      // Single-focus flow on every layout: nothing selected → only the search/results
+      // are shown; an item selected → only the details form. This keeps the first-load
+      // view clean (no empty detail fields) and doesn't rely on fragile layout detection,
+      // which is unreliable inside the Apps Script iframe.
       if (selectedEquipment) {
         selectedCard.classList.add('active');
         detailsCard.classList.toggle('quick-add-mode', isQuickAddItem(selectedEquipment));
         detailsCard.classList.toggle('custom-mode', isCustomItem(selectedEquipment));
         detailsCard.style.display = 'block';
-        searchCard.style.display = mobile ? 'none' : 'block';
+        searchCard.style.display = 'none';
         if (submitBtn) submitBtn.style.display = '';
       } else {
         selectedCard.classList.remove('active');
         detailsCard.classList.remove('quick-add-mode');
         detailsCard.classList.remove('custom-mode');
-        detailsCard.style.display = mobile ? 'none' : 'block';
+        detailsCard.style.display = 'none';
         searchCard.style.display = 'block';
         if (submitBtn) submitBtn.style.display = 'none';
       }
@@ -8299,6 +8309,8 @@
       step1.classList.toggle('done', onDetails);
       step2.classList.toggle('active', onDetails);
       sep.classList.toggle('active', onDetails);
+      const step1Num = step1.querySelector('.add-step-num');
+      if (step1Num) step1Num.textContent = onDetails ? '✓' : '1';
     }
 
     /* ── Add Item: description load & submit ─────────────────────── */
