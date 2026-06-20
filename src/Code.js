@@ -721,7 +721,9 @@ function apiSellInventoryBatch(payload) {
       : `${totalUnitsSold} items`;
 
     let goldItem = null;
+    let ledgerEntry = null;
     if (goldAmount > 0) {
+      const ledgerTs = new Date();
       const updatedHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
       const gRow = {
         'Inventory ID': makeInventoryId_(), 'Item': 'Gold', 'Library Item ID': '',
@@ -731,21 +733,125 @@ function apiSellInventoryBatch(payload) {
         'Notes': sellNote, 'Date Added': new Date(), 'Added By': character
       };
       sheet.appendRow(updatedHeaders.map(h => gRow[h] !== undefined ? gRow[h] : ''));
-      appendResourceLedger_({
+      const le = {
         userEmail, action: 'ADD', resource: 'gold', subtype: 'gold',
         qty: goldAmount, valueGp: 1, inventoryId: gRow['Inventory ID'],
         item: `Gold (sold ${soldLabel})`, notes: sellNote, character
-      });
+      };
+      appendResourceLedger_(le);
       goldItem = sanitizeInventoryForClient_(gRow);
+      ledgerEntry = sanitizeResourceLedgerForClient_({
+        'Timestamp': ledgerTs, 'Action': le.action, 'Resource': le.resource,
+        'Subtype': le.subtype, 'Qty': le.qty, 'Value GP': le.valueGp,
+        'Inventory ID': le.inventoryId, 'Item': le.item,
+        'Notes': le.notes, 'Character': le.character
+      });
     }
 
     auditWrite_({ userEmail, action: 'SELL_BATCH', itemName: soldNames.join(', '),
       note: sellNote, delta: -totalUnitsSold, status: 'SUCCESS' });
 
     bumpSync_('inventory', payload && payload._syncClientId);
-    return { ok: true, message: `Sold ${totalUnitsSold} unit${totalUnitsSold !== 1 ? 's' : ''} for ${goldAmount} gp.`, goldItem };
+    return { ok: true, message: `Sold ${totalUnitsSold} unit${totalUnitsSold !== 1 ? 's' : ''} for ${goldAmount} gp.`, goldItem, ledgerEntry };
   } catch (err) {
     return publicApiError_('apiSellInventoryBatch', err, {});
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+}
+
+function apiGiveInventoryBatch(payload) {
+  const lock = LockService.getDocumentLock();
+  let userEmail = '';
+  try {
+    userEmail = requireAllowedUser_();
+    if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
+
+    const items     = payload && Array.isArray(payload.items) ? payload.items : [];
+    if (!items.length) return { ok: false, error: 'No items specified.' };
+    const newHolder = validateText_(payload && payload.newHolder, 'Holder', 80);
+    const note      = validateText_(payload && payload.note, 'Note', 500);
+    const character = safeText_(payload && payload.clientCharacter);
+
+    const ss      = getInventorySpreadsheet_();
+    const sheet   = getRequiredSheet_(ss, CONFIG.INVENTORY_SHEET);
+    ensureInventoryHeaders_(sheet);
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+
+    // Resolve and validate each source row
+    const resolved = [];
+    for (const entry of items) {
+      const inventoryId = safeText_(entry && entry.inventoryId);
+      const qtyToGive   = Math.max(0, Number(entry && entry.qtyToGive) || 0);
+      if (!inventoryId || qtyToGive <= 0) continue;
+      const found = getInventoryRowObjectById_(sheet, headers, inventoryId);
+      if (!found) continue;
+      const rowQty  = Math.max(0, Number(found.rowObj['Qty']) || 0);
+      const giveQty = Math.min(qtyToGive, rowQty);
+      if (giveQty <= 0) continue;
+      resolved.push({ rowNumber: found.rowNumber, rowObj: found.rowObj, giveQty, rowQty });
+    }
+    if (!resolved.length) return { ok: false, error: 'None of the items were found.' };
+
+    // Record what to move before any row deletions
+    const toGive = resolved.map(r => ({ template: r.rowObj, qty: r.giveQty }));
+
+    // Drain source rows highest-first so row-number shifts don't affect earlier rows
+    resolved.sort((a, b) => b.rowNumber - a.rowNumber);
+    let totalGiven = 0;
+    for (const { rowNumber, rowObj, giveQty, rowQty } of resolved) {
+      if (giveQty >= rowQty) {
+        sheet.deleteRow(rowNumber);
+      } else {
+        const newQty  = rowQty - giveQty;
+        const valueGp = Number(rowObj['Value GP']) || 0;
+        writeInventoryRow_(sheet, headers, rowNumber,
+          { ...rowObj, 'Qty': newQty, 'Total Value GP': newQty * valueGp });
+      }
+      totalGiven += giveQty;
+    }
+
+    // Re-read column structure (row numbers may have shifted after deletes)
+    const freshHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+
+    // Merge into / create target rows for new holder
+    for (const { template, qty } of toGive) {
+      const targetRowObj = { ...template, 'Holder': newHolder };
+      const existing = findMatchingInventoryRow_(sheet, freshHeaders, targetRowObj);
+      if (existing) {
+        mergeIntoExistingRow_(sheet, freshHeaders, existing, qty);
+      } else {
+        const valueGp = Number(template['Value GP']) || 0;
+        const newRow  = {
+          ...template,
+          'Inventory ID':   makeInventoryId_(),
+          'Qty':            qty,
+          'Holder':         newHolder,
+          'Total Value GP': valueGp ? qty * valueGp : '',
+          'Notes':          note || template['Notes'] || '',
+          'Date Added':     new Date(),
+          'Added By':       character
+        };
+        const curHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+        sheet.appendRow(curHeaders.map(h => newRow[h] !== undefined ? newRow[h] : ''));
+      }
+    }
+
+    const giveNote = note || `Gave ${totalGiven} item${totalGiven !== 1 ? 's' : ''} to ${newHolder || 'Party Pool'}`;
+    auditWrite_({
+      userEmail, action: 'GIVE_BATCH',
+      itemName: resolved.map(r => r.rowObj['Item']).join(', '),
+      note: giveNote, delta: -totalGiven, status: 'SUCCESS'
+    });
+    bumpSync_('inventory', payload && payload._syncClientId);
+    return {
+      ok: true,
+      message: `Gave ${totalGiven} item${totalGiven !== 1 ? 's' : ''} to ${newHolder || 'Party Pool'}.`
+    };
+  } catch (err) {
+    log_('ERROR', 'apiGiveInventoryBatch failed', { payload, error: err.message, stack: err.stack });
+    auditWrite_({ userEmail, action: 'GIVE_BATCH', note: err.message, status: 'FAILED' });
+    return { ok: false, error: err.message || 'Give failed.' };
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
@@ -2522,10 +2628,10 @@ function apiQuickAddInventory(payload) {
         notes: rowObj['Notes'],
         character: safeText_(payload && payload.clientCharacter)
       };
-      appendResourceLedger_(ledgerEntry);
     }
 
     sheet.appendRow(headers.map(h => rowObj[h] !== undefined ? rowObj[h] : ''));
+    if (ledgerEntry) appendResourceLedger_(ledgerEntry);
 
     auditWrite_({
       userEmail,
@@ -2656,8 +2762,8 @@ function apiDepleteResource(payload) {
       character: safeText_(payload && payload.clientCharacter)
     };
 
-    appendResourceLedger_(ledgerEntry);
     sheet.appendRow(headers.map(h => rowObj[h] !== undefined ? rowObj[h] : ''));
+    appendResourceLedger_(ledgerEntry);
 
     auditWrite_({
       userEmail,

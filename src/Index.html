@@ -498,6 +498,12 @@
       color: #86efac;
     }
 
+    button.sell-confirm-armed {
+      background: linear-gradient(135deg, #92400e, #b45309 58%, #d97706);
+      border-color: rgba(217,119,6,.45);
+      color: #fef3c7;
+    }
+
     button:disabled { opacity: .5; cursor: not-allowed; }
 
     @keyframes btn-spin { to { transform: rotate(360deg); } }
@@ -589,6 +595,9 @@
       transition: background 160ms ease;
     }
 
+    .inventory-delete-action.delete-armed {
+      background: linear-gradient(180deg, #b91c1c, #7f1d1d);
+    }
     .inventory-delete-action.deleting {
       background: linear-gradient(180deg, #7f1d1d, #450a0a);
       opacity: .9;
@@ -785,7 +794,7 @@
       flex-shrink: 0;
     }
     .sell-batch-stepper-btn {
-      width: 36px; height: 36px; min-height: 36px !important;
+      width: 44px; height: 44px; min-height: 44px !important;
       border-radius: 8px;
       background: rgba(70,86,119,.22);
       border: none;
@@ -1261,6 +1270,26 @@
       overflow-x: hidden;
     }
 
+    #descActionSheet {
+      background: rgba(6,10,20,.55);
+      backdrop-filter: blur(4px);
+      display: flex; align-items: flex-end;
+    }
+    #descActionSheet .mobile-sheet-panel {
+      position: relative; inset: auto;
+      width: 100%;
+      max-height: 80vh;
+      height: auto;
+      border-radius: 20px 20px 0 0;
+      box-shadow: 0 -8px 40px rgba(2,6,23,.5);
+    }
+    #descActionSheet .mobile-sheet-body {
+      flex: 0 0 auto;
+      overflow-y: auto;
+      max-height: 45vh;
+    }
+    #descActionSheet.active { display: flex; }
+
     #identitySheet .mobile-sheet-panel {
       background:
         linear-gradient(180deg, rgba(7,11,22,.28), rgba(7,11,22,.84) 62%, rgba(7,11,22,.98)),
@@ -1410,6 +1439,7 @@
       background: rgba(10,16,31,.98);
       border-top: 1px solid rgba(92,115,158,.32);
     }
+    .btn-full { width: 100%; margin-top: 8px; }
 
     /* ─── Desktop editor (hidden on mobile) ─────────────────────── */
     .desktop-editor { display: none; }
@@ -1530,7 +1560,7 @@
       .desktop-editor { display: block; }
       .mobile-sheet { display: none !important; }
       #descriptionSheet.active { display: block !important; }
-      #descActionSheet.active  { display: block !important; }
+      #descActionSheet.active  { display: flex !important; }
       #noteFormSheet.active    { display: block !important; }
       #goldSheet.active        { display: block !important; }
       #payReasonSheet.active   { display: block !important; }
@@ -1980,7 +2010,7 @@
       width: 100%; min-width: 0;
     }
     .notes-pin-toggle {
-      width: auto; min-width: 44px; padding: 6px 10px;
+      width: auto; min-width: 44px; min-height: 44px; padding: 6px 10px;
       border-radius: 12px; font-size: 18px; line-height: 1;
       background: rgba(6,10,20,.6); border: 1px solid rgba(94,118,164,.3);
       color: rgba(148,163,184,.4); opacity: .55;
@@ -2137,7 +2167,7 @@
           </div>
 
           <div class="quick-actions">
-            <button class="primary" onclick="confirmQuickEdit()">Confirm</button>
+            <button id="quickDesktopConfirmBtn" class="primary" onclick="confirmQuickEdit()">Confirm</button>
             <button class="secondary" onclick="clearQuickEditFields()">Clear</button>
             <button class="secondary" onclick="openSelectedInventoryDescription()">Open Description</button>
             <button class="secondary" onclick="openFullEditorFromQuick()">Change Item</button>
@@ -2414,7 +2444,7 @@
         <button class="secondary" onclick="openGiveItemSheet()">Give to…</button>
         <button class="secondary" onclick="openSelectedInventoryDescription()">Open Description</button>
         <button id="mobileInventoryDeleteButton" class="danger"   onclick="deleteSelectedInventory()">Delete Item</button>
-        <button class="secondary" style="width:100%;margin-top:8px;" onclick="closeInventoryPanels()">Cancel</button>
+        <button class="secondary btn-full" onclick="closeInventoryPanels()">Cancel</button>
       </div>
 
     </div>
@@ -2443,7 +2473,7 @@
           <button class="secondary" type="button" onclick="openDescActionSheet('give')">Give to…</button>
           <button class="danger" type="button" onclick="openDescActionSheet('remove')">Remove</button>
         </div>
-        <button class="secondary" style="width:100%;margin-top:8px;" onclick="closeDescriptionSheet()">Done</button>
+        <button class="secondary btn-full" onclick="closeDescriptionSheet()">Done</button>
       </div>
     </div>
   </div>
@@ -2490,12 +2520,12 @@
       </div>
 
       <div class="mobile-sheet-actions">
-        <button class="primary" onclick="confirmQuickEdit()">Confirm</button>
+        <button id="quickSheetConfirmBtn" class="primary" onclick="confirmQuickEdit()">Confirm</button>
         <button class="secondary" onclick="openGiveItemSheet()">Give to…</button>
         <button class="secondary" onclick="clearQuickEditFields()">Clear</button>
         <button class="secondary" onclick="openSelectedInventoryDescription()">Open Description</button>
         <button class="secondary" onclick="openFullEditorFromQuick()">Change Item</button>
-        <button class="secondary" style="width:100%;margin-top:8px;" onclick="closeQuickEditPanel()">Cancel</button>
+        <button class="secondary btn-full" onclick="closeQuickEditPanel()">Cancel</button>
       </div>
 
     </div>
@@ -2534,7 +2564,7 @@
         <div id="noteFormStatus" class="status"></div>
         <button class="success" style="width:100%;" type="button" onclick="saveNoteForm()">Save Note</button>
         <button id="noteFormDeleteBtn" class="danger" style="width:100%;margin-top:8px;display:none;" type="button" onclick="deleteNoteFromForm()">Archive Note</button>
-        <button class="secondary" style="width:100%;margin-top:8px;" type="button" onclick="closeNoteForm()">Cancel</button>
+        <button class="secondary btn-full" type="button" onclick="closeNoteForm()">Cancel</button>
       </div>
     </div>
   </div>
@@ -2613,8 +2643,8 @@
         <div id="sellItemStatus" class="status"></div>
       </div>
       <div class="mobile-sheet-actions">
-        <button class="primary" type="button" onclick="confirmSellItem()">Sell</button>
-        <button class="secondary" style="width:100%;margin-top:8px;" type="button" onclick="closeSellItemSheet()">Cancel</button>
+        <button id="sellItemConfirmBtn" class="primary" type="button" onclick="confirmSellItem()">Sell</button>
+        <button class="secondary btn-full" type="button" onclick="closeSellItemSheet()">Cancel</button>
       </div>
     </div>
   </div>
@@ -2665,9 +2695,10 @@
       </div>
       <div id="descActionBody" class="mobile-sheet-body"></div>
       <div class="mobile-sheet-actions">
+        <div id="descActionStepperRow" style="display:none;"></div>
         <div id="descActionStatusRow" class="status"></div>
         <button class="primary" type="button" id="descActionConfirmBtn" onclick="confirmDescAction()">Confirm</button>
-        <button class="secondary" style="width:100%;margin-top:8px;" type="button" onclick="closeDescActionSheet()">Cancel</button>
+        <button class="secondary btn-full" type="button" onclick="closeDescActionSheet()">Cancel</button>
       </div>
     </div>
   </div>
@@ -2757,8 +2788,9 @@
     let resourcePayInFlight = {};
     let quickEditInFlight  = false;
     let descActionInFlight = false;
-    let _descActionMode    = '';
-    let descActionQty      = 1;
+    let _descActionMode            = '';
+    let descActionQty              = 1;
+    let _descActionSelectedHolder  = null;
     let lastResourceUndo = {};
     let suppressInventoryClickUntil = 0;
     let searchTimer         = null;
@@ -2775,8 +2807,49 @@
     let sellBatchAllRows      = []; // cache of all sellable rows
     let sellBatchRollups      = []; // rolled-up items (same name+holder combined)
     let sellBatchGeneration   = 0;  // incremented on each successful sell; guards stale auto-close timer
+    let _sellConfirmState     = null; // { btn, timer } — two-tap sell confirmation
     let _inFlightWrites           = 0;
     let _inFlightNoteWrites       = 0;
+    function gasCall(fn, args, onSuccess, onFail) {
+      _inFlightWrites++;
+      google.script.run
+        .withSuccessHandler(res => { _inFlightWrites--; onSuccess(res); })
+        .withFailureHandler(err => { _inFlightWrites--; onFail(err); })
+        [fn](args);
+    }
+    function _armSellBtn(btn) {
+      if (!btn) return;
+      btn.dataset.sellOrigText  = btn.textContent;
+      btn.dataset.sellOrigClass = btn.className;
+      btn.textContent = 'Confirm?';
+      btn.className = btn.className.replace(/\b(primary|success|danger)\b/g, '').trim();
+      btn.classList.add('sell-confirm-armed');
+    }
+    function _disarmSellBtn(btn) {
+      if (!btn) return;
+      if (btn.dataset.sellOrigText  !== undefined) btn.textContent = btn.dataset.sellOrigText;
+      if (btn.dataset.sellOrigClass !== undefined) btn.className   = btn.dataset.sellOrigClass;
+      delete btn.dataset.sellOrigText;
+      delete btn.dataset.sellOrigClass;
+    }
+    function _clearSellConfirm() {
+      if (!_sellConfirmState) return;
+      clearTimeout(_sellConfirmState.timer);
+      _disarmSellBtn(_sellConfirmState.btn);
+      _sellConfirmState = null;
+    }
+    function _requireSellConfirm(btn) {
+      if (_sellConfirmState && _sellConfirmState.btn === btn) {
+        clearTimeout(_sellConfirmState.timer);
+        _sellConfirmState = null;
+        _disarmSellBtn(btn);
+        return true;
+      }
+      _clearSellConfirm();
+      _armSellBtn(btn);
+      _sellConfirmState = { btn, timer: setTimeout(_clearSellConfirm, 3000) };
+      return false;
+    }
     let pendingForeignReload      = false;
     let pendingForeignNoteReload  = false;
     const _notesActionInFlight    = new Set();
@@ -2914,6 +2987,11 @@
         if (document.getElementById('identitySheet').classList.contains('active')) showIdentitySheet();
       }).withFailureHandler(err => {
         console.error('[loadCharacters] API failed:', err);
+        const sheet = document.getElementById('identitySheet');
+        const body  = document.getElementById('identitySheetBody');
+        if (sheet && sheet.classList.contains('active') && body) {
+          body.innerHTML = '<div class="status centered"><span class="error">Couldn\'t load characters.</span> <button type="button" class="secondary" style="margin-top:8px" onclick="loadCharacters()">Retry</button></div>';
+        }
       }).apiGetCharacters();
     }
 
@@ -3371,10 +3449,12 @@
       const choice = { ...pendingCombineChoice };
       pendingCombineChoice = null;
       document.getElementById('combineStatus').textContent = 'Combining…';
-      _inFlightWrites++;
-      google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
+      gasCall('apiCombineInventoryItems', {
+          sourceId: choice.sourceId,
+          targetId: choice.targetId,
+          _syncClientId: syncClientId
+        },
+        res => {
           if (!res || !res.ok || !res.item) {
             pendingCombineChoice = choice;
             document.getElementById('combineStatus').innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Combine failed.')}</span>`;
@@ -3387,17 +3467,12 @@
           renderInventory();
           setMainStatus(`<span class="success">${escapeHtml(res.message || 'Items combined.')}</span>`);
           keepDuplicateInventoryItem();
-        })
-        .withFailureHandler(err => {
-          _inFlightWrites--;
+        },
+        err => {
           pendingCombineChoice = choice;
           document.getElementById('combineStatus').innerHTML = `<span class="error">Combine failed: ${escapeHtml(err.message || err)}</span>`;
-        })
-        .apiCombineInventoryItems({
-          sourceId: choice.sourceId,
-          targetId: choice.targetId,
-          _syncClientId: syncClientId
-        });
+        }
+      );
     }
 
     function showSection(section) {
@@ -3640,7 +3715,7 @@
             return;
           }
 
-          if (_inFlightWrites > 0) { markInventoryReady(); return; }
+          if (_inFlightWrites > 0) { pendingForeignReload = true; markInventoryReady(); return; }
           const newRows = res.rows || [];
           const newLedger = Array.isArray(res.resourceLedger) ? res.resourceLedger : [];
           inventoryRows = newRows;
@@ -4510,7 +4585,7 @@
           <button id="deleriumReceivedBtn" class="secondary" style="flex:1;" type="button" onclick="receiveDelerium()">Received</button>
           <button id="deleriumSellBtn"     class="secondary" style="flex:1;" type="button" onclick="sellDelerium()">Sell</button>
         </div>
-        <button class="secondary" style="width:100%;margin-top:8px;" type="button" onclick="closeDeleriumSheet()">Done</button>
+        <button class="secondary btn-full" type="button" onclick="closeDeleriumSheet()">Done</button>
       ` : `
         <div class="field">
           <label for="deleriumSheetNote">Note (optional)</label>
@@ -4518,7 +4593,7 @@
         </div>
         <div id="deleriumSheetStatus" class="status"></div>
         <button id="deleriumReceivedBtn" class="secondary" style="width:100%;margin-top:14px;" type="button" onclick="receiveDelerium()">Received</button>
-        <button class="secondary" style="width:100%;margin-top:8px;" type="button" onclick="closeDeleriumSheet()">Done</button>
+        <button class="secondary btn-full" type="button" onclick="closeDeleriumSheet()">Done</button>
       `;
       updateDeleriumButtonStates();
     }
@@ -4756,10 +4831,8 @@
       cacheInventoryRows(inventoryRows, inventoryResourceLedger);
       renderDeleriumSheetBody();
 
-      _inFlightWrites++;
-      google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
+      gasCall('apiReceiveResource', { resource: 'delerium', items, note: recNote, clientCharacter: myCharacterName || '', _syncClientId: syncClientId },
+        res => {
           inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
           inventoryRows = inventoryRows.filter(r => !optimisticIds.includes(r['Inventory ID']));
           if (!res || !res.ok) {
@@ -4781,9 +4854,8 @@
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderDeleriumSheetBody();
           renderInventory();
-        })
-        .withFailureHandler(err => {
-          _inFlightWrites--;
+        },
+        err => {
           inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
           inventoryRows = inventoryRows.filter(r => !optimisticIds.includes(r['Inventory ID']));
           inventoryRows = previousRows;
@@ -4794,8 +4866,8 @@
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderDeleriumSheetBody();
           renderInventory();
-        })
-        .apiReceiveResource({ resource: 'delerium', items, note: recNote, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
+        }
+      );
     }
 
     function refreshDeleriumStateFromInventory_() {
@@ -4868,10 +4940,8 @@
       if (status) status.textContent = 'Selling…';
       renderDeleriumSheetBody();
 
-      _inFlightWrites++;
-      google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
+      gasCall('apiSellDelerium', { items, goldAmount, note: sellNote, clientCharacter: myCharacterName || '', _syncClientId: syncClientId },
+        res => {
           inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
           // Remove optimistic rows regardless of outcome
           inventoryRows = inventoryRows.filter(r => !optimisticIds.includes(r['Inventory ID']));
@@ -4903,9 +4973,8 @@
           if (status) status.innerHTML = `<span class="success">${escapeHtml(res.message || 'Sold.')}</span>`;
           renderDeleriumSheetBody();
           renderInventory();
-        })
-        .withFailureHandler(err => {
-          _inFlightWrites--;
+        },
+        err => {
           inventoryResourceLedger = previousLedger;
           inventoryRows = previousRows;
           refreshDeleriumStateFromInventory_();
@@ -4915,8 +4984,8 @@
           if (status) status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
           renderDeleriumSheetBody();
           renderInventory();
-        })
-        .apiSellDelerium({ items, goldAmount, note: sellNote, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
+        }
+      );
     }
 
     function flashActiveScopePill() {
@@ -5007,9 +5076,9 @@
           <button class="success" style="flex:1;" type="button" onclick="receivedGold()">Got Paid</button>
           <button class="danger"  style="flex:1;" type="button" onclick="openPayReasonSheet()">Pay</button>
         </div>
-        ${showSplit ? `<button class="secondary" style="width:100%;margin-top:8px;" type="button" onclick="splitGold()">Split Evenly</button>` : ''}
-        ${showUndo  ? `<button class="secondary" style="width:100%;margin-top:8px;" type="button" onclick="undoGoldPay()">↩ Undo Last Pay</button>` : ''}
-        <button class="secondary" style="width:100%;margin-top:8px;" type="button" onclick="closeGoldSheet()">Done</button>
+        ${showSplit ? `<button class="secondary btn-full" type="button" onclick="splitGold()">Split Evenly</button>` : ''}
+        ${showUndo  ? `<button class="secondary btn-full" type="button" onclick="undoGoldPay()">↩ Undo Last Pay</button>` : ''}
+        <button class="secondary btn-full" type="button" onclick="closeGoldSheet()">Done</button>
       `;
     }
 
@@ -5032,6 +5101,7 @@
       const recNote     = note || 'Gold received.';
       const pendingId   = '_pending_' + Date.now();
 
+      const previousLedger = inventoryResourceLedger.slice();
       inventoryResourceLedger = [{
         '_pending': true, '_pendingId': pendingId,
         'Timestamp': new Date().toISOString(), 'Action': 'RECEIVE',
@@ -5060,12 +5130,16 @@
         inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optGoldId);
       };
 
-      _inFlightWrites++;
-      google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
+      gasCall('apiReceiveResource', {
+          resource: 'gold', amount, note: recNote,
+          holder: isPartyScope ? '' : goldSheetScope,
+          clientCharacter: myCharacterName || '',
+          _syncClientId: syncClientId
+        },
+        res => {
           removePending();
           if (!res || !res.ok) {
+            inventoryResourceLedger = previousLedger;
             if (amountInput) amountInput.value = savedGoldAmount;
             if (noteInput)   noteInput.value   = savedGoldNote;
             if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Failed.')}</span>`;
@@ -5080,22 +5154,17 @@
           goldSheetMutated = true;
           renderGoldSheetBody();
           renderInventory();
-        })
-        .withFailureHandler(err => {
-          _inFlightWrites--;
+        },
+        err => {
           removePending();
+          inventoryResourceLedger = previousLedger;
           if (amountInput) amountInput.value = savedGoldAmount;
           if (noteInput)   noteInput.value   = savedGoldNote;
           if (status) status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
           renderGoldSheetBody();
           renderInventory();
-        })
-        .apiReceiveResource({
-          resource: 'gold', amount, note: recNote,
-          holder: isPartyScope ? '' : goldSheetScope,
-          clientCharacter: myCharacterName || '',
-          _syncClientId: syncClientId
-        });
+        }
+      );
     }
 
     function openPayReasonSheet() {
@@ -5182,12 +5251,14 @@
     }
 
     function closeSellItemSheet() {
+      _clearSellConfirm();
       document.getElementById('sellItemSheet').classList.remove('active');
       syncModalOpenState();
     }
 
     function confirmSellItem() {
       if (descActionInFlight) return;
+      if (!_requireSellConfirm(document.getElementById('sellItemConfirmBtn'))) return;
       const item = selectedInventory;
       if (!item) return;
       const goldInput = document.getElementById('sellItemGold');
@@ -5222,7 +5293,6 @@
 
       const previousRows = inventoryRows.slice();
       descActionInFlight = true;
-      _inFlightWrites++;
       const soldIds = {};
       items.forEach(i => { soldIds[i.inventoryId] = i.qtyToSell; });
       const updatedRows = [];
@@ -5236,9 +5306,8 @@
       cacheInventoryRows(inventoryRows, inventoryResourceLedger);
       renderInventory();
 
-      google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
+      gasCall('apiSellInventoryBatch', { items, goldAmount, note, clientCharacter: myCharacterName || '', _syncClientId: syncClientId },
+        res => {
           descActionInFlight = false;
           if (!res || !res.ok) {
             inventoryRows = previousRows;
@@ -5248,23 +5317,23 @@
             return;
           }
           if (res.goldItem) primeInventoryCacheAfterAdd(res.goldItem);
+          if (res.ledgerEntry) inventoryResourceLedger = [res.ledgerEntry, ...inventoryResourceLedger].slice(0, 60);
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
-          loadInventory(true);
-        })
-        .withFailureHandler(() => {
-          _inFlightWrites--;
+        },
+        () => {
           descActionInFlight = false;
           inventoryRows = previousRows;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
           setMainStatus('<span class="error">Sell failed — try again.</span>');
-        })
-        .apiSellInventoryBatch({ items, goldAmount, note, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
+        }
+      );
     }
 
     /* ── Batch sell sheet ────────────────────────────────────────── */
     function openSellBatchSheet() {
+      _clearSellConfirm();
       if (!isTreasurer) return;
       sellBatchQtys       = {};
       sellBatchOpenGroups = {};
@@ -5545,12 +5614,13 @@
         <div id="sellBatchStatus" class="status"></div>
         <button id="sellBatchConfirmBtn" class="success" style="width:100%;margin-top:10px;"
                 type="button" onclick="confirmSellBatch()" disabled>Select items to sell</button>
-        <button class="secondary" style="width:100%;margin-top:8px;" type="button"
+        <button class="secondary btn-full" type="button"
                 onclick="closeSellBatchSheet()">Cancel</button>
       `;
     }
 
     function confirmSellBatch() {
+      if (!_requireSellConfirm(document.getElementById('sellBatchConfirmBtn'))) return;
       // Distribute each rollup's sell qty across its underlying rows (oldest first)
       const items = [];
       Object.entries(sellBatchQtys).forEach(([key, qty]) => {
@@ -5576,34 +5646,51 @@
       status.textContent = 'Selling…';
       document.getElementById('sellBatchConfirmBtn').disabled = true;
 
-      _inFlightWrites++;
-      google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
-          if (!res || !res.ok) {
-            status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Sell failed.')}</span>`;
-            document.getElementById('sellBatchConfirmBtn').disabled = false;
-            return;
-          }
-          status.innerHTML = `<span class="success">${escapeHtml(res.message || 'Sold!')}</span>`;
+      const previousRows = inventoryRows.slice();
+      const soldIds = {};
+      items.forEach(i => { soldIds[i.inventoryId] = i.qtyToSell; });
+      inventoryRows = inventoryRows.reduce((acc, r) => {
+        const sell = soldIds[r['Inventory ID']];
+        if (!sell) { acc.push(r); return acc; }
+        const newQty = toNumber(r['Qty'] || 1) - sell;
+        if (newQty > 0) acc.push({ ...r, 'Qty': newQty });
+        return acc;
+      }, []);
+      cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+      renderInventory();
 
-          if (res.goldItem) primeInventoryCacheAfterAdd(res.goldItem);
-          loadInventory(true);
-          const gen = ++sellBatchGeneration;
-          window.setTimeout(() => { if (sellBatchGeneration === gen) closeSellBatchSheet(); }, 1500);
-        })
-        .withFailureHandler(err => {
-          _inFlightWrites--;
-          status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || String(err))}</span>`;
-          document.getElementById('sellBatchConfirmBtn').disabled = false;
-        })
-        .apiSellInventoryBatch({
+      gasCall('apiSellInventoryBatch', {
           items,
           goldAmount,
           note: note || `Sold ${totalUnits} unit${totalUnits !== 1 ? 's' : ''}`,
           clientCharacter: myCharacterName || '',
           _syncClientId: syncClientId
-        });
+        },
+        res => {
+          if (!res || !res.ok) {
+            inventoryRows = previousRows;
+            cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+            renderInventory();
+            status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Sell failed.')}</span>`;
+            document.getElementById('sellBatchConfirmBtn').disabled = false;
+            return;
+          }
+          status.innerHTML = `<span class="success">${escapeHtml(res.message || 'Sold!')}</span>`;
+          if (res.goldItem) primeInventoryCacheAfterAdd(res.goldItem);
+          if (res.ledgerEntry) inventoryResourceLedger = [res.ledgerEntry, ...inventoryResourceLedger].slice(0, 60);
+          cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+          renderInventory();
+          const gen = ++sellBatchGeneration;
+          window.setTimeout(() => { if (sellBatchGeneration === gen) closeSellBatchSheet(); }, 1500);
+        },
+        err => {
+          inventoryRows = previousRows;
+          cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+          renderInventory();
+          status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || String(err))}</span>`;
+          document.getElementById('sellBatchConfirmBtn').disabled = false;
+        }
+      );
     }
 
     function giveItemToCharacter(newHolder) {
@@ -5619,7 +5706,6 @@
       item['Holder'] = newHolder;
       const idx = inventoryRows.findIndex(r => r['Inventory ID'] === inventoryId);
       if (idx !== -1) inventoryRows[idx] = { ...inventoryRows[idx], 'Holder': newHolder };
-      _inFlightWrites++;
       cacheInventoryRows(inventoryRows, inventoryResourceLedger);
 
       const statusEl = document.getElementById('sheetEditStatusMessage') ||
@@ -5637,9 +5723,8 @@
         if (savingRow) savingRow.classList.add('saving');
       });
 
-      google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
+      gasCall('apiUpdateInventory', { inventoryId, holder: newHolder, _syncClientId: syncClientId },
+        res => {
           const savingRow = document.querySelector(`.inventory-row[data-inventory-id="${CSS.escape(inventoryId)}"]`);
           if (savingRow) savingRow.classList.remove('saving');
           if (!res || !res.ok) {
@@ -5651,9 +5736,8 @@
           } else {
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           }
-        })
-        .withFailureHandler(() => {
-          _inFlightWrites--;
+        },
+        () => {
           const savingRow = document.querySelector(`.inventory-row[data-inventory-id="${CSS.escape(inventoryId)}"]`);
           if (savingRow) savingRow.classList.remove('saving');
           item['Holder'] = oldHolder;
@@ -5661,8 +5745,8 @@
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
           setMainStatus(`<span class="error">Give failed — change reverted.</span>`);
-        })
-        .apiUpdateInventory({ inventoryId, holder: newHolder, _syncClientId: syncClientId });
+        }
+      );
     }
 
     function confirmPayWithReason(reason) {
@@ -5672,8 +5756,9 @@
       const status      = document.getElementById('goldSheetStatus');
       const amount      = Number(amountInput && amountInput.value);
       if (!Number.isFinite(amount) || amount <= 0) return;
-      const note     = (noteInput && noteInput.value) || '';
-      const isMember = reason !== 'Purchase' && characterOptions.some(c => c.character === reason);
+      const note        = (noteInput && noteInput.value) || '';
+      const isMember    = reason !== 'Purchase' && characterOptions.some(c => c.character === reason);
+      const isPartyScope = goldSheetScope === 'party';
 
       // Optimistic: clear fields and show pending entry immediately
       const pendingId = '_pending_' + Date.now();
@@ -5687,6 +5772,7 @@
         'Notes': note || reason, '_note': note || reason,
         'Character': myCharacterName || ''
       };
+      const previousLedger = (inventoryResourceLedger || []).slice();
       inventoryResourceLedger = [pendingEntry, ...(inventoryResourceLedger || [])].slice(0, 60);
 
       const optGoldPayId = '_opt_gold_' + Date.now();
@@ -5712,9 +5798,9 @@
       };
 
       const onSuccess = res => {
-        _inFlightWrites--;
         removePending();
         if (!res || !res.ok) {
+          inventoryResourceLedger = previousLedger;
           restoreInputs();
           if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Failed.')}</span>`;
           renderGoldSheetBody();
@@ -5740,26 +5826,24 @@
         renderInventory();
       };
       const onFail = err => {
-        _inFlightWrites--;
         removePending();
+        inventoryResourceLedger = previousLedger;
         restoreInputs();
         if (status) status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
         renderGoldSheetBody();
         renderInventory();
       };
 
-      const isPartyScope = goldSheetScope === 'party';
-      _inFlightWrites++;
       if (isMember) {
         // fromHolder: empty = deduct from party pool; character name = deduct from their personal gold
-        google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFail)
-          .apiSendGoldToMember({ amount, character: reason, note: note || reason,
-            fromHolder: isPartyScope ? '' : goldSheetScope, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
+        gasCall('apiSendGoldToMember', { amount, character: reason, note: note || reason,
+            fromHolder: isPartyScope ? '' : goldSheetScope, clientCharacter: myCharacterName || '', _syncClientId: syncClientId },
+          onSuccess, onFail);
       } else {
         // holder: empty = party pool; character name = personal gold
-        google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFail)
-          .apiDepleteResource({ resource: 'gold', amount, note: note || reason,
-            holder: isPartyScope ? '' : goldSheetScope, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
+        gasCall('apiDepleteResource', { resource: 'gold', amount, note: note || reason,
+            holder: isPartyScope ? '' : goldSheetScope, clientCharacter: myCharacterName || '', _syncClientId: syncClientId },
+          onSuccess, onFail);
       }
     }
 
@@ -5785,6 +5869,7 @@
         'Notes': note || 'Split', '_note': note || 'Split',
         'Character': myCharacterName || ''
       };
+      const previousLedger = (inventoryResourceLedger || []).slice();
       inventoryResourceLedger = [pendingEntry, ...(inventoryResourceLedger || [])].slice(0, 60);
       if (amountInput) amountInput.value = '';
       if (noteInput) noteInput.value = '';
@@ -5792,12 +5877,11 @@
       renderGoldSheetBody();
       goldSheetMutated = true;
 
-      _inFlightWrites++;
-      google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
+      gasCall('apiSplitGold', { amount, note, clientCharacter: myCharacterName || '', _syncClientId: syncClientId },
+        res => {
           inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
           if (!res || !res.ok) {
+            inventoryResourceLedger = previousLedger;
             if (amountInput) amountInput.value = savedAmount;
             if (noteInput)   noteInput.value   = savedNote;
             if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Failed.')}</span>`;
@@ -5815,16 +5899,15 @@
           if (status && res.message) status.innerHTML = `<span class="success">${escapeHtml(res.message)}</span>`;
           renderGoldSheetBody();
           renderInventory();
-        })
-        .withFailureHandler(err => {
-          _inFlightWrites--;
-          inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
+        },
+        err => {
+          inventoryResourceLedger = previousLedger;
           if (amountInput) amountInput.value = savedAmount;
           if (noteInput)   noteInput.value   = savedNote;
           if (status) status.innerHTML = `<span class="error">Failed: ${escapeHtml(err.message || err)}</span>`;
           renderGoldSheetBody();
-        })
-        .apiSplitGold({ amount, note, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
+        }
+      );
     }
 
     function renderResourceBreakout(resource, rows) {
@@ -6011,10 +6094,8 @@
       const updateBtn = btnsEl ? btnsEl.querySelector('.success') : null;
       if (updateBtn) updateBtn.textContent = 'Saving…';
 
-      _inFlightWrites++;
-      google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
+      gasCall('apiUpdateLedgerNote', { timestamp, entryId, resource, notes: newNote, _syncClientId: syncClientId },
+        res => {
           btns.forEach(b => b.disabled = false);
           if (!res || !res.ok) {
             if (statusEl) statusEl.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Failed.')}</span>`;
@@ -6028,14 +6109,13 @@
           cancelLedgerEdit();
           if (isGold) renderGoldSheetBody();
           else renderDeleriumSheetBody();
-        })
-        .withFailureHandler(() => {
-          _inFlightWrites--;
+        },
+        () => {
           btns.forEach(b => b.disabled = false);
           if (statusEl) statusEl.innerHTML = `<span class="error">Failed.</span>`;
           if (updateBtn) updateBtn.textContent = 'Update Note';
-        })
-        .apiUpdateLedgerNote({ timestamp, entryId, resource, notes: newNote, _syncClientId: syncClientId });
+        }
+      );
     }
 
     function isGoldItem_(row) {
@@ -6279,8 +6359,15 @@
       }
       if (status) status.textContent = 'Recording…';
 
-      google.script.run
-        .withSuccessHandler(res => {
+      gasCall('apiDepleteResource', {
+          resource,
+          amount,
+          size: resource === 'delerium' && sizeSelect ? sizeSelect.value : '',
+          note: 'Dashboard pay',
+          clientCharacter: myCharacterName || '',
+          _syncClientId: syncClientId
+        },
+        res => {
           resourcePayInFlight[resource] = false;
           if (!res || !res.ok) {
             if (amountInput) amountInput.value = amount;
@@ -6303,8 +6390,8 @@
             message: res.message || 'Recorded payment.'
           };
           renderInventory();
-        })
-        .withFailureHandler(err => {
+        },
+        err => {
           resourcePayInFlight[resource] = false;
           if (amountInput) amountInput.value = amount;
           if (button) {
@@ -6312,15 +6399,8 @@
             button.textContent = 'Pay';
           }
           if (status) status.innerHTML = `<span class="error">Pay failed: ${escapeHtml(err.message || err)}</span>`;
-        })
-        .apiDepleteResource({
-          resource,
-          amount,
-          size: resource === 'delerium' && sizeSelect ? sizeSelect.value : '',
-          note: 'Dashboard pay',
-          clientCharacter: myCharacterName || '',
-          _syncClientId: syncClientId
-        });
+        }
+      );
     }
 
     function undoResourcePay(resource) {
@@ -6337,14 +6417,12 @@
         r['Inventory ID'] !== deductId && (!creditId || r['Inventory ID'] !== creditId)
       );
       inventoryResourceLedger = inventoryResourceLedger.filter(e => e['Inventory ID'] !== deductId);
-      _inFlightWrites++;
       cacheInventoryRows(inventoryRows, inventoryResourceLedger);
       lastResourceUndo[resource] = null;
       renderInventory();
 
       function rollback() {
         resourcePayInFlight[resource] = false;
-        _inFlightWrites--;
         inventoryRows = previousRows;
         inventoryResourceLedger = previousLedger;
         cacheInventoryRows(inventoryRows, inventoryResourceLedger);
@@ -6358,26 +6436,24 @@
 
       if (creditId) {
         // Member-send path: delete both rows atomically
-        google.script.run
-          .withSuccessHandler(res => {
+        gasCall('apiUndoMemberSend', { deductId, creditId, clientCharacter: myCharacterName || '', _syncClientId: syncClientId },
+          res => {
             resourcePayInFlight[resource] = false;
-            _inFlightWrites--;
             if (!res || !res.ok) { rollback(); return; }
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
-          })
-          .withFailureHandler(rollback)
-          .apiUndoMemberSend({ deductId, creditId, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
+          },
+          rollback
+        );
       } else {
         // Purchase path: single deduct row
-        google.script.run
-          .withSuccessHandler(res => {
+        gasCall('apiDeleteInventory', { inventoryId: deductId, reverseLedgerEntry: true, _syncClientId: syncClientId },
+          res => {
             if (!res || !res.ok) { rollback(); return; }
             resourcePayInFlight[resource] = false;
-            _inFlightWrites--;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
-          })
-          .withFailureHandler(rollback)
-          .apiDeleteInventory({ inventoryId: deductId, reverseLedgerEntry: true, _syncClientId: syncClientId });
+          },
+          rollback
+        );
       }
     }
 
@@ -6527,8 +6603,12 @@
       const holderEl = document.getElementById('descriptionHolder');
       if (holderEl) { holderEl.textContent = holderLabel; holderEl.style.display = ''; }
 
-      const _totalQty = getDescRemoveTotalQty_();
-      document.getElementById('descriptionTitle').textContent = (_totalQty > 1 ? _totalQty + '× ' : '') + (row['Item'] || 'Description');
+      const _repHolder = String(row['Holder'] || '').trim();
+      const _rKey     = row._rollupKey || getInventoryRollupKey(row);
+      const _titleQty = (inventoryRows || [])
+        .filter(r => getInventoryRollupKey(r) === _rKey && String(r['Holder'] || '').trim() === _repHolder)
+        .reduce((sum, r) => sum + toNumber(r['Qty'] || 1), 0) || 1;
+      document.getElementById('descriptionTitle').textContent = (_titleQty > 1 ? _titleQty + '\xd7 ' : '') + (row['Item'] || 'Description');
       document.getElementById('descriptionCategory').textContent = row['Category'] || 'Uncategorized';
       document.getElementById('descriptionRarity').textContent = row['Rarity'] || 'Unrated';
 
@@ -6565,7 +6645,7 @@
             .withSuccessHandler(res => {
               if (!selectedInventory || selectedInventory['Inventory ID'] !== capturedId) return;
               const item = (res && res.ok && res.item) ? res.item : null;
-              itemCache[libraryItemId] = item;
+              if (res && res.ok) itemCache[libraryItemId] = item; // only cache on ok; !ok leaves undefined so next open retries
               applyItemToDescSheet_(item);
             })
             .withFailureHandler(() => {
@@ -6663,10 +6743,14 @@
       renderInventory();
 
       descActionInFlight = true;
-      _inFlightWrites++;
-      google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
+      gasCall('apiSellInventoryBatch', {
+          items,
+          goldAmount: 0,
+          note: `Removed ${qty}× ${itemName}`,
+          clientCharacter: myCharacterName || '',
+          _syncClientId: syncClientId
+        },
+        res => {
           descActionInFlight = false;
           if (!res || !res.ok) {
             inventoryRows = previousRows;
@@ -6674,25 +6758,18 @@
             renderInventory();
             setMainStatus(`<span class="error">Remove failed: ${escapeHtml((res && res.error) || 'Unknown error')}</span>`);
           } else {
-            bustInventoryCache();
-            loadInventory(true);
+            cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+            renderInventory();
           }
-        })
-        .withFailureHandler(err => {
-          _inFlightWrites--;
+        },
+        err => {
           descActionInFlight = false;
           inventoryRows = previousRows;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
           setMainStatus(`<span class="error">Remove failed: ${escapeHtml(err.message || String(err))}</span>`);
-        })
-        .apiSellInventoryBatch({
-          items,
-          goldAmount: 0,
-          note: `Removed ${qty}× ${itemName}`,
-          clientCharacter: myCharacterName || '',
-          _syncClientId: syncClientId
-        });
+        }
+      );
     }
 
     function closeDescriptionSheet() {
@@ -6703,10 +6780,12 @@
 
     /* ── Description action sub-sheet ─────────────────────────────── */
     function openDescActionSheet(mode) {
+      _clearSellConfirm();
       const item = selectedInventory;
       if (!item) return;
-      _descActionMode = mode;
-      descActionQty   = 1;
+      _descActionMode           = mode;
+      descActionQty             = 1;
+      _descActionSelectedHolder = null;
 
       const titles = { add: 'Add', sell: 'Sell for Gold', give: 'Give to…', remove: 'Remove' };
       const titleEl = document.getElementById('descActionTitle');
@@ -6716,8 +6795,8 @@
       if (statusEl) { statusEl.innerHTML = ''; statusEl.style.display = 'none'; }
       const confirmBtn = document.getElementById('descActionConfirmBtn');
       if (confirmBtn) {
-        confirmBtn.disabled = false;
-        confirmBtn.style.display = mode === 'give' ? 'none' : '';
+        confirmBtn.style.display = '';
+        confirmBtn.disabled = mode === 'give'; // enabled once character selected
       }
 
       renderDescActionBody_();
@@ -6731,29 +6810,31 @@
     }
 
     function renderDescActionBody_() {
-      const body = document.getElementById('descActionBody');
-      if (!body) return;
+      const body       = document.getElementById('descActionBody');
+      const stepperRow = document.getElementById('descActionStepperRow');
+      if (!body || !stepperRow) return;
       const maxQty = getDescRemoveTotalQty_();
 
-      const stepperHtml = (qty, max) => `
-        <div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-top:8px;">
-          <button class="sell-batch-stepper-btn" type="button" id="descActionMinus" onclick="stepDescAction(-1)"${qty <= 1 ? ' disabled' : ''}>−</button>
-          <span id="descActionQtyDisplay" style="min-width:2.5em;text-align:center;font-size:var(--phone-font-body,18px);">${qty}</span>
-          <button class="sell-batch-stepper-btn" type="button" id="descActionPlus" onclick="stepDescAction(1)"${qty >= max ? ' disabled' : ''}>+</button>
+      const stepperHtml = (qty, max, label) => `
+        ${label ? `<label style="font-size:var(--font-label,14px);color:var(--text-muted);margin-bottom:4px;display:block;">${label}</label>` : ''}
+        <div style="display:flex;align-items:stretch;gap:8px;">
+          <button type="button" id="descActionMinus" onclick="stepDescAction(-1)"${qty <= 1 ? ' disabled' : ''}
+            style="flex:1;min-height:52px;border-radius:10px;padding:0;font-size:var(--phone-font-body,22px);background:rgba(70,86,119,.22);border:none;color:var(--accent);cursor:pointer;">−</button>
+          <span id="descActionQtyDisplay"
+            style="flex:0 0 auto;display:flex;align-items:center;justify-content:center;min-width:3em;text-align:center;font-size:var(--phone-font-body,18px);color:var(--text-secondary);">${qty}</span>
+          <button type="button" id="descActionPlus" onclick="stepDescAction(1)"${qty >= max ? ' disabled' : ''}
+            style="flex:1;min-height:52px;border-radius:10px;padding:0;font-size:var(--phone-font-body,22px);background:rgba(70,86,119,.22);border:none;color:var(--accent);cursor:pointer;">+</button>
         </div>`;
 
+      stepperRow.innerHTML = '';
+      stepperRow.style.display = 'none';
+
       if (_descActionMode === 'add') {
-        body.innerHTML = `
-          <div class="field" style="text-align:center;">
-            <label>Quantity to add</label>
-            ${stepperHtml(descActionQty, 99)}
-          </div>`;
+        body.innerHTML = '';
+        stepperRow.innerHTML = stepperHtml(descActionQty, 99, 'Quantity to add');
+        stepperRow.style.display = '';
       } else if (_descActionMode === 'sell') {
         body.innerHTML = `
-          <div class="field" style="text-align:center;">
-            <label>Quantity to sell</label>
-            ${stepperHtml(descActionQty, maxQty)}
-          </div>
           <div class="field">
             <label for="descActionGold">Gold received (gp)</label>
             <input id="descActionGold" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0">
@@ -6762,6 +6843,8 @@
             <label for="descActionNote">Note (optional)</label>
             <input id="descActionNote" placeholder="Sold to merchant, traded…">
           </div>`;
+        stepperRow.innerHTML = stepperHtml(descActionQty, maxQty, 'Quantity to sell');
+        stepperRow.style.display = '';
       } else if (_descActionMode === 'give') {
         const item = selectedInventory;
         const currentHolder = String(item && item['Holder'] || '');
@@ -6771,17 +6854,17 @@
         ].filter(o => o.holder.toLowerCase() !== currentHolder.toLowerCase());
         body.innerHTML = options.length
           ? `<div class="section-stack">${options.map(o =>
-              `<button class="result-card give-option" type="button" data-holder="${escapeHtml(o.holder)}" onclick="descActionGiveTo(this.dataset.holder)">
+              `<button class="result-card give-option" type="button" data-holder="${escapeHtml(o.holder)}" onclick="selectDescGiveTarget(this)">
                 <div class="item-title">${escapeHtml(o.label)}</div>
                 <div class="item-meta">${escapeHtml(o.meta)}</div>
               </button>`).join('')}</div>`
           : `<div class="status centered">No other characters to give to.</div>`;
+        stepperRow.innerHTML = stepperHtml(descActionQty, maxQty, 'Quantity to give');
+        stepperRow.style.display = '';
       } else if (_descActionMode === 'remove') {
-        body.innerHTML = `
-          <div class="field" style="text-align:center;">
-            <label>Quantity to remove</label>
-            ${stepperHtml(descActionQty, maxQty)}
-          </div>`;
+        body.innerHTML = '';
+        stepperRow.innerHTML = stepperHtml(descActionQty, maxQty, 'Quantity to remove');
+        stepperRow.style.display = '';
       }
     }
 
@@ -6796,15 +6879,122 @@
       if (plusBtn)  plusBtn.disabled  = descActionQty >= maxQty;
     }
 
-    function descActionGiveTo(newHolder) {
-      closeDescActionSheet();
-      giveItemToCharacter(newHolder);
+    function selectDescGiveTarget(btn) {
+      _descActionSelectedHolder = btn.dataset.holder;
+      document.querySelectorAll('#descActionBody .give-option').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      const confirmBtn = document.getElementById('descActionConfirmBtn');
+      if (confirmBtn) confirmBtn.disabled = false;
     }
 
     function confirmDescAction() {
-      if (_descActionMode === 'add')    _confirmDescActionAdd_();
-      else if (_descActionMode === 'sell')   _confirmDescActionSell_();
+      if (_descActionMode === 'add')  { _confirmDescActionAdd_();  return; }
+      if (_descActionMode === 'give') { _confirmDescActionGive_(); return; }
+      const btn = document.getElementById('descActionConfirmBtn');
+      if (!_requireSellConfirm(btn)) return;
+      if (_descActionMode === 'sell')   _confirmDescActionSell_();
       else if (_descActionMode === 'remove') _confirmDescActionRemove_();
+    }
+
+    function _confirmDescActionGive_() {
+      if (descActionInFlight) return;
+      if (!selectedInventory || _descActionSelectedHolder === null) return;
+
+      const newHolder  = _descActionSelectedHolder;
+      const rollupKey  = selectedInventory._rollupKey || getInventoryRollupKey(selectedInventory);
+      const repHolder  = String(selectedInventory['Holder'] || '').trim();
+      const allForKey  = inventoryRows.filter(r => getInventoryRollupKey(r) === rollupKey);
+      const holders    = new Set(allForKey.map(r => String(r['Holder'] || '').trim()));
+      const isMultiple = holders.size > 1;
+      const matchingRows = allForKey
+        .filter(r => isMultiple || String(r['Holder'] || '').trim() === repHolder)
+        .sort((a, b) => new Date(a['Date Added'] || 0) - new Date(b['Date Added'] || 0));
+      if (!matchingRows.length) return;
+
+      let remaining = descActionQty;
+      const items = [];
+      for (const row of matchingRows) {
+        if (remaining <= 0) break;
+        const rowQty  = toNumber(row['Qty'] || 1);
+        const giveQty = Math.min(remaining, rowQty);
+        items.push({ inventoryId: row['Inventory ID'], qtyToGive: giveQty });
+        remaining -= giveQty;
+      }
+      if (!items.length) return;
+
+      const previousRows  = inventoryRows.slice();
+      const itemName      = selectedInventory['Item'] || 'item';
+      const qty           = descActionQty;
+      const targetLabel   = newHolder || 'Party Pool';
+
+      items.forEach(({ inventoryId, qtyToGive }) => {
+        const row = inventoryRows.find(r => r['Inventory ID'] === inventoryId);
+        if (!row) return;
+        const rowQty = toNumber(row['Qty'] || 1);
+        if (qtyToGive >= rowQty) {
+          inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== inventoryId);
+        } else {
+          inventoryRows = inventoryRows.map(r => r['Inventory ID'] === inventoryId
+            ? { ...r, 'Qty': String(rowQty - qtyToGive) } : r);
+        }
+      });
+
+      // Optimistic row for the new holder so recipient sees it immediately
+      const optGiveId  = '_opt_give_' + Date.now();
+      const _giveVgp   = selectedInventory['Value GP'] !== '' && selectedInventory['Value GP'] != null
+                         ? Number(selectedInventory['Value GP']) : '';
+      inventoryRows = [...inventoryRows, {
+        'Inventory ID':    optGiveId,
+        'Item':            selectedInventory['Item'] || '',
+        'Library Item ID': selectedInventory['Library Item ID'] || '',
+        'Category':        selectedInventory['Category'] || '',
+        'Rarity':          selectedInventory['Rarity'] || '',
+        'Qty':             String(qty),
+        'Holder':          newHolder,
+        'Value GP':        _giveVgp !== '' ? String(_giveVgp) : '',
+        'Total Value GP':  _giveVgp !== '' ? String(qty * _giveVgp) : '',
+        'Notes':           selectedInventory['Notes'] || '',
+        'Date Added':      new Date().toISOString().replace('T', ' ').slice(0, 19),
+        'Added By':        myCharacterName || ''
+      }];
+
+      closeDescActionSheet();
+      closeDescriptionSheet();
+      cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+      renderInventory();
+
+      descActionInFlight = true;
+      setMainStatus(`<span class="success">Giving ${qty}\xd7 ${escapeHtml(itemName)} to ${escapeHtml(targetLabel)}…</span>`);
+
+      gasCall('apiGiveInventoryBatch', {
+          items,
+          newHolder,
+          note: `Gave ${qty}\xd7 ${itemName} to ${targetLabel}`,
+          clientCharacter: myCharacterName || '',
+          _syncClientId: syncClientId
+        },
+        res => {
+          descActionInFlight = false;
+          if (!res || !res.ok) {
+            inventoryRows = previousRows;
+            cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+            renderInventory();
+            setMainStatus('<span class="error">Give failed — change reverted.</span>');
+          } else {
+            inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optGiveId);
+            bustInventoryCache();
+            loadInventory(true);
+            setMainStatus(`<span class="success">${escapeHtml(res.message || `Gave to ${targetLabel}.`)}</span>`);
+          }
+        },
+        err => {
+          descActionInFlight = false;
+          inventoryRows = previousRows;
+          cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+          renderInventory();
+          setMainStatus(`<span class="error">Give failed: ${escapeHtml(err.message || String(err))}</span>`);
+        }
+      );
     }
 
     function _confirmDescActionAdd_() {
@@ -6826,42 +7016,57 @@
         _syncClientId:    syncClientId
       };
 
-      const statusEl  = document.getElementById('descActionStatusRow');
-      const confirmBtn = document.getElementById('descActionConfirmBtn');
-      if (statusEl)  { statusEl.textContent = 'Adding…'; statusEl.style.display = ''; }
-      if (confirmBtn) confirmBtn.disabled = true;
+      const previousRows = inventoryRows.slice();
 
-      const optId  = '_opt_' + Date.now();
-      const optVgp = payload.valueGp !== '' && payload.valueGp !== null ? Number(payload.valueGp) : '';
-      const optRow = {
-        'Inventory ID':    optId,
-        'Item':            payload.item,
-        'Library Item ID': payload.libraryItemId,
-        'Category':        payload.category,
-        'Rarity':          payload.rarity,
-        'Qty':             String(descActionQty),
-        'Holder':          payload.holder,
-        'Value GP':        optVgp !== '' ? String(optVgp) : '',
-        'Total Value GP':  optVgp !== '' ? String(descActionQty * optVgp) : '',
-        'Notes':           payload.notes,
-        'Date Added':      new Date().toISOString().replace('T', ' ').slice(0, 19),
-        'Added By':        myCharacterName || ''
-      };
-      inventoryRows = [optRow, ...inventoryRows];
+      // If a matching row already exists for this holder, increment it in-place
+      // so there's no duplicate flash while waiting for the server's auto-combine.
+      const existingMatch = inventoryRows.find(r =>
+        String(r['Item']     || '').toLowerCase() === String(payload.item     || '').toLowerCase() &&
+        String(r['Category'] || '').toLowerCase() === String(payload.category || '').toLowerCase() &&
+        String(r['Rarity']   || '').toLowerCase() === String(payload.rarity   || '').toLowerCase() &&
+        String(r['Holder']   || '')                === String(payload.holder   || '') &&
+        String(r['Value GP'] || '')                === String(payload.valueGp  || '')
+      );
+
+      let optId = null;
+      if (existingMatch) {
+        const newQty = toNumber(existingMatch['Qty'] || 0) + descActionQty;
+        const vgp    = Number(existingMatch['Value GP'] || 0);
+        inventoryRows = inventoryRows.map(r => r['Inventory ID'] === existingMatch['Inventory ID']
+          ? { ...r, 'Qty': String(newQty), 'Total Value GP': vgp ? String(newQty * vgp) : '' }
+          : r);
+      } else {
+        optId = '_opt_' + Date.now();
+        const optVgp = payload.valueGp !== '' && payload.valueGp !== null ? Number(payload.valueGp) : '';
+        inventoryRows = [{
+          'Inventory ID':    optId,
+          'Item':            payload.item,
+          'Library Item ID': payload.libraryItemId,
+          'Category':        payload.category,
+          'Rarity':          payload.rarity,
+          'Qty':             String(descActionQty),
+          'Holder':          payload.holder,
+          'Value GP':        optVgp !== '' ? String(optVgp) : '',
+          'Total Value GP':  optVgp !== '' ? String(descActionQty * optVgp) : '',
+          'Notes':           payload.notes,
+          'Date Added':      new Date().toISOString().replace('T', ' ').slice(0, 19),
+          'Added By':        myCharacterName || ''
+        }, ...inventoryRows];
+      }
+
       cacheInventoryRows(inventoryRows, inventoryResourceLedger);
-
       closeDescActionSheet();
       closeDescriptionSheet();
+      renderInventory();
 
       descActionInFlight = true;
-      _inFlightWrites++;
       const isCustom = !libraryItemId;
-      const runner = google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
+      gasCall(isCustom ? 'apiAddCustomInventory' : 'apiAddInventory', payload,
+        res => {
           descActionInFlight = false;
-          inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optId);
+          if (optId) inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optId);
           if (!res || !res.ok) {
+            inventoryRows = previousRows;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
             renderInventory();
             setMainStatus(`<span class="error">${escapeHtml((res && res.error) || 'Add failed.')}</span>`);
@@ -6874,17 +7079,15 @@
           if (!cachePrimed) bustInventoryCache();
           renderInventory();
           setMainStatus(`<span class="success">${escapeHtml(res.message || `${payload.item} added.`)}</span>`);
-        })
-        .withFailureHandler(err => {
-          _inFlightWrites--;
+        },
+        err => {
           descActionInFlight = false;
-          inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optId);
+          inventoryRows = previousRows;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
           setMainStatus(`<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`);
-        });
-      if (isCustom) runner.apiAddCustomInventory(payload);
-      else          runner.apiAddInventory(payload);
+        }
+      );
     }
 
     function _confirmDescActionSell_() {
@@ -6922,7 +7125,6 @@
 
       const previousRows = inventoryRows.slice();
       descActionInFlight = true;
-      _inFlightWrites++;
       const soldIds = {};
       items.forEach(i => { soldIds[i.inventoryId] = i.qtyToSell; });
       inventoryRows = previousRows.reduce((acc, r) => {
@@ -6935,9 +7137,8 @@
       cacheInventoryRows(inventoryRows, inventoryResourceLedger);
       renderInventory();
 
-      google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
+      gasCall('apiSellInventoryBatch', { items, goldAmount, note, clientCharacter: myCharacterName || '', _syncClientId: syncClientId },
+        res => {
           descActionInFlight = false;
           if (!res || !res.ok) {
             inventoryRows = previousRows;
@@ -6947,19 +7148,18 @@
             return;
           }
           if (res.goldItem) primeInventoryCacheAfterAdd(res.goldItem);
+          if (res.ledgerEntry) inventoryResourceLedger = [res.ledgerEntry, ...inventoryResourceLedger].slice(0, 60);
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
-          loadInventory(true);
-        })
-        .withFailureHandler(() => {
-          _inFlightWrites--;
+        },
+        () => {
           descActionInFlight = false;
           inventoryRows = previousRows;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
           setMainStatus('<span class="error">Sell failed — try again.</span>');
-        })
-        .apiSellInventoryBatch({ items, goldAmount, note, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
+        }
+      );
     }
 
     function _confirmDescActionRemove_() {
@@ -7007,10 +7207,14 @@
       renderInventory();
 
       descActionInFlight = true;
-      _inFlightWrites++;
-      google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
+      gasCall('apiSellInventoryBatch', {
+          items,
+          goldAmount: 0,
+          note: `Removed ${qty}\xd7 ${itemName}`,
+          clientCharacter: myCharacterName || '',
+          _syncClientId: syncClientId
+        },
+        res => {
           descActionInFlight = false;
           if (!res || !res.ok) {
             inventoryRows = previousRows;
@@ -7018,25 +7222,18 @@
             renderInventory();
             setMainStatus(`<span class="error">Remove failed: ${escapeHtml((res && res.error) || 'Unknown error')}</span>`);
           } else {
-            bustInventoryCache();
-            loadInventory(true);
+            cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+            renderInventory();
           }
-        })
-        .withFailureHandler(err => {
-          _inFlightWrites--;
+        },
+        err => {
           descActionInFlight = false;
           inventoryRows = previousRows;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
           setMainStatus(`<span class="error">Remove failed: ${escapeHtml(err.message || String(err))}</span>`);
-        })
-        .apiSellInventoryBatch({
-          items,
-          goldAmount: 0,
-          note: `Removed ${qty}\xd7 ${itemName}`,
-          clientCharacter: myCharacterName || '',
-          _syncClientId: syncClientId
-        });
+        }
+      );
     }
 
     function deleteSelectedInventoryFromDescription() {
@@ -7222,15 +7419,19 @@
         return;
       }
 
+      const confirmBtn = document.getElementById(`${prefix}ConfirmBtn`);
+      if (confirmBtn) confirmBtn.disabled = true;
       status.textContent = 'Saving…';
       quickEditInFlight = true;
-      _inFlightWrites++;
+      const capturedItemId = selectedQuickEdit.itemId;
 
       const finishSuccess = res => {
         quickEditInFlight = false;
-        _inFlightWrites--;
+        if (confirmBtn) confirmBtn.disabled = false;
         if (!res || !res.ok) {
-          status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Quick edit failed.')}</span>`;
+          if (selectedQuickEdit && selectedQuickEdit.itemId === capturedItemId) {
+            status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Quick edit failed.')}</span>`;
+          }
           return;
         }
 
@@ -7245,42 +7446,40 @@
         bustInventoryCache();
         cacheInventoryRows(inventoryRows, inventoryResourceLedger);
         renderInventory();
+
+        // Guard: bail if the panel now belongs to a different item
+        if (!selectedQuickEdit || selectedQuickEdit.itemId !== capturedItemId) return;
+
         status.innerHTML = `<span class="success">${escapeHtml(res.message || 'Saved.')}</span>`;
         closeQuickEditPanel();
       };
 
       const fail = err => {
         quickEditInFlight = false;
-        _inFlightWrites--;
+        if (confirmBtn) confirmBtn.disabled = false;
         status.innerHTML = `<span class="error">Quick edit failed: ${escapeHtml(err.message || err)}</span>`;
       };
 
       if (mode === 'set') {
-        google.script.run
-          .withSuccessHandler(finishSuccess)
-          .withFailureHandler(fail)
-          .apiSetItemQuantity({
+        gasCall('apiSetItemQuantity', {
             itemId: selectedQuickEdit.itemId,
             quantity: amount,
             note,
             size,
             clientCharacter: myCharacterName || '',
             _syncClientId: syncClientId
-          });
+          }, finishSuccess, fail);
         return;
       }
 
-      google.script.run
-        .withSuccessHandler(finishSuccess)
-        .withFailureHandler(fail)
-        .apiAdjustInventory({
+      gasCall('apiAdjustInventory', {
           itemId: selectedQuickEdit.itemId,
           delta: mode === 'remove' ? -amount : amount,
           note,
           size,
           clientCharacter: myCharacterName || '',
           _syncClientId: syncClientId
-        });
+        }, finishSuccess, fail);
     }
 
     function syncInventoryEditorFieldsFromRow(row) {
@@ -7384,10 +7583,8 @@
       if (mobileButton) mobileButton.disabled = true;
       status.textContent = 'Saving…';
 
-      _inFlightWrites++;
-      google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
+      gasCall('apiUpdateInventory', { ...payload, _syncClientId: syncClientId },
+        res => {
           if (button) button.disabled = false;
           if (mobileButton) mobileButton.disabled = false;
           if (!res || !res.ok) {
@@ -7398,14 +7595,13 @@
           cacheInventoryRows(inventoryRows);
           renderInventory();
           closeInventoryPanels(false);
-        })
-        .withFailureHandler(err => {
-          _inFlightWrites--;
+        },
+        err => {
           if (button) button.disabled = false;
           if (mobileButton) mobileButton.disabled = false;
           status.innerHTML = `<span class="error">Save failed: ${escapeHtml(err.message || err)}</span>`;
-        })
-        .apiUpdateInventory({ ...payload, _syncClientId: syncClientId });
+        }
+      );
     }
 
     function updateInventoryRowLocally(payload) {
@@ -7452,8 +7648,28 @@
 
       const wrapper = document.querySelector(`.inventory-row[data-representative-id="${escapeSelectorValue(inventoryId)}"]`);
       const button = wrapper ? wrapper.querySelector('.inventory-delete-action') : null;
+
+      // Two-step safety: first tap arms, second tap fires
+      if (button && !button.dataset.armed) {
+        button.dataset.armed = '1';
+        button.textContent = 'Confirm?';
+        button.classList.add('delete-armed');
+        const t = setTimeout(() => {
+          if (button.dataset.armed) {
+            delete button.dataset.armed;
+            button.textContent = 'Delete';
+            button.classList.remove('delete-armed');
+          }
+        }, 2500);
+        button.dataset.armedTimer = String(t);
+        return;
+      }
+
       if (button) {
+        clearTimeout(Number(button.dataset.armedTimer || ''));
+        delete button.dataset.armed;
         button.textContent = 'Deleting…';
+        button.classList.remove('delete-armed');
         button.classList.add('deleting');
         button.disabled = true;
       }
@@ -7525,37 +7741,34 @@
         ? `${shouldDecrement ? 'Removing one from' : 'Deleting'} ${deletedRow['Item'] || 'item'}…`
         : (shouldDecrement ? 'Removing one…' : 'Deleting…');
 
-      _inFlightWrites++;
-      const runner = google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
-          if (detailButton) detailButton.disabled = false;
-          if (!res || !res.ok) {
-            inventoryRows = previousRows;
-            renderInventory();
-            document.getElementById('inventoryStatus').innerHTML = `<span class="error">${escapeHtml((res && res.error) || (shouldDecrement ? 'Remove failed.' : 'Delete failed.'))}</span>`;
-            if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || (shouldDecrement ? 'Remove failed.' : 'Delete failed.'))}</span>`;
-            return;
-          }
-          bustInventoryCache();
-          if (res.item) {
-            updateInventoryRowFromServer(res.item);
-          }
-          document.getElementById('inventoryStatus').innerHTML = `<span class="success">${escapeHtml(res.message || (shouldDecrement ? 'Removed one.' : 'Deleted.'))}</span>`;
-        })
-        .withFailureHandler(err => {
-          _inFlightWrites--;
-          if (detailButton) detailButton.disabled = false;
+      const onDeleteSuccess = res => {
+        if (detailButton) detailButton.disabled = false;
+        if (!res || !res.ok) {
           inventoryRows = previousRows;
           renderInventory();
-          document.getElementById('inventoryStatus').innerHTML = `<span class="error">${escapeHtml((shouldDecrement ? 'Remove failed: ' : 'Delete failed: ') + (err.message || err))}</span>`;
-          if (status) status.innerHTML = `<span class="error">${escapeHtml((shouldDecrement ? 'Remove failed: ' : 'Delete failed: ') + (err.message || err))}</span>`;
-        });
+          document.getElementById('inventoryStatus').innerHTML = `<span class="error">${escapeHtml((res && res.error) || (shouldDecrement ? 'Remove failed.' : 'Delete failed.'))}</span>`;
+          if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || (shouldDecrement ? 'Remove failed.' : 'Delete failed.'))}</span>`;
+          return;
+        }
+        if (res.item) updateInventoryRowFromServer(res.item);
+        if (res.ledgerEntry) {
+          inventoryResourceLedger = [res.ledgerEntry, ...inventoryResourceLedger].slice(0, 60);
+        }
+        cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+        document.getElementById('inventoryStatus').innerHTML = `<span class="success">${escapeHtml(res.message || (shouldDecrement ? 'Removed one.' : 'Deleted.'))}</span>`;
+      };
+      const onDeleteFail = err => {
+        if (detailButton) detailButton.disabled = false;
+        inventoryRows = previousRows;
+        renderInventory();
+        document.getElementById('inventoryStatus').innerHTML = `<span class="error">${escapeHtml((shouldDecrement ? 'Remove failed: ' : 'Delete failed: ') + (err.message || err))}</span>`;
+        if (status) status.innerHTML = `<span class="error">${escapeHtml((shouldDecrement ? 'Remove failed: ' : 'Delete failed: ') + (err.message || err))}</span>`;
+      };
 
       if (shouldDecrement) {
-        runner.apiAdjustInventory({ itemId: inventoryId, delta: -1, note: 'Swipe remove one', clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
+        gasCall('apiAdjustInventory', { itemId: inventoryId, delta: -1, note: 'Swipe remove one', clientCharacter: myCharacterName || '', _syncClientId: syncClientId }, onDeleteSuccess, onDeleteFail);
       } else {
-        runner.apiDeleteInventory({ inventoryId, _syncClientId: syncClientId });
+        gasCall('apiDeleteInventory', { inventoryId, _syncClientId: syncClientId }, onDeleteSuccess, onDeleteFail);
       }
     }
 
@@ -7807,7 +8020,7 @@
         item.category || item.type || '',
         item.rarity || ''
       ].filter(Boolean).join(' · ');
-      document.getElementById('holder').value = '';
+      if (!includeDescription) document.getElementById('holder').value = '';
 
       // Scroll detection — show spell field; hide stat block/description (not useful for scrolls)
       const _isScroll = /scroll/i.test(item.name || '');
@@ -8130,58 +8343,14 @@
         if (_addSearchEl) { _addSearchEl.focus(); _addSearchEl.select(); }
       }, 80);
 
-      _inFlightWrites++;
-      const runner = google.script.run
-        .withSuccessHandler(res => {
-          _inFlightWrites--;
-          // Remove optimistic row
-          inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optId);
-          if (!res || !res.ok) {
-            cacheInventoryRows(inventoryRows, inventoryResourceLedger);
-            renderInventory();
-            selectedEquipment = selectedSnapshot;
-            if (selectedSnapshot) fillAddFormFromEquipment(selectedSnapshot, false);
-            document.getElementById('libraryItemId').value = payloadSnapshot.libraryItemId || '';
-            document.getElementById('quickAddKey').value = quickKey;
-            document.getElementById('item').value = payloadSnapshot.item || '';
-            document.getElementById('category').value = payloadSnapshot.category || '';
-            document.getElementById('rarity').value = payloadSnapshot.rarity || '';
-            document.getElementById('qty').value = payloadSnapshot.qty || 1;
-            document.getElementById('holder').value = payloadSnapshot.holder || '';
-            document.getElementById('valueGp').value = payloadSnapshot.valueGp || '';
-            document.getElementById('factionRelevance').value = payloadSnapshot.factionRelevance || '';
-            document.getElementById('notes').value = payloadSnapshot.notes || '';
-            if (capturedSize) { const _sz = document.getElementById('quickAddSize'); if (_sz) _sz.value = capturedSize; }
-            const _scrollRestore = String(payloadSnapshot.item || '').match(/^Scroll of (.+)$/i);
-            if (_scrollRestore) { setScrollMode_(true); document.getElementById('scrollSpellName').value = _scrollRestore[1]; handleScrollSpellInput(); }
-            updateAddFlow();
-            setMainStatus(`<span class="error">${escapeHtml((res && res.error) || `Failed to add ${itemName}.`)}</span>`);
-            return;
-          }
-          if (res.ledgerEntry) {
-            inventoryResourceLedger = [res.ledgerEntry, ...(inventoryResourceLedger || [])].slice(0, 60);
-          }
-          const cachePrimed = primeInventoryCacheAfterAdd(res.item);
-          if (!cachePrimed) bustInventoryCache();
-          renderInventory();
-          setMainStatus(`<span class="success">${escapeHtml(res.message || `${itemName} added.`)}</span>`);
-          const duplicateCandidate = findDuplicateInventoryCandidate(res.item);
-          if (duplicateCandidate) {
-            const sameHolder = (res.item['Holder'] || '') === (duplicateCandidate['Holder'] || '');
-            const sameValue  = String(res.item['Value GP'] || '') === String(duplicateCandidate['Value GP'] || '');
-            if (!sameHolder || !sameValue) showCombineChoice(res.item, duplicateCandidate);
-          }
-        })
-        .withFailureHandler(err => {
-          _inFlightWrites--;
-          inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optId);
+      const onAddSuccess = res => {
+        // Remove optimistic row
+        inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optId);
+        if (!res || !res.ok) {
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
-          if (commandMode === 'inventory') renderInventory();
-          setMainStatus(`<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`);
+          renderInventory();
           selectedEquipment = selectedSnapshot;
-          if (selectedSnapshot) {
-            fillAddFormFromEquipment(selectedSnapshot, false);
-          }
+          if (selectedSnapshot) fillAddFormFromEquipment(selectedSnapshot, false);
           document.getElementById('libraryItemId').value = payloadSnapshot.libraryItemId || '';
           document.getElementById('quickAddKey').value = quickKey;
           document.getElementById('item').value = payloadSnapshot.item || '';
@@ -8193,14 +8362,54 @@
           document.getElementById('factionRelevance').value = payloadSnapshot.factionRelevance || '';
           document.getElementById('notes').value = payloadSnapshot.notes || '';
           if (capturedSize) { const _sz = document.getElementById('quickAddSize'); if (_sz) _sz.value = capturedSize; }
-          const _scrollRestoreFail = String(payloadSnapshot.item || '').match(/^Scroll of (.+)$/i);
-          if (_scrollRestoreFail) { setScrollMode_(true); document.getElementById('scrollSpellName').value = _scrollRestoreFail[1]; handleScrollSpellInput(); }
-          document.getElementById('addStatus').innerHTML = `<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`;
+          const _scrollRestore = String(payloadSnapshot.item || '').match(/^Scroll of (.+)$/i);
+          if (_scrollRestore) { setScrollMode_(true); document.getElementById('scrollSpellName').value = _scrollRestore[1]; handleScrollSpellInput(); }
           updateAddFlow();
-        });
+          setMainStatus(`<span class="error">${escapeHtml((res && res.error) || `Failed to add ${itemName}.`)}</span>`);
+          return;
+        }
+        if (res.ledgerEntry) {
+          inventoryResourceLedger = [res.ledgerEntry, ...(inventoryResourceLedger || [])].slice(0, 60);
+        }
+        const cachePrimed = primeInventoryCacheAfterAdd(res.item);
+        if (!cachePrimed) bustInventoryCache();
+        renderInventory();
+        setMainStatus(`<span class="success">${escapeHtml(res.message || `${itemName} added.`)}</span>`);
+        const duplicateCandidate = findDuplicateInventoryCandidate(res.item);
+        if (duplicateCandidate) {
+          const sameHolder = (res.item['Holder'] || '') === (duplicateCandidate['Holder'] || '');
+          const sameValue  = String(res.item['Value GP'] || '') === String(duplicateCandidate['Value GP'] || '');
+          if (!sameHolder || !sameValue) showCombineChoice(res.item, duplicateCandidate);
+        }
+      };
+      const onAddFail = err => {
+        inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optId);
+        cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+        if (commandMode === 'inventory') renderInventory();
+        setMainStatus(`<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`);
+        selectedEquipment = selectedSnapshot;
+        if (selectedSnapshot) {
+          fillAddFormFromEquipment(selectedSnapshot, false);
+        }
+        document.getElementById('libraryItemId').value = payloadSnapshot.libraryItemId || '';
+        document.getElementById('quickAddKey').value = quickKey;
+        document.getElementById('item').value = payloadSnapshot.item || '';
+        document.getElementById('category').value = payloadSnapshot.category || '';
+        document.getElementById('rarity').value = payloadSnapshot.rarity || '';
+        document.getElementById('qty').value = payloadSnapshot.qty || 1;
+        document.getElementById('holder').value = payloadSnapshot.holder || '';
+        document.getElementById('valueGp').value = payloadSnapshot.valueGp || '';
+        document.getElementById('factionRelevance').value = payloadSnapshot.factionRelevance || '';
+        document.getElementById('notes').value = payloadSnapshot.notes || '';
+        if (capturedSize) { const _sz = document.getElementById('quickAddSize'); if (_sz) _sz.value = capturedSize; }
+        const _scrollRestoreFail = String(payloadSnapshot.item || '').match(/^Scroll of (.+)$/i);
+        if (_scrollRestoreFail) { setScrollMode_(true); document.getElementById('scrollSpellName').value = _scrollRestoreFail[1]; handleScrollSpellInput(); }
+        document.getElementById('addStatus').innerHTML = `<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`;
+        updateAddFlow();
+      };
 
       if (isQuickAdd) {
-        runner.apiQuickAddInventory({
+        gasCall('apiQuickAddInventory', {
           quickKey,
           item: payload.item,
           qty: payload.qty,
@@ -8211,11 +8420,11 @@
           size: capturedSize,
           clientCharacter: myCharacterName || '',
           _syncClientId: syncClientId
-        });
+        }, onAddSuccess, onAddFail);
       } else if (isCustomAdd) {
-        runner.apiAddCustomInventory({ ...payload, _syncClientId: syncClientId });
+        gasCall('apiAddCustomInventory', { ...payload, _syncClientId: syncClientId }, onAddSuccess, onAddFail);
       } else {
-        runner.apiAddInventory({ ...payload, _syncClientId: syncClientId });
+        gasCall('apiAddInventory', { ...payload, _syncClientId: syncClientId }, onAddSuccess, onAddFail);
       }
     }
 

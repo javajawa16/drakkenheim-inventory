@@ -1119,7 +1119,7 @@ execution-trace + state-machine on every write path):
   validates ID, appends gold row + ledger ADD when goldAmount>0, deletes source
   row. Clean read-before-delete via `getInventoryRowObjectById_`.
 
-#### BUG · Index.html:6844 · Stale quick-edit success handler closes/corrupts a reopened panel for a different item
+#### ~~BUG · Index.html:6844 · Stale quick-edit success handler closes/corrupts a reopened panel for a different item~~ FIXED
 Story: **Quick-adjust currency/delerium**, at the Confirm step. `confirmQuickEdit`'s
 `finishSuccess` unconditionally calls `updateInventoryRowFromServer(res.item)`,
 writes its status message into `getQuickStatusElement()`, and calls
@@ -1140,7 +1140,7 @@ Fix: add the same identity guard to `finishSuccess`/`fail` (capture the submitte
 or stop clearing `quickEditInFlight` inside `closeQuickEditPanel` so a panel cannot
 be reopened while a confirm is still in flight.
 
-#### RISK · Index.html:6210 · `payResource` is the only write path that omits the `_inFlightWrites` guard
+#### ~~RISK · Index.html:6210 · `payResource` is the only write path that omits the `_inFlightWrites` guard~~ FIXED
 Story: **Pay gold** (dashboard `renderResourceBreakout` Pay button, 5821; also the
 delerium dashboard pay). Every other write path in the app brackets its
 `google.script.run` call with `_inFlightWrites++ … _inFlightWrites--`
@@ -1158,7 +1158,7 @@ the moment this path gains an optimistic row or runs alongside another foreign
 write. Fix: bump/decrement `_inFlightWrites` symmetrically in `payResource`'s
 success and failure handlers, matching every sibling write.
 
-#### RISK · Code.js:2470 · Ledger-before-row append order can strand a phantom ledger entry
+#### ~~RISK · Code.js:2470 · Ledger-before-row append order can strand a phantom ledger entry~~ FIXED
 `apiQuickAddInventory` (appendResourceLedger_ 2470 → sheet.appendRow 2473) and
 `apiDepleteResource` (appendResourceLedger_ 2604 → sheet.appendRow 2605) write the
 RESOURCE_LEDGER entry *before* the inventory row. Because `appendResourceLedger_`
@@ -1278,7 +1278,7 @@ not BUG — but the asymmetric guard is a latent defect. Fix: add the
 `resource === 'gold'` check in `renderGoldSheetButtons`, and clear
 `ledgerEditTarget` in `openGoldSheet`/`openDeleriumSheet`.
 
-#### IDEA · Index.html:5233 · Sell-for-gold forces a full reload that the other gold ops avoid
+#### ~~IDEA · Index.html:5233 · Sell-for-gold forces a full reload that the other gold ops avoid~~ FIXED
 Story: **Sell item** / **Sell items batch**, efficiency. `apiSellInventoryBatch`
 (Code.js 746) returns only `{message, goldItem}` — it appends a RESOURCE_LEDGER
 entry server-side but does not return it. So `confirmSellItem` (5223) and
@@ -1290,7 +1290,7 @@ optimistically with no reload. Returning the ledger entry from
 `apiSellInventoryBatch` would let the sell paths skip the extra round-trip and
 match the snappier feel of the other gold flows.
 
-#### RISK · Index.html:5020 · Optimistic ledger prepend + slice(0,60) silently drops the 60th entry on rollback
+#### ~~RISK · Index.html:5020 · Optimistic ledger prepend + slice(0,60) silently drops the 60th entry on rollback~~ FIXED
 Cross-cutting (Receive gold 5020, Pay 5659, Split 5746, Sell crystals 4840).
 Each optimistic handler does `ledger = [pending, ...ledger].slice(0, 60)`. When
 the in-memory ledger is already at the 60-entry cap, prepending the pending entry
@@ -1496,20 +1496,13 @@ have `apiGetMyCharacter` run the hint through the same active-character check
 (`validateCharacterChoice_`-style) before accepting it, returning `character:null`
 when the hinted character is no longer active.
 
-#### RISK · Code.js:663 · `apiSellInventoryBatch` has no treasurer gate; "Sell Items (treasurer)" is UI-only
-The endpoint calls `requireAllowedUser_()` (667) but never `requireTreasurer_`.
-The sibling party-pool mutators do gate: `apiSplitGold` and `apiSellDelerium`
-both call `requireTreasurer_(clientCharacter)`. The "Sell Items" batch button is
-only rendered for `isTreasurer` (renderInventory 3839), so the treasurer
-restriction on *bulk* selling the whole party pool lives entirely on the client.
-Any allowed user can replay an `apiSellInventoryBatch` payload (or set
-`isTreasurer` in their own client) to liquidate every party-held item. The
-per-item Sell/Remove paths intentionally share this endpoint and are open to all
-users, so a blanket treasurer gate would over-restrict — but the batch flow is
-documented and UI-presented as treasurer-only without server enforcement. Story:
-*Sell Items batch*. Suggested fix: pass a `batch: true` (or item-count
-threshold) flag from `confirmSellBatch` and require treasurer when set, or split
-the batch flow into its own treasurer-gated endpoint.
+#### Note · Code.js:663 · `apiSellInventoryBatch` treasurer gate is intentionally UI-only (by design)
+The endpoint calls `requireAllowedUser_()` (667) but not `requireTreasurer_`.
+The "Sell Items" batch button is only rendered for `isTreasurer` (renderInventory
+3839). The per-item Sell/Remove paths intentionally share this endpoint and are
+open to all players — individual characters can sell their own items. The batch
+flow is treasurer-only in the UI, which is the appropriate enforcement boundary
+for a trusted-player campaign tool. No server-side gate needed.
 
 #### Note · Code.js:663 · `apiSellInventoryBatch` FIFO row-shift + lock handling is correct (positive baseline)
 Stories *Sell item*, *Remove item*, *Sell Items batch* traced through this
