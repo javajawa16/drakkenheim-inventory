@@ -1,9 +1,112 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 10. Index.html lines 3001–4500 (inventory render, search)
+Next section: 11. Index.html lines 4501–6000 (gold/delerium UI, sync)
 
 ## Sessions
+
+### 2026-06-20 (run 49) — Sections audited: 10
+
+Section 10 = Index.html lines 3001–4500 (inventory render, search). Composition:
+DPR font scaling + phone detection (3001–3027), the swipe-to-delete gesture engine
+(3029–3185), navigation/command-search wiring (`setCommandMode` 3188, command-search
+handlers 3263–3322), the combine flow (`confirmCombineInventoryItem` 3369), the dice
+calculator (client-only, 3420–3506), inventory load/render (`loadInventory` 3588,
+`renderInventory` 3714, `renderInventoryRowCard` 3766, `renderInventoryDashboard`
+3830), the collaborative sync poll (`pollSync` 3868), the full Party Notes v2 CRUD
+set (3908–4272), and identity resolution (`applyIdentity` 4307, `confirmIdentity`
+4410). Read out into `handleInventoryDeleteActionById`/`deleteSelectedInventory`
+(7449/7464), `openInventoryPrimaryActionById` (6447), and `#mainStatus` placement
+(2082) to close each trace.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every in-range write path / component):
+
+- **Add library item → combine suggestion** — `findDuplicateInventoryCandidate`
+  (3337) → `showCombineChoice` (3346) → `confirmCombineInventoryItem` (3369).
+  Execution-trace clean: `_inFlightWrites` inc/dec balanced on both handlers,
+  double-tap guarded by nulling `pendingCombineChoice`, failure restores the
+  choice and re-enables the sheet. State machine (idle/in-flight/success/error)
+  has no stuck state. Note below.
+- **Delete inventory item (swipe)** — gesture engine (3037–3185) → tap vs.
+  swipe-open axis lock → Delete button → `handleInventoryDeleteActionById` (7449)
+  → `deleteSelectedInventory(..,{decrementOnly:true})`. Confirmed the dual
+  pointerup/touchend tap handlers are mutually guarded by `lastTapOpenedAt`
+  (no double-open). Confirmed swiped-open card survives `renderInventory()`
+  re-render via inline `offsetStyle` transform keyed on `swipedInventoryId`.
+- **Combine duplicate / View item details (tap card)** — `openInventoryPrimaryActionById`
+  reached from both pointerup (3081) and touchend (3153) tap branches.
+- **Quick-adjust currency/delerium** — dashboard stat buttons (`openGoldSheet`/
+  `openDeleriumSheet`, 3851/3854) entered from `renderInventoryDashboard`. IDEA below
+  (scoped totals vs party-pool sheet).
+- **Create / Edit / Pin / Archive / Delete note** — full trace through
+  `saveNoteForm` (4119), `toggleNotePin` (4245), `archiveNote` (4216),
+  `deleteNoteFromForm` (4091). Optimistic + rollback verified; `_notesActionInFlight`
+  Set blocks double-tap on pin/archive/delete; rollbacks locate the note by ID at
+  handler time (no stale index). RISK + IDEA below.
+- **Collaborative sync interference / Tab switch during in-flight / iOS
+  background-foreground** (cross-cutting) — `pollSync` (3868) deferral logic
+  exhaustively walked for inventory and notes: in-flight foreign change sets
+  `pendingForeignReload`/`pendingForeignNoteReload` without advancing `syncState`,
+  so the deferred reload is correctly re-detected and consumed on a later poll even
+  when interleaved with the local writer's own timestamp bump. No lost foreign
+  reload, no stuck flag. Confirmed clean.
+- **First-open identity** — `confirmIdentity` (4410) optimistic-apply +
+  `apiSetMyCharacter`; `loadMyIdentity` double-apply (cached then server) is
+  idempotent (`startSyncPoll` and `loadNotes` both self-guard). Confirmed clean.
+- **Dice calculator** — client-only, no server calls, no inventory/notes state;
+  confirmed not a write path (re-confirmed from run 48).
+
+#### RISK · Index.html:4174 · Failed note create pops the form sheet over an unrelated tab
+Story: **Create note**, navigate-away step. `saveNoteForm`'s create branch closes
+the form, inserts an optimistic card, then fires `apiCreateNote`. If the user
+switches to the Inventory or Add tab while the create round-trips and the call then
+fails, `restoreNoteForm_` (4174) calls `openNoteForm('add', …)` unconditionally —
+which only adds `.active` to `#noteFormSheet` and never checks `commandMode`. The
+New Note form sheet therefore springs open on top of whatever tab the user is now
+viewing (inventory/add), with `syncModalOpenState()` dimming that tab. The user gets
+an unexpected modal for a note they thought they'd left behind. Suggest: in
+`restoreNoteForm_`, if `commandMode !== 'notes'` keep the optimistic card out and
+instead surface a dismissible retry affordance (or switch to the notes tab first via
+`setCommandMode('notes')` before re-opening), rather than forcing the sheet open
+cross-tab. The edit branch (4136) does not have this problem — it only reverts data
+and calls `setMainStatus`.
+
+#### IDEA · Index.html:4261 · Notes action failures land in #mainStatus, off-screen on the notes tab
+Story: **Pin note / Edit note** failure feedback. Failure feedback for notes actions
+is inconsistent: `toggleNotePin` (4261/4269) and the edit branch of `saveNoteForm`
+(4151/4160) route errors to `setMainStatus`, but `#mainStatus` lives at the very top
+of `<main>` (line 2082), above the notes list — after any scroll on the notes tab it
+is off-screen, so a pin/edit failure looks silent even though the optimistic state
+correctly reverts (the pin visibly flips back, but with no explanation). Meanwhile
+`archiveNote` uses a blocking `alert()` (4232/4240) and `deleteNoteFromForm` uses
+`setMainStatus`. Suggest unifying notes-tab failures onto a single visible surface
+near the list (a transient toast or a status line inside `#notesSection`), so the
+three sibling actions give comparable, in-view feedback.
+
+#### IDEA · Index.html:3851 · Dashboard Gold/Delerium totals are scope-filtered but the cards open party-pool sheets
+Story: **Quick-adjust currency/delerium**, entry step. `renderInventoryDashboard`
+(3830) computes `totals.gold`/`totals.delerium` from the already scope-filtered
+`rows` it is handed by `renderInventory`. In a character scope, gold/delerium rows
+(which normally have an empty Holder and live in the party pool) are filtered out, so
+the dashboard shows "0 Gold / 0 Delerium" — yet tapping either card opens
+`openGoldSheet`/`openDeleriumSheet`, which always display the real party-pool total.
+The number the user taps does not match the number they land on. Party scope is
+consistent; only character scope mismatches. Suggest either computing the dashboard
+currency totals from the unscoped `inventoryRows` (party pool is shared, not
+per-character) or labelling the cards as party totals so the tap target reads
+consistently.
+
+#### Note · Index.html:3369 · Combine flow and sync-poll deferral traced clean
+Combine (`confirmCombineInventoryItem`) and the collaborative sync poll (`pollSync`)
+were the two highest-risk write/concurrency paths in this section and both trace
+cleanly. Combine: balanced `_inFlightWrites`, double-tap guarded, failure restores
+`pendingCombineChoice` and re-enables the sheet, success rewrites `inventoryRows` by
+ID (no stale index) and re-caches. Sync poll: deferral of foreign reloads during
+local in-flight writes does not advance `syncState`, guaranteeing the deferred reload
+is re-detected and consumed later even when interleaved with the local writer's own
+timestamp bump (verified the foreign-then-mine ordering ends in a `loadInventory(true)`
+with `pendingForeignReload` cleared). Stories named under run-49 header above.
 
 ### 2026-06-20 (run 48) — Sections audited: 9
 
