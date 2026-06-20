@@ -1530,6 +1530,7 @@
       .desktop-editor { display: block; }
       .mobile-sheet { display: none !important; }
       #descriptionSheet.active { display: block !important; }
+      #descActionSheet.active  { display: block !important; }
       #noteFormSheet.active    { display: block !important; }
       #goldSheet.active        { display: block !important; }
       #payReasonSheet.active   { display: block !important; }
@@ -2436,18 +2437,11 @@
         <div id="descriptionText" class="description-text"></div>
       </div>
       <div class="mobile-sheet-actions">
-        <div id="descRemoveRow" style="display:flex;align-items:stretch;gap:4px;margin-bottom:8px;">
-          <button type="button" id="descRemoveMinus" onclick="stepDescRemoveQty(-1)" disabled
-            style="flex:1;width:auto;border-radius:8px;padding:0;font-size:var(--phone-font-body,18px);background:rgba(70,86,119,.22);border:none;color:var(--accent);">−</button>
-          <span id="descRemoveQtyDisplay"
-            style="flex:0 0 auto;display:flex;align-items:center;justify-content:center;min-width:2.5em;text-align:center;font-size:var(--phone-font-body,15px);color:var(--text-secondary);">1</span>
-          <button type="button" id="descRemovePlus" onclick="stepDescRemoveQty(1)"
-            style="flex:1;width:auto;border-radius:8px;padding:0;font-size:var(--phone-font-body,18px);background:rgba(70,86,119,.22);border:none;color:var(--accent);">+</button>
-        </div>
-        <div style="display:flex;gap:8px;">
-          <button class="secondary" style="flex:1;width:auto;" onclick="openSellItemSheet()">Sell for Gold</button>
-          <button class="secondary" style="flex:1;width:auto;" onclick="openGiveItemSheet()">Give to…</button>
-          <button class="danger" style="flex:1;width:auto;" type="button" onclick="confirmDescRemove()">Remove</button>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+          <button class="secondary" type="button" onclick="openDescActionSheet('add')">Add</button>
+          <button class="secondary" type="button" onclick="openDescActionSheet('sell')">Sell</button>
+          <button class="secondary" type="button" onclick="openDescActionSheet('give')">Give to…</button>
+          <button class="danger" type="button" onclick="openDescActionSheet('remove')">Remove</button>
         </div>
         <button class="secondary" style="width:100%;margin-top:8px;" onclick="closeDescriptionSheet()">Done</button>
       </div>
@@ -2663,6 +2657,21 @@
     </div>
   </div>
 
+  <!-- ── Description action sub-sheet ─────────────────────────── -->
+  <div id="descActionSheet" class="mobile-sheet" style="z-index:81;">
+    <div class="mobile-sheet-panel">
+      <div class="mobile-sheet-header">
+        <div class="mobile-sheet-title" id="descActionTitle">Action</div>
+      </div>
+      <div id="descActionBody" class="mobile-sheet-body"></div>
+      <div class="mobile-sheet-actions">
+        <div id="descActionStatusRow" class="status"></div>
+        <button class="primary" type="button" id="descActionConfirmBtn" onclick="confirmDescAction()">Confirm</button>
+        <button class="secondary" style="width:100%;margin-top:8px;" type="button" onclick="closeDescActionSheet()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Identity picker (shown when Session.getActiveUser fails) ─ -->
   <div id="identitySheet" class="mobile-sheet" style="z-index:90;">
     <div class="mobile-sheet-panel">
@@ -2746,8 +2755,10 @@
     let inventoryExpandedGroups = {};
     let expandedResource = '';
     let resourcePayInFlight = {};
-    let quickEditInFlight = false;
+    let quickEditInFlight  = false;
     let descActionInFlight = false;
+    let _descActionMode    = '';
+    let descActionQty      = 1;
     let lastResourceUndo = {};
     let suppressInventoryClickUntil = 0;
     let searchTimer         = null;
@@ -6688,6 +6699,344 @@
       document.getElementById('descriptionSheet').classList.remove('active');
       document.querySelectorAll('.inventory-card').forEach(c => c.classList.remove('selected'));
       syncModalOpenState();
+    }
+
+    /* ── Description action sub-sheet ─────────────────────────────── */
+    function openDescActionSheet(mode) {
+      const item = selectedInventory;
+      if (!item) return;
+      _descActionMode = mode;
+      descActionQty   = 1;
+
+      const titles = { add: 'Add', sell: 'Sell for Gold', give: 'Give to…', remove: 'Remove' };
+      const titleEl = document.getElementById('descActionTitle');
+      if (titleEl) titleEl.textContent = `${titles[mode] || mode}: “${item['Item'] || 'Item'}”`;
+
+      const statusEl = document.getElementById('descActionStatusRow');
+      if (statusEl) { statusEl.innerHTML = ''; statusEl.style.display = 'none'; }
+      const confirmBtn = document.getElementById('descActionConfirmBtn');
+      if (confirmBtn) {
+        confirmBtn.disabled = false;
+        confirmBtn.style.display = mode === 'give' ? 'none' : '';
+      }
+
+      renderDescActionBody_();
+      document.getElementById('descActionSheet').classList.add('active');
+      syncModalOpenState();
+    }
+
+    function closeDescActionSheet() {
+      document.getElementById('descActionSheet').classList.remove('active');
+      syncModalOpenState();
+    }
+
+    function renderDescActionBody_() {
+      const body = document.getElementById('descActionBody');
+      if (!body) return;
+      const maxQty = getDescRemoveTotalQty_();
+
+      const stepperHtml = (qty, max) => `
+        <div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-top:8px;">
+          <button class="sell-batch-stepper-btn" type="button" id="descActionMinus" onclick="stepDescAction(-1)"${qty <= 1 ? ' disabled' : ''}>−</button>
+          <span id="descActionQtyDisplay" style="min-width:2.5em;text-align:center;font-size:var(--phone-font-body,18px);">${qty}</span>
+          <button class="sell-batch-stepper-btn" type="button" id="descActionPlus" onclick="stepDescAction(1)"${qty >= max ? ' disabled' : ''}>+</button>
+        </div>`;
+
+      if (_descActionMode === 'add') {
+        body.innerHTML = `
+          <div class="field" style="text-align:center;">
+            <label>Quantity to add</label>
+            ${stepperHtml(descActionQty, 99)}
+          </div>`;
+      } else if (_descActionMode === 'sell') {
+        body.innerHTML = `
+          <div class="field" style="text-align:center;">
+            <label>Quantity to sell</label>
+            ${stepperHtml(descActionQty, maxQty)}
+          </div>
+          <div class="field">
+            <label for="descActionGold">Gold received (gp)</label>
+            <input id="descActionGold" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0">
+          </div>
+          <div class="field">
+            <label for="descActionNote">Note (optional)</label>
+            <input id="descActionNote" placeholder="Sold to merchant, traded…">
+          </div>`;
+      } else if (_descActionMode === 'give') {
+        const item = selectedInventory;
+        const currentHolder = String(item && item['Holder'] || '');
+        const options = [
+          { holder: '', label: 'Party Pool', meta: 'Return to shared inventory' },
+          ...characterOptions.map(c => ({ holder: c.character, label: c.character, meta: `Assign to ${c.character}` }))
+        ].filter(o => o.holder.toLowerCase() !== currentHolder.toLowerCase());
+        body.innerHTML = options.length
+          ? `<div class="section-stack">${options.map(o =>
+              `<button class="result-card give-option" type="button" data-holder="${escapeHtml(o.holder)}" onclick="descActionGiveTo(this.dataset.holder)">
+                <div class="item-title">${escapeHtml(o.label)}</div>
+                <div class="item-meta">${escapeHtml(o.meta)}</div>
+              </button>`).join('')}</div>`
+          : `<div class="status centered">No other characters to give to.</div>`;
+      } else if (_descActionMode === 'remove') {
+        body.innerHTML = `
+          <div class="field" style="text-align:center;">
+            <label>Quantity to remove</label>
+            ${stepperHtml(descActionQty, maxQty)}
+          </div>`;
+      }
+    }
+
+    function stepDescAction(delta) {
+      const maxQty = _descActionMode === 'add' ? 99 : getDescRemoveTotalQty_();
+      descActionQty = Math.max(1, Math.min(maxQty, descActionQty + delta));
+      const qtyEl   = document.getElementById('descActionQtyDisplay');
+      const minusBtn = document.getElementById('descActionMinus');
+      const plusBtn  = document.getElementById('descActionPlus');
+      if (qtyEl)    qtyEl.textContent = descActionQty;
+      if (minusBtn) minusBtn.disabled = descActionQty <= 1;
+      if (plusBtn)  plusBtn.disabled  = descActionQty >= maxQty;
+    }
+
+    function descActionGiveTo(newHolder) {
+      closeDescActionSheet();
+      giveItemToCharacter(newHolder);
+    }
+
+    function confirmDescAction() {
+      if (_descActionMode === 'add')    _confirmDescActionAdd_();
+      else if (_descActionMode === 'sell')   _confirmDescActionSell_();
+      else if (_descActionMode === 'remove') _confirmDescActionRemove_();
+    }
+
+    function _confirmDescActionAdd_() {
+      if (descActionInFlight) return;
+      const item = selectedInventory;
+      if (!item) return;
+      const libraryItemId = item['Library Item ID'] || '';
+      const payload = {
+        libraryItemId,
+        item:             item['Item'] || '',
+        category:         item['Category'] || '',
+        rarity:           item['Rarity'] || '',
+        qty:              String(descActionQty),
+        holder:           item['Holder'] || '',
+        valueGp:          item['Value GP'] || '',
+        factionRelevance: item['Faction Relevance'] || '',
+        notes:            item['Notes'] || '',
+        clientCharacter:  myCharacterName || '',
+        _syncClientId:    syncClientId
+      };
+
+      const statusEl  = document.getElementById('descActionStatusRow');
+      const confirmBtn = document.getElementById('descActionConfirmBtn');
+      if (statusEl)  { statusEl.textContent = 'Adding…'; statusEl.style.display = ''; }
+      if (confirmBtn) confirmBtn.disabled = true;
+
+      const optId  = '_opt_' + Date.now();
+      const optVgp = payload.valueGp !== '' && payload.valueGp !== null ? Number(payload.valueGp) : '';
+      const optRow = {
+        'Inventory ID':    optId,
+        'Item':            payload.item,
+        'Library Item ID': payload.libraryItemId,
+        'Category':        payload.category,
+        'Rarity':          payload.rarity,
+        'Qty':             String(descActionQty),
+        'Holder':          payload.holder,
+        'Value GP':        optVgp !== '' ? String(optVgp) : '',
+        'Total Value GP':  optVgp !== '' ? String(descActionQty * optVgp) : '',
+        'Notes':           payload.notes,
+        'Date Added':      new Date().toISOString().replace('T', ' ').slice(0, 19),
+        'Added By':        myCharacterName || ''
+      };
+      inventoryRows = [optRow, ...inventoryRows];
+      cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+
+      closeDescActionSheet();
+      closeDescriptionSheet();
+
+      descActionInFlight = true;
+      _inFlightWrites++;
+      const isCustom = !libraryItemId;
+      const runner = google.script.run
+        .withSuccessHandler(res => {
+          _inFlightWrites--;
+          descActionInFlight = false;
+          inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optId);
+          if (!res || !res.ok) {
+            cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+            renderInventory();
+            setMainStatus(`<span class="error">${escapeHtml((res && res.error) || 'Add failed.')}</span>`);
+            return;
+          }
+          if (res.ledgerEntry) {
+            inventoryResourceLedger = [res.ledgerEntry, ...(inventoryResourceLedger || [])].slice(0, 60);
+          }
+          const cachePrimed = primeInventoryCacheAfterAdd(res.item);
+          if (!cachePrimed) bustInventoryCache();
+          renderInventory();
+          setMainStatus(`<span class="success">${escapeHtml(res.message || `${payload.item} added.`)}</span>`);
+        })
+        .withFailureHandler(err => {
+          _inFlightWrites--;
+          descActionInFlight = false;
+          inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optId);
+          cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+          renderInventory();
+          setMainStatus(`<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`);
+        });
+      if (isCustom) runner.apiAddCustomInventory(payload);
+      else          runner.apiAddInventory(payload);
+    }
+
+    function _confirmDescActionSell_() {
+      if (descActionInFlight) return;
+      const item = selectedInventory;
+      if (!item) return;
+      const goldInput  = document.getElementById('descActionGold');
+      const noteInput  = document.getElementById('descActionNote');
+      const goldAmount = Math.max(0, Number((goldInput && goldInput.value) || 0));
+      const note       = (noteInput && noteInput.value) || `Sold ${item['Item'] || 'item'}`;
+
+      const rollupKey = item._rollupKey || getInventoryRollupKey(item);
+      const repHolder = String(item['Holder'] || '').trim();
+      const allForKey = inventoryRows.filter(r => getInventoryRollupKey(r) === rollupKey);
+      const holders   = new Set(allForKey.map(r => String(r['Holder'] || '').trim()));
+      const isMultiple = holders.size > 1;
+      const matchingRows = allForKey
+        .filter(r => isMultiple || String(r['Holder'] || '').trim() === repHolder)
+        .sort((a, b) => new Date(a['Date Added'] || 0) - new Date(b['Date Added'] || 0));
+
+      const items = [];
+      let remaining = descActionQty;
+      for (const row of matchingRows) {
+        if (remaining <= 0) break;
+        const rowQty = toNumber(row['Qty'] || 1);
+        const sellFromRow = Math.min(remaining, rowQty);
+        items.push({ inventoryId: row['Inventory ID'], qtyToSell: sellFromRow });
+        remaining -= sellFromRow;
+      }
+      if (!items.length) return;
+
+      closeDescActionSheet();
+      closeDescriptionSheet();
+      closeInventoryPanels(false);
+
+      const previousRows = inventoryRows.slice();
+      descActionInFlight = true;
+      _inFlightWrites++;
+      const soldIds = {};
+      items.forEach(i => { soldIds[i.inventoryId] = i.qtyToSell; });
+      inventoryRows = previousRows.reduce((acc, r) => {
+        const sell = soldIds[r['Inventory ID']];
+        if (!sell) { acc.push(r); return acc; }
+        const newQty = toNumber(r['Qty'] || 1) - sell;
+        if (newQty > 0) acc.push({ ...r, 'Qty': newQty });
+        return acc;
+      }, []);
+      cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+      renderInventory();
+
+      google.script.run
+        .withSuccessHandler(res => {
+          _inFlightWrites--;
+          descActionInFlight = false;
+          if (!res || !res.ok) {
+            inventoryRows = previousRows;
+            cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+            renderInventory();
+            setMainStatus('<span class="error">Sell failed — try again.</span>');
+            return;
+          }
+          if (res.goldItem) primeInventoryCacheAfterAdd(res.goldItem);
+          cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+          renderInventory();
+          loadInventory(true);
+        })
+        .withFailureHandler(() => {
+          _inFlightWrites--;
+          descActionInFlight = false;
+          inventoryRows = previousRows;
+          cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+          renderInventory();
+          setMainStatus('<span class="error">Sell failed — try again.</span>');
+        })
+        .apiSellInventoryBatch({ items, goldAmount, note, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
+    }
+
+    function _confirmDescActionRemove_() {
+      if (descActionInFlight) return;
+      if (!selectedInventory) return;
+
+      const rollupKey = selectedInventory._rollupKey || getInventoryRollupKey(selectedInventory);
+      const repHolder = String(selectedInventory['Holder'] || '').trim();
+      const allForKey = inventoryRows.filter(r => getInventoryRollupKey(r) === rollupKey);
+      const holders   = new Set(allForKey.map(r => String(r['Holder'] || '').trim()));
+      const isMultiple = holders.size > 1;
+      const matchingRows = allForKey
+        .filter(r => isMultiple || String(r['Holder'] || '').trim() === repHolder)
+        .sort((a, b) => new Date(a['Date Added'] || 0) - new Date(b['Date Added'] || 0));
+      if (!matchingRows.length) return;
+
+      let remaining = descActionQty;
+      const items = [];
+      for (const row of matchingRows) {
+        if (remaining <= 0) break;
+        const rowQty    = toNumber(row['Qty'] || 1);
+        const removeQty = Math.min(remaining, rowQty);
+        items.push({ inventoryId: row['Inventory ID'], qtyToSell: removeQty });
+        remaining -= removeQty;
+      }
+
+      const previousRows = inventoryRows.slice();
+      items.forEach(({ inventoryId, qtyToSell }) => {
+        const row = inventoryRows.find(r => r['Inventory ID'] === inventoryId);
+        if (!row) return;
+        const rowQty = toNumber(row['Qty'] || 1);
+        if (qtyToSell >= rowQty) {
+          inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== inventoryId);
+        } else {
+          inventoryRows = inventoryRows.map(r => r['Inventory ID'] === inventoryId
+            ? { ...r, 'Qty': String(rowQty - qtyToSell) } : r);
+        }
+      });
+
+      const itemName = selectedInventory['Item'] || 'item';
+      const qty      = descActionQty;
+      closeDescActionSheet();
+      closeDescriptionSheet();
+      cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+      renderInventory();
+
+      descActionInFlight = true;
+      _inFlightWrites++;
+      google.script.run
+        .withSuccessHandler(res => {
+          _inFlightWrites--;
+          descActionInFlight = false;
+          if (!res || !res.ok) {
+            inventoryRows = previousRows;
+            cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+            renderInventory();
+            setMainStatus(`<span class="error">Remove failed: ${escapeHtml((res && res.error) || 'Unknown error')}</span>`);
+          } else {
+            bustInventoryCache();
+            loadInventory(true);
+          }
+        })
+        .withFailureHandler(err => {
+          _inFlightWrites--;
+          descActionInFlight = false;
+          inventoryRows = previousRows;
+          cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+          renderInventory();
+          setMainStatus(`<span class="error">Remove failed: ${escapeHtml(err.message || String(err))}</span>`);
+        })
+        .apiSellInventoryBatch({
+          items,
+          goldAmount: 0,
+          note: `Removed ${qty}\xd7 ${itemName}`,
+          clientCharacter: myCharacterName || '',
+          _syncClientId: syncClientId
+        });
     }
 
     function deleteSelectedInventoryFromDescription() {
