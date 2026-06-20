@@ -1,9 +1,76 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 8. Index.html lines 1–1500 (HTML structure, CSS)
+Next section: 9. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-20 (run 47) — Sections audited: 8
+
+Section 8 = Index.html lines 1–1500, which is entirely the `<head>` design-token +
+CSS block (no `<body>` markup falls in range; HTML structure starts later). There
+are no write paths or `google.script.run` calls in range, so the audit focused on
+CSS rules that drive *behavioral state* — section/sheet visibility
+(`.section.active`, `.mobile-sheet.active`), the scroll-lock
+(`body.app-modal-open`), the disabled-button loading spinner (504–510), and the
+swipe-action reveal CSS — tracing each into the JS that toggles it.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every CSS-driven UI state):
+
+- **All mobile-sheet flows** (quick-adjust currency/delerium, edit/combine item,
+  description sheet → give/sell/remove, pay → pay-reason, sell batch, note form,
+  identity picker). The shared mechanism is `body.app-modal-open { overflow:
+  hidden }` (line 110) plus `.mobile-sheet.active { display: block }`. Traced the
+  scroll-lock state machine across all open/close paths (greps at 3216–8319).
+- **Receive/sell crystals** — delerium button enable/disable + class-swap logic
+  (`updateDeleriumButtonStates`, 4691) against the spinner CSS.
+- **Sell Items batch** (treasurer) — `sellBatchConfirmBtn` initial/idle state vs
+  the disabled-spinner CSS. One bug below.
+
+#### RISK · Index.html:5546 · Sell-batch confirm shows an infinite spinner while idle
+The Sell Items batch confirm button is declared `<button id="sellBatchConfirmBtn"
+class="success" … disabled>Select items to sell</button>` (5546–5547) and
+`updateSellBatchCount` (5436) only ever toggles `btn.disabled` / `btn.textContent`
+— it never changes the class. The CSS at 504–510 attaches an infinite `btn-spin`
+loading spinner to **every** disabled `.success` (and `.primary`) button via
+`button.success:disabled::after`. Net effect: the moment a treasurer opens the
+sell-batch sheet (Sell Items batch story, step a — happy path), the confirm button
+sits disabled in its validation state ("Select items to sell" / "Set quantities to
+sell") with a spinner whirring next to the label, falsely signalling that work is
+in progress before the user has tapped anything. The spinner only stops once they
+add a unit (button enabled) — i.e. feedback is inverted: it spins when idle and is
+solid when actionable. Contrast the delerium buttons (`updateDeleriumButtonStates`,
+4700–4708), which correctly swap to `class="secondary"` while validation-disabled
+precisely so the spinner CSS does not apply. Fix: either swap `sellBatchConfirmBtn`
+to `secondary` while `totalUnits === 0` (mirroring the delerium pattern), or gate
+the spinner pseudo-element on an explicit `.is-loading` class set only during the
+in-flight write rather than on `:disabled`.
+
+#### Note · Index.html:110 · Scroll-lock state machine is clean across stacked sheets
+`syncModalOpenState()` (3324) sets `app-modal-open` by recomputing
+`Boolean(document.querySelector('.mobile-sheet.active'))` on every sheet
+open/close (3360, 3366, 3430, 4083, 4088, 4332, 4453, 4532, 4539, 4940, 5130,
+5135, 5160, 5165, 5181, 5186, 5278, 5386, 6701, 6725, 6730, 7169–7175, 7320–7325,
+8319). Because it recomputes from "is *any* sheet still active," stacked sheets
+behave correctly: pay-reason (`z-index: 80`, line 231) over the pay flow, and
+give/sell sheets over the description sheet, all keep the body scroll locked until
+the *last* sheet closes — closing the top sheet does not prematurely unlock scroll.
+The only two direct `classList.add/remove('app-modal-open')` calls (identity open
+4395, identity confirm 4423; description open 6589) are harmless: the adds are
+idempotent, and the one direct remove runs at identity-confirm time when no other
+sheet can be stacked. No stuck `overflow: hidden` state found on any navigate-away
+or tab-switch path. Confirms the delerium button class-swap (4700–4708) as the
+correct guard against the disabled-spinner trap flagged above.
+
+#### Note · Index.html:1151 · Notes swipe edit/delete action CSS is unreferenced (not a leak)
+`.notes-edit-action` / `.notes-delete-action` (1151–1183, `opacity: 0` reveal-on-
+swipe styling) appear only in CSS — no HTML template or JS ever creates or reveals
+these elements (grep across the file returns CSS-only). README's Party Notes spec
+lists Pin/Archive buttons + tap-to-edit, no swipe-to-edit/delete on note cards, so
+this is unused styling, not a hidden tappable element bleeding through. No
+behavioral bug; flagged only to confirm it was checked (dead style, not reported
+per audit rules).
 
 ### 2026-06-20 (run 46) — Sections audited: 7
 
