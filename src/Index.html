@@ -1116,18 +1116,6 @@
     html.is-phone .add-step-num { width: 26px; height: 26px; font-size: var(--phone-font-label, 16px); }
     html.is-phone .add-step-arrow { font-size: var(--phone-font-body, 24px); }
 
-    /* ─── Add Item: scrollable read-only description ─────────────── */
-    /* Always a bounded scroll box so it never pushes the form off-screen;
-       "Show more" just grows the box — it stays scrollable either way. */
-    .add-desc-collapse {
-      position: relative;
-      max-height: 440px;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-    }
-    .add-desc-collapse.expanded { max-height: 700px; }
-    html.is-phone .add-desc-collapse { max-height: 520px; }
-    html.is-phone .add-desc-collapse.expanded { max-height: 80vh; }
 
     /* ─── Add Item: empty-search custom CTA ──────────────────────── */
     .search-empty {
@@ -2187,14 +2175,14 @@
     <div id="appHeaderTitle" class="app-header-title">Weiners of Drakkenheim</div>
     <div class="search-bar-row">
       <div class="search-control">
-        <input id="commandSearch" class="search-input" placeholder="Filter inventory…" oninput="handleCommandSearchInput()" onfocus="handleCommandSearchFocus()">
+        <input id="commandSearch" class="search-input" placeholder="Filter inventory…" enterkeyhint="done" oninput="handleCommandSearchInput()" onfocus="handleCommandSearchFocus()" onkeydown="handleSearchEnter(event)">
         <button id="commandSearchClear" class="search-clear" type="button" aria-label="Clear search" onclick="clearCommandSearch()">×</button>
       </div>
       <button id="diceTab" type="button" onclick="openDiceCalc()" aria-label="Dice roller"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12,2 20,7 22,16 12,22 2,16 4,7"/><polyline points="4,7 12,11 20,7"/><line x1="12" y1="2" x2="12" y2="11"/><line x1="12" y1="11" x2="2" y2="16"/><line x1="12" y1="11" x2="22" y2="16"/><line x1="12" y1="11" x2="12" y2="22"/></svg></button>
     </div>
     <div class="notes-toolbar" id="notesHeaderToolbar" style="display:none;padding:0;border-bottom:0;background:transparent;">
       <div class="search-control">
-        <input id="notesSearchInput" class="search-input" placeholder="Search notes…" oninput="handleNotesSearch()">
+        <input id="notesSearchInput" class="search-input" placeholder="Search notes…" enterkeyhint="done" oninput="handleNotesSearch()" onkeydown="handleSearchEnter(event)">
         <button class="search-clear" id="notesSearchClear" type="button" onclick="clearNotesSearch()">×</button>
       </div>
       <select id="notesCatFilter" class="notes-cat-select" onchange="applyNotesFilters()">
@@ -2387,19 +2375,16 @@
             <input id="item" placeholder="Custom item name" oninput="handleCustomItemNameInput()">
           </div>
 
-          <!-- Library item stat block + description (read-only) -->
+          <!-- Library item stat block + description (read-only, shown in full) -->
           <div class="add-library-preview library-only">
             <div id="addStatBlock" class="description-stat-block" style="display:none;"></div>
             <div id="addDescStatus" class="status"></div>
-            <div id="addDescWrap" class="add-desc-collapse">
-              <div id="addDescText" class="add-description-text"></div>
-            </div>
+            <div id="addDescText" class="add-description-text"></div>
           </div>
 
-          <!-- Customize (left) + Show more (right) share one row to save vertical space -->
+          <!-- Customize spans the full row -->
           <div class="add-desc-actions">
             <button class="secondary customize-item-btn" type="button" onclick="customizeSelectedItem()">Customize Item</button>
-            <button id="addDescToggle" type="button" class="secondary customize-item-btn" style="display:none;" onclick="toggleAddDescCollapse()">Show more</button>
           </div>
 
           <!-- Notes: shown for library and custom, hidden for quick-add -->
@@ -3424,6 +3409,15 @@
       const el = document.getElementById('mainStatus');
       if (!el) return;
       el.innerHTML = html || '';
+    }
+
+    function handleSearchEnter(e) {
+      // Enter has no other purpose in these filter fields — dismiss the iOS keyboard
+      // so the filtered list can be scrolled.
+      if (e.key === 'Enter' || e.keyCode === 13) {
+        e.preventDefault();
+        if (e.target && typeof e.target.blur === 'function') e.target.blur();
+      }
     }
 
     function handleCommandSearchInput() {
@@ -8050,35 +8044,6 @@
       return parts.join('');
     }
 
-    function toggleAddDescCollapse() {
-      const wrap = document.getElementById('addDescWrap');
-      const btn  = document.getElementById('addDescToggle');
-      if (!wrap || !btn) return;
-      const expanded = wrap.classList.toggle('expanded');
-      btn.textContent = expanded ? 'Show less' : 'Show more';
-    }
-
-    function resetAddDescCollapse_() {
-      const wrap = document.getElementById('addDescWrap');
-      const btn  = document.getElementById('addDescToggle');
-      if (wrap) wrap.classList.remove('expanded');
-      if (btn)  { btn.style.display = 'none'; btn.textContent = 'Show more'; }
-    }
-
-    function setupAddDescCollapse_() {
-      const wrap = document.getElementById('addDescWrap');
-      const btn  = document.getElementById('addDescToggle');
-      if (!wrap || !btn) return;
-      wrap.classList.remove('expanded');
-      btn.textContent = 'Show more';
-      // The box is always scrollable; only offer "Show more" (grow the box) when the
-      // content is tall enough that growing it actually reveals more at once.
-      requestAnimationFrame(() => {
-        const overflows = wrap.scrollHeight > wrap.clientHeight + 8;
-        btn.style.display = overflows ? '' : 'none';
-      });
-    }
-
     function selectEquipmentResult(index) {
       const result = equipmentResults[index];
       if (!result) return;
@@ -8123,12 +8088,10 @@
           if (statEl) { statEl.innerHTML = html; statEl.style.display = html ? '' : 'none'; }
           if (descEl) { descEl.textContent = item.description || ''; }
           if (statusEl) { statusEl.textContent = ''; }
-          setupAddDescCollapse_();
         } else {
           if (statEl) { statEl.innerHTML = ''; statEl.style.display = 'none'; }
           if (descEl) { descEl.textContent = ''; }
           if (statusEl) { statusEl.textContent = item.itemId ? 'Loading…' : ''; }
-          resetAddDescCollapse_();
         }
       }
 
@@ -8155,7 +8118,6 @@
         if (statEl)   { statEl.innerHTML = ''; statEl.style.display = 'none'; }
         if (descEl)   { descEl.textContent = ''; }
         if (statusEl) { statusEl.textContent = ''; }
-        resetAddDescCollapse_();
       }
 
       const sizeField = document.getElementById('quickAddSizeField');
