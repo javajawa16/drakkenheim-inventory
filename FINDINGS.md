@@ -1,9 +1,82 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 1. Code.js lines 1–500 (config, helpers, validation)
+Next section: 2. Code.js lines 501–1100 (auth, character, inventory read)
 
 ## Sessions
+
+### 2026-06-20 (run 53) — Sections audited: 1
+
+Section 1 = Code.js lines 1–500 (config, helpers, validation). Composition: `CONFIG`
++ schema constants (`EQUIPMENT_HEADERS`, `INVENTORY_HEADERS`, `RESOURCE_LEDGER_HEADERS`,
+`DELERIUM_HEADERS`, `CHARACTERS_HEADERS`, `USER_PROFILE_HEADERS`), the three lists that
+feed write/validation paths (`APPROVED_INVENTORY_CATEGORIES` 29, `DELERIUM_SIZE_VALUES`
+42, `QUICK_ADD_ITEMS` 52), the spreadsheet menu (`onOpen`, `addEmailColumnToCharacters`,
+`runHealthCheck`), the web-app entry (`doGet` 238, `include_` 253), tab/setup utilities
+(`setupInventoryTabs` 261, `resetAppDataSheets` 286, `setupLookupsSheet_` 330,
+`setupLogSheet_` 367), and the batched clean-library import (`resetCleanEquipmentLibrary`
+391, `continueCleanEquipmentLibrary` 417). No user-facing `api*` write path lives strictly
+in 1–500; the section is consumed by stories via `doGet` (every story's app-load step) and
+via the three constant lists. Read out to `apiGetQuickAddItems` (883), `apiGetCategories`
+(874), client `loadQuickAddItems`/`QUICK_ADD_ITEMS` (Index.html 2835/2900), client
+`DELERIUM_SIZES` (Index.html 2786) and the delerium counter handlers (4546–4859) to close
+the constant-consumer traces.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus execution-trace +
+state-machine on the in-range admin write path):
+
+- **App load (cross-cutting, every story)** — `doGet` → `createTemplateFromFile('Index')
+  .evaluate()`. Happy: template renders, `ALLOWALL` set so it embeds. Failure: eval throws
+  → catch returns a static "temporarily unavailable — please reload" page; user can retry by
+  reload, no stuck server state (read-only entry). See RISK below re: the fallback page.
+- **Add custom item / quick-add** (Custom Item / quick-add tiles) — `QUICK_ADD_ITEMS`
+  (Code.js 52) → `apiGetQuickAddItems` (883) → client `loadQuickAddItems` (2900). Server and
+  client object shapes match field-for-field (`quickKey/name/category/rarity/valueGp/terms`);
+  client ships an identical hardcoded fallback list (2835) and only overwrites it on
+  `ok && items.length`, so a failed/slow `apiGetQuickAddItems` leaves the quick-add tiles
+  fully functional — clean failure path. All quick-add categories ('Potion','Other',
+  'Tool / Gear','Scroll') are members of `APPROVED_INVENTORY_CATEGORIES`.
+- **Add library item** (categories) — `apiGetCategories` (874) returns
+  `APPROVED_INVENTORY_CATEGORIES.slice()`; the add/edit validators downstream check membership.
+  In-range list is internally consistent with the quick-add categories.
+- **Receive / Sell crystals** (delerium size handling) — `DELERIUM_SIZE_VALUES` (42,
+  lowercase) is the authoritative size list: emitted lowercase to the client via
+  `sizeOptions` (3579) and validated lowercase at 2476/2603/2821/2926/3632/3748. Client
+  `DELERIUM_SIZES` (Index.html 2786) is lowercase and identical; counter buttons emit
+  `data-size` lowercase (4578/4610) and `apiAdjustDelerium`-bound payloads carry lowercase
+  sizes. No title-case mismatch — the LOOKUPS sheet's title-case "Delerium Types" (335) is a
+  separate spreadsheet-dropdown list and does not gate the API.
+
+Secondary scan (uncovered write paths in-range): only `continueCleanEquipmentLibrary` (admin,
+not a catalog story). Execution-trace/state-machine: `requireAdminUser_` runs before
+`LockService.getDocumentLock().tryLock` (no lock leak on auth failure); lock released in a
+`finally` (577); progress checkpointed to DocumentProperties every chunk
+(`CLEAN_LIB_NEXT_READ_ROW/WRITE_ROW/COPIED_COUNT`) with `SpreadsheetApp.flush()`, so a 4.25-min
+timeout-abort resumes cleanly on the next run — clean resumable-batch trace.
+
+#### RISK · Code.js:247 · doGet error fallback omits setXFrameOptionsMode(ALLOWALL)
+The happy path sets `.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)` (244),
+which is only meaningful if the web app is loaded inside an iframe (e.g. embedded in a
+campaign page / Google Site / the Wallpaper). The `catch` fallback (247–249) builds its
+`HtmlOutput` with only `.setTitle(...)` — no `setXFrameOptionsMode`. In an embedded
+deployment, GAS's default X-Frame-Options would block the fallback frame, so on a template-eval
+failure the user sees a blank/blocked frame instead of the intended "temporarily unavailable —
+please reload" message — exactly the moment graceful degradation is supposed to fire. Affects
+the app-load failure step of every story when embedded. Fix: chain
+`.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)` onto the fallback output too.
+(If the app is only ever opened as a top-level `/exec` navigation, impact is nil — but then the
+ALLOWALL on the success path is also unnecessary, so the two paths should at least agree.)
+
+#### Note · Code.js:42 · Section 1 constants/entry traced clean; one latent drift risk
+Traced: App load (doGet) cross-cutting; Add custom item/quick-add (failure resilience via
+hardcoded client fallback); Add library item (categories); Delerium receive/sell (size constant
+end-to-end). All four constant→consumer paths are internally consistent and case-correct.
+Latent (not a current bug): `DELERIUM_SIZE_VALUES` (Code.js:42) and `DELERIUM_SIZES`
+(Index.html:2786) are duplicated by hand, as are the two `QUICK_ADD_ITEMS` lists — the client
+quick-add list self-heals from the server, but the delerium lists do not (client never refetches
+sizes), so adding a size to one list and not the other would silently make new-size crystals fail
+server-side `includes()` validation with no client-visible reason. Worth a shared source if the
+size taxonomy ever changes.
 
 ### 2026-06-20 (run 52) — Sections audited: 13
 
