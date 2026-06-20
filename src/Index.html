@@ -3422,6 +3422,7 @@
     }
 
     function showCombineChoice(newItem, existingItem) {
+      if (commandMode !== 'inventory' && commandMode !== 'add') return;
       pendingCombineChoice = {
         sourceId: newItem['Inventory ID'],
         targetId: existingItem['Inventory ID'],
@@ -3903,9 +3904,9 @@
     }
 
     function renderInventoryDashboard(rows) {
-      const totals = rows.reduce((acc, row) => {
+      // Always compute resource totals from the full list so the card numbers match what the sheets open to.
+      const totals = (inventoryRows || rows).reduce((acc, row) => {
         const name = String(row['Item'] || '').toLowerCase();
-        const category = String(row['Category'] || '').toLowerCase();
         const qty = toNumber(row['Qty'] || 0);
 
         if (isGoldItem_(row)) {
@@ -4249,12 +4250,14 @@
         function restoreNoteForm_() {
           notesData = notesData.filter(x => x.noteId !== tempId);
           renderNotesList();
+          if (commandMode !== 'notes') return false;
           openNoteForm('add', null, savedContent.relatedItemId);
           document.getElementById('noteFormTitle').value    = savedContent.title;
           document.getElementById('noteFormCategory').value = savedContent.category;
           document.getElementById('noteFormBody').value     = savedContent.note;
           document.getElementById('noteFormTags').value     = savedContent.tags;
           document.getElementById('noteFormPinned').checked = savedContent.pinned;
+          return true;
         }
 
         google.script.run
@@ -4272,17 +4275,25 @@
               lastNotesLoadAt = Date.now();
               renderNotesList();
             } else {
-              restoreNoteForm_();
-              const s = document.getElementById('noteFormStatus');
-              if (s) s.innerHTML = `<span class="error">Save failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`;
+              const restored = restoreNoteForm_();
+              if (restored) {
+                const s = document.getElementById('noteFormStatus');
+                if (s) s.innerHTML = `<span class="error">Save failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`;
+              } else {
+                setMainStatus(`<span class="error">Note save failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
+              }
             }
           })
           .withFailureHandler(() => {
             _inFlightNoteWrites--;
             notesSaving = false;
-            restoreNoteForm_();
-            const s = document.getElementById('noteFormStatus');
-            if (s) s.innerHTML = '<span class="error">Save failed — please try again.</span>';
+            const restored = restoreNoteForm_();
+            if (restored) {
+              const s = document.getElementById('noteFormStatus');
+              if (s) s.innerHTML = '<span class="error">Save failed — please try again.</span>';
+            } else {
+              setMainStatus('<span class="error">Note save failed — please try again.</span>');
+            }
           })
           .apiCreateNote({ title, category, note, tags, pinned, relatedItemId, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
       }
@@ -5508,6 +5519,8 @@
       if (!btn) return;
       btn.textContent = totalUnits === 0 ? 'Set quantities to sell' : `Sell ${totalUnits} unit${totalUnits !== 1 ? 's' : ''}`;
       btn.disabled = totalUnits === 0;
+      btn.classList.toggle('success', totalUnits > 0);
+      btn.classList.toggle('secondary', totalUnits === 0);
       updateSellBatchPhbValue();
     }
 
@@ -5612,7 +5625,7 @@
           </div>
         </div>
         <div id="sellBatchStatus" class="status"></div>
-        <button id="sellBatchConfirmBtn" class="success" style="width:100%;margin-top:10px;"
+        <button id="sellBatchConfirmBtn" class="secondary" style="width:100%;margin-top:10px;"
                 type="button" onclick="confirmSellBatch()" disabled>Select items to sell</button>
         <button class="secondary btn-full" type="button"
                 onclick="closeSellBatchSheet()">Cancel</button>
@@ -7706,7 +7719,7 @@
           confirmBtn.style.cssText = 'display:block;width:100%;margin-top:6px;';
           confirmBtn.textContent = rollupCount > 1 ? 'Confirm delete this addition' : 'Confirm delete all';
           const capturedId = inventoryId;
-          confirmBtn.addEventListener('click', () => deleteSelectedInventory(capturedId, { deleteConfirmed: true }));
+          confirmBtn.addEventListener('click', () => { confirmBtn.disabled = true; deleteSelectedInventory(capturedId, { deleteConfirmed: true }); });
           status.appendChild(confirmBtn);
         }
         return;
@@ -8333,7 +8346,8 @@
         'Added By':        myCharacterName || ''
       };
       inventoryRows = [optRow, ...inventoryRows];
-      cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+      // Don't cache here — _inFlightWrites is still 0 and cacheInventoryRows would write the _opt_ row to localStorage.
+      // The success/fail handlers update the cache after gasCall has incremented the counter.
 
       status.textContent = 'Adding…';
       setMainStatus(`<span class="success">Adding ${escapeHtml(itemName)}…</span>`);
@@ -8349,22 +8363,24 @@
         if (!res || !res.ok) {
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
-          selectedEquipment = selectedSnapshot;
-          if (selectedSnapshot) fillAddFormFromEquipment(selectedSnapshot, false);
-          document.getElementById('libraryItemId').value = payloadSnapshot.libraryItemId || '';
-          document.getElementById('quickAddKey').value = quickKey;
-          document.getElementById('item').value = payloadSnapshot.item || '';
-          document.getElementById('category').value = payloadSnapshot.category || '';
-          document.getElementById('rarity').value = payloadSnapshot.rarity || '';
-          document.getElementById('qty').value = payloadSnapshot.qty || 1;
-          document.getElementById('holder').value = payloadSnapshot.holder || '';
-          document.getElementById('valueGp').value = payloadSnapshot.valueGp || '';
-          document.getElementById('factionRelevance').value = payloadSnapshot.factionRelevance || '';
-          document.getElementById('notes').value = payloadSnapshot.notes || '';
-          if (capturedSize) { const _sz = document.getElementById('quickAddSize'); if (_sz) _sz.value = capturedSize; }
-          const _scrollRestore = String(payloadSnapshot.item || '').match(/^Scroll of (.+)$/i);
-          if (_scrollRestore) { setScrollMode_(true); document.getElementById('scrollSpellName').value = _scrollRestore[1]; handleScrollSpellInput(); }
-          updateAddFlow();
+          if (selectedEquipment === null) {
+            selectedEquipment = selectedSnapshot;
+            if (selectedSnapshot) fillAddFormFromEquipment(selectedSnapshot, false);
+            document.getElementById('libraryItemId').value = payloadSnapshot.libraryItemId || '';
+            document.getElementById('quickAddKey').value = quickKey;
+            document.getElementById('item').value = payloadSnapshot.item || '';
+            document.getElementById('category').value = payloadSnapshot.category || '';
+            document.getElementById('rarity').value = payloadSnapshot.rarity || '';
+            document.getElementById('qty').value = payloadSnapshot.qty || 1;
+            document.getElementById('holder').value = payloadSnapshot.holder || '';
+            document.getElementById('valueGp').value = payloadSnapshot.valueGp || '';
+            document.getElementById('factionRelevance').value = payloadSnapshot.factionRelevance || '';
+            document.getElementById('notes').value = payloadSnapshot.notes || '';
+            if (capturedSize) { const _sz = document.getElementById('quickAddSize'); if (_sz) _sz.value = capturedSize; }
+            const _scrollRestore = String(payloadSnapshot.item || '').match(/^Scroll of (.+)$/i);
+            if (_scrollRestore) { setScrollMode_(true); document.getElementById('scrollSpellName').value = _scrollRestore[1]; handleScrollSpellInput(); }
+            updateAddFlow();
+          }
           setMainStatus(`<span class="error">${escapeHtml((res && res.error) || `Failed to add ${itemName}.`)}</span>`);
           return;
         }
@@ -8387,25 +8403,25 @@
         cacheInventoryRows(inventoryRows, inventoryResourceLedger);
         if (commandMode === 'inventory') renderInventory();
         setMainStatus(`<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`);
-        selectedEquipment = selectedSnapshot;
-        if (selectedSnapshot) {
-          fillAddFormFromEquipment(selectedSnapshot, false);
+        if (selectedEquipment === null) {
+          selectedEquipment = selectedSnapshot;
+          if (selectedSnapshot) fillAddFormFromEquipment(selectedSnapshot, false);
+          document.getElementById('libraryItemId').value = payloadSnapshot.libraryItemId || '';
+          document.getElementById('quickAddKey').value = quickKey;
+          document.getElementById('item').value = payloadSnapshot.item || '';
+          document.getElementById('category').value = payloadSnapshot.category || '';
+          document.getElementById('rarity').value = payloadSnapshot.rarity || '';
+          document.getElementById('qty').value = payloadSnapshot.qty || 1;
+          document.getElementById('holder').value = payloadSnapshot.holder || '';
+          document.getElementById('valueGp').value = payloadSnapshot.valueGp || '';
+          document.getElementById('factionRelevance').value = payloadSnapshot.factionRelevance || '';
+          document.getElementById('notes').value = payloadSnapshot.notes || '';
+          if (capturedSize) { const _sz = document.getElementById('quickAddSize'); if (_sz) _sz.value = capturedSize; }
+          const _scrollRestoreFail = String(payloadSnapshot.item || '').match(/^Scroll of (.+)$/i);
+          if (_scrollRestoreFail) { setScrollMode_(true); document.getElementById('scrollSpellName').value = _scrollRestoreFail[1]; handleScrollSpellInput(); }
+          document.getElementById('addStatus').innerHTML = `<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`;
+          updateAddFlow();
         }
-        document.getElementById('libraryItemId').value = payloadSnapshot.libraryItemId || '';
-        document.getElementById('quickAddKey').value = quickKey;
-        document.getElementById('item').value = payloadSnapshot.item || '';
-        document.getElementById('category').value = payloadSnapshot.category || '';
-        document.getElementById('rarity').value = payloadSnapshot.rarity || '';
-        document.getElementById('qty').value = payloadSnapshot.qty || 1;
-        document.getElementById('holder').value = payloadSnapshot.holder || '';
-        document.getElementById('valueGp').value = payloadSnapshot.valueGp || '';
-        document.getElementById('factionRelevance').value = payloadSnapshot.factionRelevance || '';
-        document.getElementById('notes').value = payloadSnapshot.notes || '';
-        if (capturedSize) { const _sz = document.getElementById('quickAddSize'); if (_sz) _sz.value = capturedSize; }
-        const _scrollRestoreFail = String(payloadSnapshot.item || '').match(/^Scroll of (.+)$/i);
-        if (_scrollRestoreFail) { setScrollMode_(true); document.getElementById('scrollSpellName').value = _scrollRestoreFail[1]; handleScrollSpellInput(); }
-        document.getElementById('addStatus').innerHTML = `<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`;
-        updateAddFlow();
       };
 
       if (isQuickAdd) {
