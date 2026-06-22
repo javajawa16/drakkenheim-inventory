@@ -1,9 +1,105 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
+Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
 
 ## Sessions
+
+### 2026-06-22 (run 56) — Sections audited: 4
+
+Section 4 = Code.js lines 1701–2300 (sell, combine, gold ops). The physical
+1701–2300 range holds the validators/sanitizers (`validateMoney_`,
+`sanitizeInventoryForClient_`, `sanitizeResourceLedgerForClient_`), the
+resource-ledger read/write helpers (`getResourceLedgerForClient_` 1792,
+`appendResourceLedger_` 1962, `deleteResourceLedgerRowsForInventory_` 1989), the
+auto-combine helpers (`findMatchingInventoryRow_` 1860, `mergeIntoExistingRow_`
+1890), sync (`bumpSync_` 2122 / `apiGetSyncState` 2132), `apiGetInventory` (2084),
+and the **Party Notes v2 write APIs** (`apiCreateNote` 2233, `apiUpdateNote`
+2274, `apiArchiveNote` 2305). Traced every story whose write path consumes these
+helpers — out to the named-theme endpoints (`apiSellInventoryBatch` 663,
+`apiSellInventoryItem` 2964, `apiSellDelerium` 3019, `apiCombineInventoryItems`
+3528, `apiReceiveResource` 2879, `apiDepleteResource` 2691, `apiSendGoldToMember`
+3242, `apiSplitGold` 3104, `apiUndoMemberSend` 3490, `apiUpdateLedgerNote` 2823,
+`apiAddInventory` 2327, `apiAddCustomInventory` 2443) and their client callers in
+Index.html (add flow, `receivedGold` 5165, `confirmPayWithReason` 5829, `splitGold`
+5927, `undoResourcePay` 6483, `updateLedgerNoteFromBottom` 6160, notes handlers
+`saveNoteForm` 4259 / `toggleNotePin` 4395 / `archiveNote` 4366 /
+`deleteNoteFromForm` 4231). Each traced happy → failure-at-step → navigate-away →
+friction with execution-trace + state-machine on every write path.
+
+Stories traced: **Add library item**, **Add custom item**, **Combine duplicate**,
+**Sell item / Sell crystals / Sell batch**, **Receive gold**, **Pay gold**, **Split
+gold evenly**, **Undo last pay**, **Edit ledger note**, **Create note**, **Edit
+note**, **Pin note**, **Archive note**, and the three cross-cutting sync stories.
+
+#### BUG · Code.js:1890 · Auto-combine on add silently discards the user-entered Notes and Faction Relevance
+**Stories: Add library item / Add custom item (happy path, server auto-merge
+step).** When `apiAddInventory` (2387) / `apiAddCustomInventory` (2497) find an
+existing row matching Item/Category/Rarity/Holder/Value GP, they call
+`mergeIntoExistingRow_` (1890), which does
+`Object.assign({}, existing, { Qty, 'Total Value GP' })` — i.e. it keeps **every**
+field of the existing row and writes back only the new quantity and total. The
+just-submitted row's `Notes` and `Faction Relevance` (both validated and built
+into `rowObj` at 2382/2380 and 2492/2490) are therefore dropped on the floor. A
+user who searches an item the party already holds, types a note like "from the
+goblin cave," sets a holder, and taps Add gets the qty bumped but their note
+**silently vanishes** — no warning, and the optimistic client row is reconciled
+to the merged server row by Inventory ID so the note disappears on the next
+render. This is a real data-loss path that the prior "no double-count" note
+(Code.js:1754) did not cover. The contrast is stark: the *explicit* combine
+endpoint `apiCombineInventoryItems` deliberately concatenates notes
+(`${targetNotes}\n\n${sourceNotes}` at 3601) and preserves faction (3590-3594) —
+the *implicit* auto-combine does neither. Fix: in `mergeIntoExistingRow_` (or at
+the two call sites) merge Notes/Faction the same way `apiCombineInventoryItems`
+does, or skip the auto-merge when the incoming row carries a non-empty Notes /
+Faction value that differs from the existing row so the new note survives as its
+own row.
+
+#### RISK · Code.js:3242 · Member-send by a non-treasurer has no client Undo path (and no server treasurer gate)
+**Stories: Pay gold (route to character) + Undo last pay.** `apiSendGoldToMember`
+(3242) gates only on `requireAllowedUser_()` — any party member can move gold from
+the party pool to another member's holder. But the client only *records* the undo
+handle and renders the Undo button **inside `if (isTreasurer)`**
+(`confirmPayWithReason` onSuccess, Index.html:5892-5899). So a non-treasurer who
+pays a member (the pay-reason sheet lists every member to everyone — no treasurer
+gate in `openPayReasonSheet`) commits a pool deduct + member credit with **no
+client-side reversal**: `lastResourceUndo['gold']` is never set, the Undo button
+never appears, and there is no other in-app reverse path (the dashboard
+`undoResourcePay` UI was already found dead in run-on-section-12). The only way
+back is a manual sheet edit. Either gate `apiSendGoldToMember` to treasurer (if
+members shouldn't move pool gold) or render/store the undo handle for all users,
+not just the treasurer.
+
+#### IDEA · Index.html:4259 · Second note cannot be saved while the first create is still in flight
+**Story: Create note (friction).** `notesSaving` is a module-global set true at
+the top of `saveNoteForm` (4260/4273) and reset to `false` **only** inside the
+create/edit async success/failure handlers. The create branch closes the form
+immediately (4310) but leaves `notesSaving === true` for the whole round-trip. If
+the user taps **+** to start a *different* note and hits Save before the first
+create's handler fires, `if (notesSaving) return;` (4260) makes Save a **silent
+no-op** — no status text, no disabled button, nothing. On a slow GAS round-trip
+(seconds) this reads as a dead Save button. Unlike the inventory add flow (which
+keys re-entry per-operation), `notesSaving` is a single global that conflates
+"this save is in flight" with "no save may start." Fix: scope the guard to the
+in-flight operation (or give the create path its own optimistic-and-release model
+like pin/archive), and/or surface feedback when a save is suppressed.
+
+#### Note · Code.js:3104 · Gold receive / split / pay optimistic + lock discipline traced clean
+**Stories: Receive gold, Split gold evenly, Pay gold (Purchase + member),
+Edit ledger note.** `apiReceiveResource` (2879), `apiSplitGold` (3104),
+`apiDepleteResource` (2691), `apiSendGoldToMember` (3242) and
+`apiUpdateLedgerNote` (2823) all `requireAllowedUser_`/`requireTreasurer_`
+*before* `lock.tryLock(10000)` (auth failure never holds a lock) and release in
+`finally` on every path including the busy-return. Client optimism is sound:
+`receivedGold` (5165) and `splitGold` (5927) mutate only `inventoryResourceLedger`
+with a `_pendingId` entry, strip it by id on ok/!ok/transport-fail, restore the
+saved amount+note on failure, and double-tap is foreclosed by clearing the amount
+input synchronously (a re-tap reads `''` → `0` → early-return). `confirmPayWithReason`
+(5829) primes returned pool-deduct/credit rows by Inventory ID so a sync clobber
+self-heals. Split ledger entries share one `nowStr` Timestamp but carry distinct
+Inventory IDs, so `apiUpdateLedgerNote`'s preferred `entryId` match (2857) stays
+unambiguous — the timestamp-fallback timezone gap is confined to the already-
+documented deferred case (optimistic pending rows with empty Inventory ID).
 
 ### 2026-06-20 (run 55) — Sections audited: 3
 
