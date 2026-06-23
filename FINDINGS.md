@@ -25,9 +25,97 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
+Next section: 6. Code.js lines 2901–3500 (batch sell, give, remove)
 
 ## Sessions
+
+### 2026-06-23 (run 57) — Sections audited: 5
+
+Section 5 = Code.js 2301–2900 (Party Notes update/archive, inventory add /
+custom-add / quick-add, deplete/receive resource, ledger-note edit). Stories
+traced end-to-end (happy / failure-at-step / navigate-away / friction):
+**Edit note**, **Archive note**, **Pin note**, **Create note** (client
+`saveNoteForm`/`archiveNote`/`toggleNotePin`/`deleteNoteFromForm`),
+**Add library item** & **Add custom item** (`apiAddInventory` /
+`apiAddCustomInventory` ↔ `submitAddItem` onAddSuccess/onAddFail at
+Index.html:8500–8614), **Quick-add** (`apiQuickAddInventory`),
+**Receive gold** & **Receive crystals** (`apiReceiveResource` ↔ `receivedGold`
+5213 / delerium receive 4900), **Quick-adjust / dashboard pay**
+(`apiDepleteResource`), **Edit ledger note** (`apiUpdateLedgerNote` ↔
+`updateLedgerNoteFromBottom` 6219). Cross-cutting sync interference verified
+against the `_inFlightWrites` / `_inFlightNoteWrites` deferral in `pollSync`
+(4006) — inventory and note reloads are correctly deferred mid-write.
+
+#### BUG · Index.html:4299, 4334 · Note create AND edit throw ReferenceError on undeclared `tags`/`pinned` — Party Notes save is completely dead
+**Stories: Create note (happy path, optimistic-insert step) and Edit note
+(happy path, optimistic-update step).** The note form (`#noteFormSheet`,
+Index.html:2617–2644) contains only Title, Category, Note body, and a hidden
+Related Item ID — there is **no Tags input and no Pinned checkbox** (the README
+"Title, Category, Note body, Tags, Pinned checkbox" line is stale; the fields
+were evidently removed in a refactor). But `saveNoteForm()` still reads two
+identifiers that no longer exist:
+- **Edit path (4299):**
+  `Object.assign(notesData[idx], { title, category, note, tags, pinned, relatedItemId, updatedAt: now })`
+- **Create path (4334):** `if (pinned) notesData.unshift(optimistic); else notesData.push(optimistic);`
+
+`tags` and `pinned` are declared **nowhere** in scope — the only `tags`
+binding is at 4139, inside `renderNotesList()`'s `forEach` callback (a different
+function). Reading an undeclared identifier throws `ReferenceError: tags is not
+defined` (create path: `pinned is not defined`) in **both** strict and sloppy
+mode — this is not the create-an-implicit-global case (that applies only to
+*assignment*). So:
+- Tap **Save Note** on a brand-new note → line 4334 throws *before* the
+  optimistic row is inserted, *before* `closeNoteForm()`, and *before*
+  `apiCreateNote` is ever called. The form stays open, no status message, no
+  server write. The note is silently lost. **Create note is 100% broken.**
+- Tap **Save Note** while editing → line 4299 throws *before* `closeNoteForm()`
+  / `renderNotesList()` / `apiUpdateNote`. The edit never persists and the form
+  hangs open. **Edit note is 100% broken.**
+
+`notesSaving` was set `true` at 4289 and the throw escapes before any reset, so
+on the create path `notesSaving` is left stuck `true` — every *subsequent*
+Save tap hits the `if (notesSaving) return;` guard at 4278 and does nothing,
+even after the form is manually reopened. The user is fully wedged until reload.
+
+Fix: remove `tags` and `pinned` from the 4299 `Object.assign` (the edit only
+patches Category/Title/Note/Related Item ID server-side at 4328 anyway, and
+tags/pinned aren't user-editable here), and change 4334 to an unconditional
+`notesData.push(optimistic)`. **Do not** simply default `const tags='',
+pinned=false` and keep them in the assign — that would optimistically wipe an
+existing note's tags and un-pin it locally on every edit until the next reload,
+since the patch sent to the server doesn't touch those columns. (Pin is still
+handled correctly by the separate `toggleNotePin`, which is unaffected.)
+
+#### RISK · Code.js:2949 · `apiReceiveResource` (delerium) and `apiSellDelerium` write rows one-by-one — partial failure orphans crystals while the client rolls back fully
+**Stories: Receive crystals / Sell crystals (failure-at-step).** Both functions
+loop over the selected sizes doing per-item `sheet.appendRow(...)` +
+`appendResourceLedger_(...)` (receive: 2949–2970; sell: 3064–3086). If the
+script dies mid-loop (lock timeout near the 30s ceiling, transient sheet/quota
+error on append after the first row), rows already appended are committed, but
+the `catch` returns `{ ok:false }`. The client then restores `previousRows` /
+`previousLedger` wholesale (delerium receive handler 4958–4966) and shows
+"Failed" — so the user believes nothing happened, yet 1–2 crystal rows are now
+live in `PARTY_INVENTORY` and surface on the next poll/reload as phantom stock
+nobody intentionally added. `apiSplitGold` was already converted to a single
+atomic `setValues` for exactly this reason (run-56 RISK Code.js:3104); the
+delerium multi-row paths still carry the old non-atomic pattern. Lower
+probability than split (no large per-member fan-out) but same failure shape.
+Fix: build all rows and commit with one `setValues`, mirroring the split fix.
+
+#### Note · Code.js:2346 / Index.html:8530 · Add-item, receive-gold, ledger-note-edit flows trace clean
+**Stories traced clean: Add library item, Add custom item, Receive gold, Edit
+ledger note.** `apiAddInventory`/`apiAddCustomInventory` hold the document lock
+across read→match→write and release it in `finally` on every path; the client
+optimistic add (8500) correctly defers caching until after `gasCall` bumps
+`_inFlightWrites`, restores the full form (including scroll-spell and quick-add
+size) on failure (8536–8553), and only caches the rollback. `receivedGold`
+(5213) snapshots amount+note, clears inputs, inserts optimistic ledger+gold
+rows, and restores both inputs and `previousLedger` on either failure callback —
+no stuck state on navigate-away (handlers are id-keyed, not DOM-keyed).
+`updateLedgerNoteFromBottom` (6219) re-enables its buttons on both success and
+failure and matches the local entry by Inventory ID first. The auto-combine
+Notes/Faction discard (BUG Code.js:1890) was already fixed in run 56 and the
+merge now carries the incoming row — confirmed still correct here.
 
 ### 2026-06-23 (run 56, consolidated) — Sections audited: 4
 
