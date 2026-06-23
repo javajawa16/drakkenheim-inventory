@@ -4311,6 +4311,9 @@
         if (idx >= 0) Object.assign(notesData[idx], { title, category, note, tags, pinned, relatedItemId, updatedAt: now });
         closeNoteForm();
         renderNotesList();
+        // Release the save lock now that the optimistic write is committed and the form
+        // is closed — a different note can be saved while this round-trip runs.
+        notesSaving = false;
         _inFlightNoteWrites++;
         _notesActionInFlight.add(editId);  // shared per-note guard with pin/archive
         google.script.run
@@ -4344,6 +4347,7 @@
         notesLoaded = true;
         closeNoteForm();
         renderNotesList();
+        notesSaving = false;  // optimistic row shown + form closed; allow another note immediately
         _inFlightNoteWrites++;
 
         function restoreNoteForm_() {
@@ -4419,7 +4423,7 @@
           if (!res || !res.ok) {
             if (backup && !notesData.some(n => n.noteId === backup.noteId)) notesData.unshift(backup);
             renderNotesList();
-            alert('Archive failed: ' + escapeHtml((res && res.error) || 'Unknown error'));
+            setMainStatus(`<span class="error">Archive failed: ${escapeHtml((res && res.error) || 'Unknown error')}</span>`);
           }
         })
         .withFailureHandler(() => {
@@ -4427,7 +4431,7 @@
           _inFlightNoteWrites--;
           if (backup && !notesData.some(n => n.noteId === backup.noteId)) notesData.unshift(backup);
           renderNotesList();
-          alert('Archive failed — please try again.');
+          setMainStatus('<span class="error">Archive failed — please try again.</span>');
         })
         .apiArchiveNote({ noteId, _syncClientId: syncClientId });
     }
@@ -5911,11 +5915,22 @@
       inventoryResourceLedger = [pendingEntry, ...(inventoryResourceLedger || [])].slice(0, 60);
 
       const optGoldPayId = '_opt_gold_' + Date.now();
+      const optGoldCreditId = isMember ? '_opt_goldc_' + Date.now() : null;
       inventoryRows = [{
         'Inventory ID': optGoldPayId, 'Item': 'Gold', 'Category': 'Currency', 'Rarity': '',
         'Qty': String(-amount), 'Holder': isPartyScope ? '' : goldSheetScope,
         'Value GP': '1', 'Total Value GP': String(-amount)
       }, ...inventoryRows];
+      // Member-send is a transfer (total party gold is unchanged): also show the
+      // recipient's +amount credit optimistically so any view that counts member gold
+      // doesn't flicker down-then-up across the round-trip.
+      if (isMember) {
+        inventoryRows = [{
+          'Inventory ID': optGoldCreditId, 'Item': 'Gold', 'Category': 'Currency', 'Rarity': '',
+          'Qty': String(amount), 'Holder': reason,
+          'Value GP': '1', 'Total Value GP': String(amount)
+        }, ...inventoryRows];
+      }
 
       if (amountInput) amountInput.value = '';
       if (noteInput) noteInput.value = '';
@@ -5925,7 +5940,7 @@
 
       const removePending = () => {
         inventoryResourceLedger = inventoryResourceLedger.filter(e => e['_pendingId'] !== pendingId);
-        inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optGoldPayId);
+        inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optGoldPayId && r['Inventory ID'] !== optGoldCreditId);
       };
       const restoreInputs = () => {
         if (amountInput) amountInput.value = amount;
@@ -6474,46 +6489,57 @@
 
       const amountInput = document.getElementById(`${resource}PayAmount`);
       const status = document.getElementById(`${resource}PayStatus`);
-      const button = document.getElementById(`${resource}PayButton`);
-      const amount = Number(amountInput && amountInput.value);
       const sizeSelect = document.getElementById('deleriumPaySize');
+      const amount = Number(amountInput && amountInput.value);
 
       if (!Number.isFinite(amount) || amount <= 0) {
         if (status) status.innerHTML = '<span class="error">Enter an amount to pay.</span>';
         return;
       }
 
+      const sizeVal = (resource === 'delerium' && sizeSelect) ? sizeSelect.value : '';
       resourcePayInFlight[resource] = true;
       lastResourceUndo[resource] = null;
-      if (button) {
-        button.disabled = true;
-        button.textContent = 'Recording…';
-      }
-      if (amountInput) {
-        amountInput.value = '';
-      }
-      if (status) status.textContent = 'Recording…';
+
+      // Optimistic: insert a negative-qty row so the dashboard total drops instantly,
+      // matching the Gold/Delerium sheets (otherwise the total sits stale for the whole
+      // round-trip). renderInventory rebuilds the breakout; its button reads
+      // resourcePayInFlight, so it correctly shows "Recording…".
+      const optId  = '_opt_paydash_' + Date.now();
+      const optRow = resource === 'gold'
+        ? { 'Inventory ID': optId, 'Item': 'Gold', 'Category': 'Currency', 'Rarity': '',
+            'Qty': String(-amount), 'Holder': '', 'Value GP': '1', 'Total Value GP': String(-amount) }
+        : { 'Inventory ID': optId, 'Item': 'Delerium ' + titleCase(sizeVal || 'crystal'),
+            'Category': 'Delerium', 'Rarity': '', 'Qty': String(-amount), 'Holder': '',
+            'Value GP': '', 'Total Value GP': '' };
+      const previousRows = inventoryRows.slice();
+      inventoryRows = [optRow, ...inventoryRows];
+      renderInventory();
+
+      const showError = msg => {
+        const s = document.getElementById(`${resource}PayStatus`);
+        if (s) s.innerHTML = `<span class="error">${escapeHtml(msg)}</span>`;
+        const a = document.getElementById(`${resource}PayAmount`);
+        if (a) a.value = amount;
+      };
 
       gasCall('apiDepleteResource', {
           resource,
           amount,
-          size: resource === 'delerium' && sizeSelect ? sizeSelect.value : '',
+          size: sizeVal,
           note: 'Dashboard pay',
           clientCharacter: myCharacterName || '',
           _syncClientId: syncClientId
         },
         res => {
           resourcePayInFlight[resource] = false;
+          inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optId);
           if (!res || !res.ok) {
-            if (amountInput) amountInput.value = amount;
-            if (button) {
-              button.disabled = false;
-              button.textContent = 'Pay';
-            }
-            if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Pay failed.')}</span>`;
+            inventoryRows = previousRows;
+            renderInventory();
+            showError((res && res.error) || 'Pay failed.');
             return;
           }
-
           primeInventoryCacheAfterAdd(res.item);
           if (res.ledgerEntry) {
             inventoryResourceLedger = [res.ledgerEntry, ...(inventoryResourceLedger || [])].slice(0, 60);
@@ -6528,12 +6554,9 @@
         },
         err => {
           resourcePayInFlight[resource] = false;
-          if (amountInput) amountInput.value = amount;
-          if (button) {
-            button.disabled = false;
-            button.textContent = 'Pay';
-          }
-          if (status) status.innerHTML = `<span class="error">Pay failed: ${escapeHtml(err.message || err)}</span>`;
+          inventoryRows = previousRows;
+          renderInventory();
+          showError('Pay failed: ' + (err.message || err));
         }
       );
     }

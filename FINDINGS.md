@@ -21,6 +21,24 @@ Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
 > the note `updatedAt` mis-sort (mik3fq 4279 + n73txz 4274), and the member-send
 > gold flicker (yp7n4x 5829 + pvfqw0 5856).
 
+> **✅ RESOLUTION — all fourteen findings fixed (2026-06-23).** BUGs + RISKs in
+> commit `6b17cde`; the four IDEAs in this same commit. Both deployed to `/exec`.
+> Per-finding status below:
+> - **BUG `Code.js:1890`** — FIXED: `mergeIntoExistingRow_` now takes the incoming row and merges Notes/Faction like `apiCombineInventoryItems` (all 3 callers updated).
+> - **BUG `Index.html:5160`** — FIXED: `undoGoldPay` now calls `renderGoldSheetBody()` so the reversed ledger entry disappears immediately.
+> - **BUG `Index.html:4279`** — FIXED: optimistic note `updatedAt` now uses the server `yyyy-MM-dd HH:mm:ss` format (`formatNoteTs_`); no more same-day mis-sort.
+> - **BUG `Index.html:4317`** — FIXED: failed create off the Notes tab stashes content in `pendingFailedNote` and rehydrates on next Notes open (no loss).
+> - **RISK `Code.js:3104`** — FIXED: `apiSplitGold` builds all rows and commits them in one `setValues` write (atomic for the inventory side).
+> - **RISK `Code.js:3242`** — FIXED: member-send undo handle is stored/rendered for all users, not just the treasurer.
+> - **RISK `Index.html:4862`** — FIXED: `receiveDelerium` warns instead of silently dropping a typed "Gold received" amount.
+> - **RISK `Index.html:4276`** — FIXED: note edit shares the per-note `_notesActionInFlight` guard and the edit form is blocked while a write is in flight.
+> - **RISK `Index.html:4594`** — FIXED: `openGoldSheet` clears the static amount/note inputs on open.
+> - **RISK `Index.html:7214`** — FIXED: optimistic sell/remove no longer cache to localStorage before the `gasCall`.
+> - **IDEA `Index.html:6414`** — FIXED: dashboard inline Pay is now optimistic (negative-qty temp row, reconciled on resolve).
+> - **IDEA `Index.html:5829`** — FIXED: member-send inserts an optimistic recipient credit row so the total no longer flickers.
+> - **IDEA `Index.html:4259`** — FIXED: `notesSaving` released once the optimistic write commits, so a second note saves immediately.
+> - **IDEA `Index.html:4382`** — FIXED: archive-note failures routed through `setMainStatus` (uniform, non-blocking) instead of `alert()`.
+
 #### BUG · Code.js:1890 · Auto-combine on add silently discards the user-entered Notes and Faction Relevance
 _Source: audit/findings-section-4._
 **Stories: Add library item / Add custom item (happy path, server auto-merge
