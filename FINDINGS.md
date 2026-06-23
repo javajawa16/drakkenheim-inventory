@@ -1,5 +1,29 @@
 # Audit Findings — Drakkenheim Inventory
 
+> ## ⚠️ AUDIT PROTOCOL — READ BEFORE STARTING A RUN
+> **This file on `main` is the single source of truth. Do not fork it.**
+>
+> 1. **Branch from `main`** (which always holds the latest consolidated findings).
+>    Never branch from an older audit branch or a previous run's branch.
+> 2. **Append, don't rewrite.** Add your new `### <date> (run N) — Sections
+>    audited: X` block directly **below** this header and **above** the previous
+>    run — newest first. Leave every earlier run intact.
+> 3. **Increment the run number** from the most recent run in this file (the top
+>    Sessions entry). Check it first so two runs never share a number.
+> 4. **Advance the Audit Cursor** below to the next unaudited section when done.
+> 5. **One run = one branch = one commit to `FINDINGS.md`**, then open a PR into
+>    `main` (or commit to `main` directly if that's the workflow). Delete the
+>    branch after merge so stale forks don't accumulate.
+> 6. **Finding format:** `#### BUG|RISK|IDEA|Note · File:line · Short title`
+>    followed by the detailed body. When you fix a finding, mark it with a
+>    `✅ RESOLUTION` line citing the commit (see run 56 for the pattern).
+> 7. If you discover an issue another run already logged, reference the existing
+>    finding instead of duplicating it.
+>
+> _Background: runs 56-era were authored six times on parallel forks of this
+> file, none seeing the others. Following the rules above keeps that from
+> recurring._
+
 ## Audit Cursor
 Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
 
