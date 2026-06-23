@@ -1,9 +1,148 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
+Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
 
 ## Sessions
+
+### 2026-06-23 (run 56, consolidated) — Sections audited: 4
+
+> **Consolidation note.** Section 4 ("sell, combine, gold ops", Code.js
+> 1701–2300 + the gold/sell/combine endpoints it feeds) was independently audited
+> **three times** on parallel branches that each forked their own copy of
+> FINDINGS.md, so none of them saw the others' work:
+> `audit/findings-section-4` (2026-06-22), `audit/findings-section-4-run56`
+> (2026-06-23), and `claude/trusting-galileo-yp7n4x` (2026-06-23). This entry
+> merges all **eight distinct findings** (2 BUG · 3 RISK · 3 IDEA) into a single
+> run. Each finding is tagged with its source branch; where the branches reached
+> different conclusions on the same code it is called out inline.
+
+#### BUG · Code.js:1890 · Auto-combine on add silently discards the user-entered Notes and Faction Relevance
+_Source: audit/findings-section-4._
+**Stories: Add library item / Add custom item (happy path, server auto-merge
+step).** When `apiAddInventory` (2387) / `apiAddCustomInventory` (2497) find an
+existing row matching Item/Category/Rarity/Holder/Value GP, they call
+`mergeIntoExistingRow_` (1890), which does
+`Object.assign({}, existing, { Qty, 'Total Value GP' })` — it keeps **every**
+field of the existing row and writes back only the new quantity and total. The
+just-submitted row's `Notes` and `Faction Relevance` are dropped on the floor. A
+user who searches an item the party already holds, types a note like "from the
+goblin cave," sets a holder, and taps Add gets the qty bumped but their note
+**silently vanishes** — no warning, and the optimistic client row is reconciled
+to the merged server row by Inventory ID so the note disappears on the next
+render. The contrast is stark: the *explicit* `apiCombineInventoryItems`
+deliberately concatenates notes (`${targetNotes}\n\n${sourceNotes}` at 3601) and
+preserves faction (3590-3594); the *implicit* auto-combine does neither. Fix:
+merge Notes/Faction the same way `apiCombineInventoryItems` does, or skip the
+auto-merge when the incoming row carries a non-empty Notes/Faction that differs
+from the existing row.
+
+#### BUG · Index.html:5160 · "Undo Last Pay" on the Gold tab leaves the reversed entry visible in the ledger
+_Source: audit/findings-section-4-run56._
+Story "Undo last pay", final step. On the Gold tab the treasurer taps
+`↩ Undo Last Pay` → `undoGoldPay()` (5160) calls `undoResourcePay('gold')` then
+only `renderGoldSheetButtons()`. `undoResourcePay` (6483) removes the reversed
+entry from `inventoryResourceLedger` and the rows from `inventoryRows`, then calls
+**`renderInventory()`** — which repaints the hidden inventory list, not the gold
+sheet. The Gold tab ledger list is produced by `renderGoldSheetBody()` →
+`renderResourceLedger('gold',60)`, which is never called on the success path (only
+the failure `rollback()` calls it). Result: after a successful undo the
+now-deleted PAY / SEND_DEDUCT entry stays on screen in the Gold tab ledger until
+some other action re-renders the body or the app reloads. Server and client state
+are both already corrected — this is purely a missing re-render. Fix: add
+`renderGoldSheetBody()` to `undoGoldPay()` (and to `undoResourcePay`'s success
+handlers for parity). _(Branch `trusting-galileo` independently confirmed the
+data layer is correct: the ledger IS reversed on both server and client — see its
+Note at Code.js:3445 — which corroborates that this is render-only.)_
+
+#### RISK · Code.js:3104 · apiSplitGold commits many rows with no atomicity or rollback
+_Source: claude/trusting-galileo-yp7n4x._ ⚠️ **Branches disagree on this code:**
+`audit/findings-section-4` examined the same endpoint and recorded a Note calling
+the gold receive/split/pay path "clean" (correct lock discipline + optimistic
+restore) — but it assessed *lock/auth/optimism*, not *multi-write atomicity*,
+which is the actual gap below.
+Split Evenly story, "confirm → apiSplitGold" step. The handler writes,
+sequentially under one document lock, a pool-deduct inventory row + ledger entry,
+then one credit row + ledger entry **per active member**, then an optional
+remainder row + ledger entry — up to ~2(N+1) sheet writes (≈14 appends for a
+6-player party). LockService gives mutual exclusion, not transactionality: if
+execution dies partway (GAS 6-min/quota cutoff, transient SpreadsheetApp
+failure), the pool is already debited `-amount` while some/all members are
+un-credited — gold is silently destroyed or stranded. The client failure handler
+in `splitGold` (Index.html:5927) only restores its own optimistic ledger entry,
+so the next `loadInventory` surfaces the corrupted balance as fact. Compounded by
+`appendResourceLedger_` (1962) swallowing its own write errors. Same
+multi-write/no-rollback class also affects `apiSendGoldToMember` (3242, two rows)
+and the delerium branch of `apiReceiveResource` (2879, N rows). Suggest building
+the full 2D values array and writing it in a single batched append so a failure is
+all-or-nothing, and surfacing `appendResourceLedger_` failures to the caller.
+
+#### RISK · Code.js:3242 · Member-send by a non-treasurer has no client Undo path (and no server treasurer gate)
+_Source: audit/findings-section-4._
+**Stories: Pay gold (route to character) + Undo last pay.** `apiSendGoldToMember`
+(3242) gates only on `requireAllowedUser_()` — any party member can move gold from
+the party pool to another member's holder. But the client only records the undo
+handle and renders the Undo button **inside `if (isTreasurer)`**
+(`confirmPayWithReason` onSuccess, Index.html:5892-5899). So a non-treasurer who
+pays a member (the pay-reason sheet lists every member to everyone) commits a pool
+deduct + member credit with **no client-side reversal**: `lastResourceUndo['gold']`
+is never set, the Undo button never appears, and there is no other in-app reverse
+path. The only way back is a manual sheet edit. Either gate `apiSendGoldToMember`
+to treasurer (if members shouldn't move pool gold) or render/store the undo handle
+for all users, not just the treasurer.
+
+#### RISK · Index.html:4862 · "Gold received" field silently dropped when tapping "Received" on the delerium sheet
+_Source: audit/findings-section-4-run56._
+Stories "Receive crystals" / "Sell crystals". For a treasurer
+`renderDeleriumSheetActions()` renders a shared `deleriumSheetGold` ("Gold
+received (gp)") input next to both the **Received** and **Sell** buttons.
+`receiveDelerium()` (4862) reads only `deleriumSheetNote` — it never reads
+`deleriumSheetGold`, and `apiReceiveResource`'s delerium branch (Code.js
+2923–2952) has no goldAmount parameter at all. So a treasurer who types a gold
+amount and then taps **Received** (intentionally, or by hitting the wrong of two
+adjacent buttons) loses that value silently: no gold row, no gold ledger entry, no
+warning, and the field isn't cleared. Only `sellDelerium()` consumes the field.
+Fix: hide/disable the gold input unless the pending action is a sell, or surface a
+warning when Received is tapped with a non-empty gold field.
+
+#### IDEA · Index.html:4259 · Second note cannot be saved while the first create is still in flight
+_Source: audit/findings-section-4._
+**Story: Create note (friction).** `notesSaving` is a module-global set true at
+the top of `saveNoteForm` and reset to `false` **only** inside the create/edit
+async handlers. The create branch closes the form immediately but leaves
+`notesSaving === true` for the whole round-trip. If the user taps **+** to start a
+*different* note and hits Save before the first create's handler fires,
+`if (notesSaving) return;` makes Save a **silent no-op** — no status text, no
+disabled button. On a slow GAS round-trip this reads as a dead Save button. Fix:
+scope the guard to the in-flight operation (or give the create path its own
+optimistic-and-release model like pin/archive), and/or surface feedback when a
+save is suppressed.
+
+#### IDEA · Index.html:5829 · Member-send Pay flickers the live gold total down by the sent amount
+_Source: claude/trusting-galileo-yp7n4x._
+Pay gold story (route → character). A member-send moves gold from the pool to a
+party member, so total party gold is unchanged. But `confirmPayWithReason`
+optimistically inserts only the `-amount` pool-deduct inventory row (~5855) — it
+does not insert the offsetting `+amount` credit row for the recipient (that only
+arrives via `primeInventoryCacheAfterAdd(res.item)` on success). For the in-flight
+window the header "Gold = XXX gp" therefore drops by the full sent amount and then
+snaps back up when the server confirms, which reads as money briefly vanishing.
+(Purchase pays correctly drop the total, since those really do reduce party gold.)
+Suggest also inserting an optimistic credit row for the member-send branch so the
+net optimistic delta is zero.
+
+#### IDEA · Index.html:6414 · Dashboard inline Pay has no optimistic balance update (inconsistent with Gold tab)
+_Source: audit/findings-section-4-run56._
+Story "Pay gold". The Gold-tab pay (`confirmPayWithReason`, 5829) and Got-Paid
+(`receivedGold`, 5165) both insert an optimistic inventory row + pending ledger
+entry so the balance and ledger move instantly. The dashboard resource-breakout
+inline Pay (`payResource`, 6414) does neither — it only flips the button to
+"Recording…" and waits for the round-trip before `primeInventoryCacheAfterAdd`. On
+a slow GAS call the gold/delerium total sits stale for the whole round-trip, which
+reads as "did my tap register?" friction and is inconsistent with the adjacent
+Gold/Delerium sheets. Suggest mirroring the optimistic pattern (insert a
+negative-qty row keyed by a temp id, remove on resolve).
+
 
 ### 2026-06-20 (run 55) — Sections audited: 3
 
