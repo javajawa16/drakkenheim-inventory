@@ -25,9 +25,108 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
+Next section: 6. Code.js lines 2901–3500 (batch sell, give, remove)
 
 ## Sessions
+
+### 2026-06-23 (run 57) — Sections audited: 5
+
+Section 5 = Code.js 2301–2900: the Party-Notes write endpoints (`apiUpdateNote`,
+`apiArchiveNote`, `apiCreateNote`, `apiGetNotes`), inventory-add family
+(`apiAddInventory`, `apiAddCustomInventory`, `apiQuickAddInventory`), and the
+resource write paths (`apiDepleteResource`, `apiUpdateLedgerNote`,
+`apiReceiveResource`). Stories traced end-to-end: **Create note**, **Edit note**,
+**Pin note**, **Archive note**, **Add library item**, **Add custom item**,
+**Quick-adjust currency/delerium**, **Receive crystals**, **Edit ledger note**,
+**Receive gold**.
+
+#### BUG · Index.html:4334 · `saveNoteForm` throws ReferenceError on every Save — Create note AND Edit note are broken
+**Stories: Create note (Save step) · Edit note (Save step).** The note form
+(`#noteFormSheet`, Index.html:2617–2644) has only four inputs: Title, Category,
+Note body, and a hidden Related Item ID. There is **no Tags input and no Pinned
+checkbox** (the README "Tags / Pinned checkbox" description is stale). But
+`saveNoteForm` still references local variables `tags` and `pinned` that it never
+declares and that exist nowhere in scope:
+- **Create branch, Index.html:4334** — `if (pinned) notesData.unshift(optimistic); else notesData.push(optimistic);`
+- **Edit branch, Index.html:4299** — `Object.assign(notesData[idx], { title, category, note, tags, pinned, relatedItemId, updatedAt: now });`
+
+Reading an undeclared identifier throws `ReferenceError: pinned is not defined`
+(in both strict and sloppy mode — only *writes* create implicit globals). The
+only `tags`/`pinned` bindings in the file are `const tags` block-scoped inside
+`renderNotesList` (Index.html:4139) and `n.pinned` property reads — neither is
+visible here. `saveNoteForm` is wired directly to the Save button via
+`onclick="saveNoteForm()"` (Index.html:2639) with no surrounding try/catch, so
+the throw aborts the handler **before** `closeNoteForm()`, before the optimistic
+row insert, and before the `google.script.run` call. Net effect: the user fills
+the form, taps **Save Note**, and *nothing happens* — no card appears, no error
+banner (the throw precedes every `setMainStatus`/status write), the sheet stays
+open. Both new-note creation and note editing are completely non-functional;
+only the card-level Pin toggle (`toggleNotePin`) and swipe/Archive paths still
+work because they don't go through `saveNoteForm`.
+
+Trace confirms the failure point precisely: in the create branch, execution
+reaches line 4334 (`if (pinned)`) immediately after building `savedContent`,
+`tempId`, and `optimistic` — all of which succeed — then throws. In the edit
+branch, line 4299's `Object.assign({... tags, pinned ...})` is the first
+statement after `backup` is captured and throws there.
+
+**Fix:** the form no longer collects tags/pinned, so drop the dangling
+references. Edit branch: `Object.assign(notesData[idx], { title, category, note, relatedItemId, updatedAt: now })`
+(omitting `tags`/`pinned` also correctly *preserves* the note's existing pin
+state instead of clobbering it to `undefined`). Create branch: replace
+`if (pinned) notesData.unshift(optimistic); else notesData.push(optimistic);`
+with an unconditional `notesData.push(optimistic);` (new notes are unpinned).
+Alternatively, re-add the Tags input + Pinned checkbox to the form and read them
+into `const tags`/`const pinned` near lines 4279–4282, and thread `tags`/`pinned`
+into the `apiCreateNote`/`apiUpdateNote` payloads (the server already supports
+both — `apiCreateNote` reads `payload.pinned`/`payload.tags` at Code.js:2271–2272,
+`apiUpdateNote` allows `Tags`/`Pinned` patches at Code.js:2307).
+
+#### IDEA · Index.html:4147 · Tags are stored, searched, and rendered but can never be set from the UI
+**Story: Create note / Edit note.** Note cards render a tag row
+(`renderNotesList`, Index.html:4139–4147), `apiGetNotes` filters/searches on tags
+(Code.js:2230, 2241), and the server schema persists a `Tags` column — but with
+the Tags input removed from the form, there is now **no way for a user to ever
+populate a tag**. The entire tag feature (storage, search, card chips) is
+dead-ended behind a missing input. Either re-add a Tags field to the note form
+(comma-separated, threaded into the create/edit payloads) or, if tags are being
+retired, also remove the card tag-row render and the tag search branch so the
+codebase doesn't imply a feature that can't be reached. Note this is the same
+removal that caused the BUG above — the two should be fixed together.
+
+#### Note · Index.html:8530 · Add library/custom item flow traces clean
+**Stories: Add library item · Add custom item.** `confirmAdd`'s
+`onAddSuccess`/`onAddFail` (Index.html:8530–8595) correctly remove the optimistic
+row by `optId`, and on failure restore the full form from `selectedSnapshot` /
+`payloadSnapshot` (including scroll-mode spell name and quick-add size) so the
+user can retry without re-entering anything. Server side, `apiAddInventory`
+(Code.js:2346) and `apiAddCustomInventory` (Code.js:2462) validate → resolve
+library item → auto-combine via `findMatchingInventoryRow_`/`mergeIntoExistingRow_`
+(the run-56 Notes/Faction merge fix at Code.js:1890 is present and correct) →
+audit → `bumpSync_`, with the document lock released on every path via `finally`.
+The post-add `findDuplicateInventoryCandidate` only offers the combine sheet when
+holder or value differs (exact matches already merged server-side) — consistent.
+
+#### Note · Index.html:4926 · Receive-crystals optimistic/rollback traces clean
+**Stories: Receive crystals · Receive gold.** `apiReceiveResource` (Code.js:2898)
+appends one inventory row + one ledger row per size under a 10 s document lock,
+returning sanitized `items`+`ledgerEntries`. The client (Index.html:4922–4990)
+snapshots `previousRows`/`previousLedger`, inserts optimistic rows + a `_pending`
+ledger entry, and on **both** the success-but-not-ok branch and the failure
+branch restores the snapshots, restores the typed note (`savedRecNote`), clears
+the optimistic/pending entries, and re-renders. No stuck "Saving…" state, no
+orphaned pending ledger row. (The known optimistic-rollback-clobbers-concurrent-sync
+tradeoff applies here as app-wide; deferred to the sync section.)
+
+#### Note · Code.js:2569 · Quick-add ledger timestamp is cosmetically consistent
+**Story: Quick-adjust currency/delerium.** `apiQuickAddInventory` returns its
+optimistic `ledgerEntry.Timestamp` from `rowObj['Date Added']` (a `Date`), while
+the row actually persisted by `appendResourceLedger_` stamps its own `new Date()`.
+Both pass through `normalizeForClient_` → identical `yyyy-MM-dd HH:mm:ss` strings
+in all but sub-second-boundary cases, and later note-edits match by Inventory ID
+(`apiUpdateLedgerNote` prefers `entryId`, Code.js:2876), so this is benign — not
+a finding, recorded only to close the trace.
+
 
 ### 2026-06-23 (run 56, consolidated) — Sections audited: 4
 
