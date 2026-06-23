@@ -8,14 +8,18 @@ Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
 ### 2026-06-23 (run 56, consolidated) — Sections audited: 4
 
 > **Consolidation note.** Section 4 ("sell, combine, gold ops", Code.js
-> 1701–2300 + the gold/sell/combine endpoints it feeds) was independently audited
-> **three times** on parallel branches that each forked their own copy of
-> FINDINGS.md, so none of them saw the others' work:
-> `audit/findings-section-4` (2026-06-22), `audit/findings-section-4-run56`
-> (2026-06-23), and `claude/trusting-galileo-yp7n4x` (2026-06-23). This entry
-> merges all **eight distinct findings** (2 BUG · 3 RISK · 3 IDEA) into a single
-> run. Each finding is tagged with its source branch; where the branches reached
-> different conclusions on the same code it is called out inline.
+> 1701–2300 + the gold/sell/combine/Party-Notes endpoints it feeds) was
+> independently audited across **six** parallel branches that each forked their
+> own copy of FINDINGS.md, so none of them saw the others' work:
+> `audit/findings-section-4` (2026-06-22), `audit/findings-section-4-run56`,
+> `claude/trusting-galileo-n73txz`, `-yp7n4x`, `-mik3fq`, `-pvfqw0`
+> (all 2026-06-23). This entry merges all **fourteen distinct findings**
+> (4 BUG · 6 RISK · 4 IDEA) into a single run. Each finding is tagged with its
+> source branch(es); where branches reached different conclusions on the same
+> code, or independently re-found the same issue, it is called out inline.
+> Duplicates collapsed: `Code.js:1890` (found by section-4 + n73txz),
+> the note `updatedAt` mis-sort (mik3fq 4279 + n73txz 4274), and the member-send
+> gold flicker (yp7n4x 5829 + pvfqw0 5856).
 
 #### BUG · Code.js:1890 · Auto-combine on add silently discards the user-entered Notes and Faction Relevance
 _Source: audit/findings-section-4._
@@ -142,6 +146,86 @@ a slow GAS call the gold/delerium total sits stale for the whole round-trip, whi
 reads as "did my tap register?" friction and is inconsistent with the adjacent
 Gold/Delerium sheets. Suggest mirroring the optimistic pattern (insert a
 negative-qty row keyed by a temp id, remove on resolve).
+
+#### BUG · Index.html:4279 · Edited note's optimistic `updatedAt` (ISO) mis-sorts vs server (space) format
+_Source: trusting-galileo-mik3fq (independently re-found by n73txz at 4274)._
+Edit-note story, "Save → optimistic reorder" step. The optimistic edit sets
+`updatedAt: now` where `now = new Date().toISOString()` → `2026-06-23T14:32:01.123Z`
+(a 'T' at index 10). Server-confirmed notes carry `Utilities.formatDate(...,
+'yyyy-MM-dd HH:mm:ss')` → `2026-06-23 14:32:01` (a space at index 10).
+`renderNotesList` sorts with `(b.updatedAt||'').localeCompare(a.updatedAt||'')`;
+for two same-date notes the tiebreak is index-10, where `'T'` (84) > `' '` (32). So
+a just-edited note sorts *above every same-day server-format note regardless of
+actual time-of-day*. Worse, the edit success handler (4284) **never overwrites the
+local `updatedAt` with the server value** (unlike create, which swaps in
+`res.note`), so the mis-sort persists until the next full `loadNotes`. Fix: store
+the optimistic `updatedAt` in the same `yyyy-MM-dd HH:mm:ss` space format the
+server uses (or have `apiUpdateNote` echo the new `Updated At` and swap it in on
+success).
+
+#### BUG · Index.html:4317 · Create-note failure while navigated away from Notes tab silently drops the note content
+_Source: trusting-galileo-mik3fq._ ⚠️ **This is a tradeoff introduced by the
+earlier "failed note-create pops the form over an unrelated tab" fix (run 50).**
+On a failed `apiCreateNote`, `restoreNoteForm_()` removes the optimistic temp row,
+then bails with `if (commandMode !== 'notes') return false;` — so if the user
+switched to another tab during the round-trip, the form is **not** re-opened and
+`savedContent` is discarded; only a `setMainStatus` toast is shown. The optimistic
+card is already gone, so the user's typed title/body/tags are lost with no
+recovery path. This trades the run-50 bug (sheet popping over the wrong tab) for a
+content-loss path, and contradicts the README guarantee "Failed create re-opens
+the form pre-filled (no content loss)" (the guarantee now only holds while still
+on the Notes tab). Fix: when `commandMode !== 'notes'`, stash `savedContent` in a
+module var (e.g. `pendingFailedNote`) and re-hydrate the form next time the Notes
+tab opens, or surface a "tap to recover" action in the toast.
+
+#### RISK · Index.html:4276 · Pin and Edit on the same note use disjoint in-flight guards → conflicting `apiUpdateNote` writes
+_Source: trusting-galileo-mik3fq._ Pin/Archive gate on the `_notesActionInFlight`
+Set (per-noteId); Create/Edit gate on the `notesSaving` boolean +
+`_inFlightNoteWrites`. With no shared per-note guard, a user can tap **Pin**
+(optimistic flip + in-flight `apiUpdateNote {Pinned}`) and, before it settles,
+open the edit form (whose Pinned checkbox still reflects the *pre-pin* state) and
+Save — issuing a second `apiUpdateNote` with the full patch including the stale
+`Pinned`. The two writes race (last-write-wins) and both mutate `notesData[idx]`,
+so the final pinned state can disagree with the server until a reload. Low
+frequency (same-note pin+edit within one round-trip) but a genuine lost-update.
+Fix: add the noteId to `_notesActionInFlight` for edit saves too, or block opening
+the edit form while `_notesActionInFlight.has(noteId)`.
+
+#### RISK · Index.html:4594 · Gold sheet amount/note persist across close→reopen
+_Source: trusting-galileo-pvfqw0._ `goldSheetAmount` (HTML 2681) and
+`goldSheetNote` are **static** inputs outside `goldSheetBody`, so
+`renderGoldSheetBody()` never rebuilds/clears them. `openGoldSheet` (4594) clears
+neither, and `closeGoldSheet` clears only `goldSheetStatus`. Every successful
+submit clears the fields and every failure restores them — but the
+dismiss-without-submit path (user types an amount, then taps Done/backdrop) leaves
+the value sitting in the field. On the next `openGoldSheet` the stale amount is
+pre-filled, and a hurried tap on **Got Paid / Pay / Split Evenly** (all read
+`goldSheetAmount` fresh) fires a real transaction for the leftover amount. Affects
+Receive gold, Pay gold, Split gold. Fix: clear both inputs (and reset
+`amountInput.readOnly`) in `openGoldSheet`, or in `closeGoldSheet`.
+
+#### RISK · Index.html:7214 · Optimistic sell/remove persists unconfirmed state to cache
+_Source: trusting-galileo-pvfqw0._ `_confirmDescActionSell_` (7214) and
+`_confirmDescActionRemove_` (7283) call `cacheInventoryRows(...)` immediately after
+the optimistic mutation but **before** `gasCall` runs — so `_inFlightWrites` is
+still 0 and the guard at `cacheInventoryRows` (`if (_inFlightWrites>0) return`)
+does not fire. The post-sell (reduced) inventory is written to localStorage before
+the server confirms. The add flow deliberately avoids exactly this (explicit
+comment at 8449: "Don't cache here — `_inFlightWrites` is still 0…"). If the iOS
+GAS webview is backgrounded/killed mid-round-trip, the cache holds a sell/remove
+that may have failed. Self-corrects on the next full `loadInventory`, so severity
+is low, but it is inconsistent with the add path. Fix: drop the pre-call cache
+writes at 7214/7283 (the onSuccess/onFail handlers already re-cache once
+`_inFlightWrites` has cycled), or move them after `gasCall`.
+
+#### IDEA · Index.html:4382 · Inconsistent failure-feedback channel across note actions
+_Source: trusting-galileo-mik3fq._ `archiveNote` reports failure via blocking
+`alert()`, while `saveNoteForm`/`toggleNotePin`/`deleteNoteFromForm` use the
+non-blocking `setMainStatus` toast. Same family of optimistic note writes, three
+different feedback surfaces — inconsistent, and the `alert()` is jarring on mobile.
+(Overlaps the run-50 IDEA at 4261 about off-screen `#mainStatus` feedback on the
+notes tab.) Suggest routing all note-write failures through one channel — ideally
+a dedicated notes-tab status line — for a uniform, non-blocking experience.
 
 
 ### 2026-06-20 (run 55) — Sections audited: 3
