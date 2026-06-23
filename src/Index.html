@@ -2615,7 +2615,7 @@
       <div class="mobile-sheet-header">
         <div class="mobile-sheet-title" id="noteFormSheetTitle">New Note</div>
       </div>
-      <div class="mobile-sheet-body">
+      <div class="mobile-sheet-body" style="display:flex;flex-direction:column;">
         <div class="field">
           <label for="noteFormTitle">Title</label>
           <input id="noteFormTitle" placeholder="Give this note a name…">
@@ -2624,17 +2624,9 @@
           <label for="noteFormCategory">Category</label>
           <select id="noteFormCategory"></select>
         </div>
-        <div class="field">
+        <div class="field" style="flex:1;display:flex;flex-direction:column;">
           <label for="noteFormBody">Note</label>
-          <textarea id="noteFormBody" placeholder="Write it down before you forget…" rows="5"></textarea>
-        </div>
-        <div class="field">
-          <label for="noteFormTags">Tags <span style="font-weight:400;opacity:.6;">(comma-separated)</span></label>
-          <input id="noteFormTags" placeholder="boss, dungeon, session-3…">
-        </div>
-        <div class="field" style="display:flex;align-items:center;gap:10px;">
-          <input id="noteFormPinned" type="checkbox" style="width:auto;min-height:0;">
-          <label for="noteFormPinned" style="margin:0;">Pin this note</label>
+          <textarea id="noteFormBody" placeholder="Write it down before you forget…" style="flex:1;resize:none;"></textarea>
         </div>
         <input type="hidden" id="noteFormRelatedItemId">
       </div>
@@ -4210,8 +4202,6 @@
       document.getElementById('noteFormTitle').value    = '';
       document.getElementById('noteFormCategory').value = 'General';
       document.getElementById('noteFormBody').value     = '';
-      document.getElementById('noteFormTags').value     = '';
-      document.getElementById('noteFormPinned').checked = false;
       document.getElementById('noteFormRelatedItemId').value = relatedItemId || '';
 
       if (mode === 'edit' && noteId) {
@@ -4220,8 +4210,6 @@
           document.getElementById('noteFormTitle').value    = n.title || '';
           document.getElementById('noteFormCategory').value = n.category || 'General';
           document.getElementById('noteFormBody').value     = n.note || '';
-          document.getElementById('noteFormTags').value     = n.tags || '';
-          document.getElementById('noteFormPinned').checked = !!n.pinned;
           document.getElementById('noteFormRelatedItemId').value = n.relatedItemId || '';
         }
       }
@@ -4278,8 +4266,6 @@
       document.getElementById('noteFormTitle').value    = c.title;
       document.getElementById('noteFormCategory').value = c.category;
       document.getElementById('noteFormBody').value     = c.note;
-      document.getElementById('noteFormTags').value     = c.tags;
-      document.getElementById('noteFormPinned').checked = c.pinned;
       const s = document.getElementById('noteFormStatus');
       if (s) s.innerHTML = '<span class="error">Last save failed — your note is here, try again.</span>';
     }
@@ -4289,8 +4275,6 @@
       const title    = document.getElementById('noteFormTitle').value.trim();
       const category = document.getElementById('noteFormCategory').value;
       const note     = document.getElementById('noteFormBody').value.trim();
-      const tags     = document.getElementById('noteFormTags').value.trim();
-      const pinned   = document.getElementById('noteFormPinned').checked;
       const relatedItemId = document.getElementById('noteFormRelatedItemId').value;
       const statusEl = document.getElementById('noteFormStatus');
 
@@ -4337,11 +4321,11 @@
             renderNotesList();
             setMainStatus('<span class="error">Save failed — please try again.</span>');
           })
-          .apiUpdateNote({ noteId: editId, patch: { Category: category, Title: title, Note: note, Tags: tags, Pinned: pinned, 'Related Item ID': relatedItemId }, _syncClientId: syncClientId });
+          .apiUpdateNote({ noteId: editId, patch: { Category: category, Title: title, Note: note, 'Related Item ID': relatedItemId }, _syncClientId: syncClientId });
       } else {
-        const savedContent = { title, category, note, tags, pinned, relatedItemId };
+        const savedContent = { title, category, note, relatedItemId };
         const tempId = 'NOTE_TEMP_' + Date.now();
-        const optimistic = { noteId: tempId, title, category, note, tags, pinned,
+        const optimistic = { noteId: tempId, title, category, note,
           relatedItemId, author: myCharacterName || '', createdAt: now, updatedAt: now, archived: false };
         if (pinned) notesData.unshift(optimistic); else notesData.push(optimistic);
         notesLoaded = true;
@@ -4363,8 +4347,6 @@
           document.getElementById('noteFormTitle').value    = savedContent.title;
           document.getElementById('noteFormCategory').value = savedContent.category;
           document.getElementById('noteFormBody').value     = savedContent.note;
-          document.getElementById('noteFormTags').value     = savedContent.tags;
-          document.getElementById('noteFormPinned').checked = savedContent.pinned;
           return true;
         }
 
@@ -4403,7 +4385,7 @@
               setMainStatus('<span class="error">Note save failed — please try again.</span>');
             }
           })
-          .apiCreateNote({ title, category, note, tags, pinned, relatedItemId, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
+          .apiCreateNote({ title, category, note, relatedItemId, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
       }
     }
 
