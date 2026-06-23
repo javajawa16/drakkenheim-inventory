@@ -1,9 +1,119 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
+Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
 
 ## Sessions
+
+### 2026-06-23 (run 56) — Sections audited: 4
+
+Section 4 = Code.js lines 1701–2300 (sell, combine, gold ops). The physical
+1701–2300 range is the shared write-helper layer that every gold/sell/combine
+endpoint consumes: client sanitizers (`sanitizeInventoryForClient_` 1760,
+`sanitizeResourceLedgerForClient_` 1777), ledger reader
+(`getResourceLedgerForClient_` 1792), inventory row helpers
+(`getInventoryRowObjectById_` 1842, `writeInventoryRow_` 1855), the **combine**
+primitives (`findMatchingInventoryRow_` 1860, `mergeIntoExistingRow_` 1890),
+quick-edit classifier (`classifyQuickEdit_` 1900), audit/ledger writers
+(`auditWrite_` 1932, `appendResourceLedger_` 1962,
+`deleteResourceLedgerRowsForInventory_` 1989), sync bump (`bumpSync_` 2122,
+`apiGetSyncState` 2132), plus the notes API that physically lives here
+(`apiGetNotes`/`apiCreateNote`/`apiUpdateNote`/`apiArchiveNote` 2185–2325 —
+deferred to section 5's Party-Notes pass). Traced out to the consuming
+endpoints: `apiSellInventoryBatch` (663), `apiDepleteResource` (2691),
+`apiUpdateLedgerNote` (2823), `apiReceiveResource` (2879), `apiSellInventoryItem`
+(2964, dead from client), `apiSellDelerium` (3019), `apiSplitGold` (3104),
+`apiSendGoldToMember` (3242), `apiUndoMemberSend` (3490),
+`apiCombineInventoryItems` (3528), and the client callers in Index.html:
+`confirmReceiveGold` (~5170), `confirmPayWithReason` (5829), `splitGold` (5927),
+`payResource` (~6400), `undoResourcePay` (6483), `updateLedgerNoteFromBottom`
+(6160), `_confirmDescActionSell_` (~7160), `_confirmDescActionRemove_` (7242),
+`confirmCombineInventoryItem` (3530)/`showCombineChoice` (3506),
+`primeInventoryCacheAfterAdd` (3087), `cacheInventoryRows` (3076), `gasCall`
+(2891), `pollSync` (4008), `openGoldSheet`/`closeGoldSheet` (4594/5078).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every write path):
+
+- **Receive gold (Got Paid)** → `apiReceiveResource(resource:'gold')`. Optimistic
+  ledger pending + `_opt_gold_` inventory row; on success `removePending` then
+  prime real rows + ledgerEntries; on failure/`onFail` restores `previousLedger`
+  and saved inputs. Clean rollback.
+- **Pay gold** → `confirmPayWithReason` routing to `apiSendGoldToMember`
+  (member) or `apiDepleteResource` (Purchase). Optimistic deduct row + pending
+  ledger; success primes `poolDeduct`+`item`; treasurer gets `lastResourceUndo`.
+- **Split gold evenly** → `apiSplitGold` (treasurer-gated, conservation verified:
+  `perMember=floor`, `remainder` rounded to 2dp, sum reconciles).
+- **Edit ledger note** → `apiUpdateLedgerNote` (prefers Inventory ID, Timestamp
+  fallback per known TODO); button-disable prevents double-tap.
+- **Undo last pay** → `undoResourcePay` → `apiUndoMemberSend` (both rows, both
+  ledger rows, descending delete) or `apiDeleteInventory(reverseLedgerEntry)`.
+  Optimistic remove + `rollback()` on failure restores rows/ledger/undo token.
+- **Sell item / Remove item** (description sheet) → `apiSellInventoryBatch` FIFO
+  drain; server clamps `sellQty=min(qtyToSell,rowQty)`, processes rows
+  highest-number-first. Optimistic decrement, full `previousRows` rollback.
+- **Combine duplicate** → `apiCombineInventoryItems`; `pendingCombineChoice`
+  null-set guards double-tap; failure restores choice + keeps sheet open.
+- **Cross-cutting sync/tab-switch/visibility**: all the above go through
+  `gasCall`, which brackets every call in `_inFlightWrites++/--`, so the 20 s
+  `pollSync` defers a foreign `loadInventory(true)` via `pendingForeignReload`
+  (and re-evaluates because `syncState.inventory.ts` is intentionally NOT
+  advanced while deferring). `loadInventory` (3773) also bails to
+  `pendingForeignReload` when writes are in flight. This path is robust.
+
+#### RISK · Index.html:4594 · Gold sheet amount/note persist across close→reopen
+`goldSheetAmount` (HTML 2681) and `goldSheetNote` are **static** inputs that sit
+outside `goldSheetBody`, so `renderGoldSheetBody()` never rebuilds/clears them.
+`openGoldSheet` (4594) clears neither, and `closeGoldSheet` (5078) clears only
+`goldSheetStatus`. Every successful submit clears the fields (5197/5862/5951) and
+every failure *restores* them — but the dismiss-without-submit path (user types
+an amount, then taps Done/backdrop) leaves the value sitting in the field. On the
+next `openGoldSheet` the stale amount is pre-filled, and a hurried tap on **Got
+Paid / Pay / Split Evenly** (all read `goldSheetAmount` fresh) fires a real
+transaction for the leftover amount. Affects stories: Receive gold, Pay gold,
+Split gold. Fix: clear both inputs (and reset `amountInput.readOnly`) in
+`openGoldSheet`, or in `closeGoldSheet` after the `cancelLedgerEdit` branch.
+
+#### RISK · Index.html:7214 · Optimistic sell/remove persists unconfirmed state to cache
+`_confirmDescActionSell_` (7214) and `_confirmDescActionRemove_` (7283) call
+`cacheInventoryRows(...)` immediately after the optimistic mutation but **before**
+`gasCall` runs — so `_inFlightWrites` is still 0 and the guard at
+`cacheInventoryRows` (3076 `if (_inFlightWrites>0) return`) does not fire. The
+post-sell (reduced) inventory is written to localStorage before the server has
+confirmed. The add flow deliberately avoids exactly this (explicit comment at
+8449: "Don't cache here — `_inFlightWrites` is still 0…"). If the iOS GAS webview
+is backgrounded/killed mid-round-trip (the visibilitychange/foreground scenario
+in the cross-cutting catalog), the cache holds a sell/remove that may have
+failed. It self-corrects on the next full `loadInventory`, so severity is low,
+but it is inconsistent with the add path. Fix: drop the pre-call cache writes at
+7214/7283 (the onSuccess/onFail handlers already re-cache once `_inFlightWrites`
+has cycled), or move them after `gasCall`. Stories: Sell item, Remove item
+(navigate-away leg).
+
+#### IDEA · Index.html:5856 · Pay→member optimistic row hides the credit, gold flickers down
+For Pay→character (a transfer that nets zero party-wide), `confirmPayWithReason`
+prepends only the `-amount` pool-deduct optimistic row (5856–5860); the matching
+`+amount` credit to the member is added only after `apiSendGoldToMember` returns
+(`primeInventoryCacheAfterAdd(res.item)` at 5888). During the round trip the
+header "Gold = XXX gp" total visibly drops by `amount`, then snaps back to
+net-zero when the server replies. For a treasurer splitting/sending on a flaky
+connection this reads like the money briefly vanished. Suggestion: prepend both
+the deduct *and* a `_opt_` credit row (Holder = target character) optimistically,
+and reconcile both on success. Story: Pay gold.
+
+#### Note · Code.js:1860 · Combine + gold-ops write paths traced clean
+Confirmed correct: (1) `findMatchingInventoryRow_`/`mergeIntoExistingRow_`
+auto-combine in `apiAddInventory` reconciles with the client by removing the
+`_opt_` row *first* (Index 8462) then `primeInventoryCacheAfterAdd` merging the
+existing-ID row — no double-count. (2) `apiCombineInventoryItems` deletes source
+then writes target at the shift-adjusted row number (3605). (3) `apiSplitGold`
+gold conservation holds across `floor`+`remainder`. (4) `apiUndoMemberSend`
+deletes rows in descending row order and reverses both ledgers. (5)
+`apiSellInventoryBatch` clamps and processes rows highest-first to avoid
+row-shift corruption. (6) The whole section is sync-safe via `gasCall`'s
+`_inFlightWrites` bracketing + `pollSync` deferral. Stories traced: Receive gold,
+Pay gold, Split gold, Edit ledger note, Undo last pay, Sell item, Remove item,
+Combine duplicate, plus the three cross-cutting sync scenarios.
 
 ### 2026-06-20 (run 55) — Sections audited: 3
 
