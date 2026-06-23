@@ -1859,6 +1859,10 @@
       padding: 12px 12px calc(var(--phone-nav-height, 110px) + var(--safe-bottom) + 40px);
     }
 
+    /* Note form: actions row sits outside the body, so no nav-clearance pad needed */
+    #noteFormSheet .mobile-sheet-body { padding-bottom: 14px; }
+    html.is-phone #noteFormSheet .mobile-sheet-body { padding-bottom: 12px; }
+
     html.is-phone .mobile-sheet-actions {
       padding: 10px 12px calc(14px + var(--safe-bottom));
     }
