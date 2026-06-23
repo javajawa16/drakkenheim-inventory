@@ -2952,6 +2952,7 @@
     let notesSaving      = false;
     let notesFormMode    = 'new'; // 'new' | 'edit'
     let notesFormNoteId  = '';
+    let pendingFailedNote = null;  // create-note content stashed when a save fails off the Notes tab
     let notesSearchTimer = null;
     let notesFilters     = { search: '', category: '', pinnedOnly: false };
     let lastNotesLoadAt  = 0;
@@ -3387,6 +3388,7 @@
 
       if (notesActive) {
         loadNotes();
+        rehydratePendingNote_();  // restore a note whose create failed while away
         return;
       }
 
@@ -4191,6 +4193,12 @@
     }
 
     function openNoteForm(mode, noteId, relatedItemId) {
+      if (mode === 'edit' && noteId && _notesActionInFlight.has(noteId)) {
+        // A pin/archive/edit for this note is still in flight — opening the editor now
+        // would let a stale-state Save race the in-flight write. Ask the user to wait.
+        setMainStatus('<span class="error">That note is still saving — try again in a moment.</span>');
+        return;
+      }
       initNoteFormCategorySelect();
       notesFormMode   = mode;
       notesFormNoteId = noteId || '';
@@ -4256,6 +4264,26 @@
         .apiArchiveNote({ noteId, _syncClientId: syncClientId });
     }
 
+    function formatNoteTs_(d) {
+      const p = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+             `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    }
+
+    function rehydratePendingNote_() {
+      if (!pendingFailedNote || commandMode !== 'notes') return;
+      const c = pendingFailedNote;
+      pendingFailedNote = null;
+      openNoteForm('add', null, c.relatedItemId);
+      document.getElementById('noteFormTitle').value    = c.title;
+      document.getElementById('noteFormCategory').value = c.category;
+      document.getElementById('noteFormBody').value     = c.note;
+      document.getElementById('noteFormTags').value     = c.tags;
+      document.getElementById('noteFormPinned').checked = c.pinned;
+      const s = document.getElementById('noteFormStatus');
+      if (s) s.innerHTML = '<span class="error">Last save failed — your note is here, try again.</span>';
+    }
+
     function saveNoteForm() {
       if (notesSaving) return;
       const title    = document.getElementById('noteFormTitle').value.trim();
@@ -4271,21 +4299,27 @@
         return;
       }
       notesSaving = true;
-      const now = new Date().toISOString();
+      // Match the server's "yyyy-MM-dd HH:mm:ss" (space at index 10) format, not ISO
+      // (which has a 'T' there) — renderNotesList sorts by string localeCompare, and a
+      // 'T' tiebreak would float a just-edited note above same-day server-format notes.
+      const now = formatNoteTs_(new Date());
 
       if (notesFormMode === 'edit' && notesFormNoteId) {
-        const idx = notesData.findIndex(x => x.noteId === notesFormNoteId);
+        const editId = notesFormNoteId;
+        const idx = notesData.findIndex(x => x.noteId === editId);
         const backup = idx >= 0 ? { ...notesData[idx] } : null;
         if (idx >= 0) Object.assign(notesData[idx], { title, category, note, tags, pinned, relatedItemId, updatedAt: now });
         closeNoteForm();
         renderNotesList();
         _inFlightNoteWrites++;
+        _notesActionInFlight.add(editId);  // shared per-note guard with pin/archive
         google.script.run
           .withSuccessHandler(res => {
             _inFlightNoteWrites--;
+            _notesActionInFlight.delete(editId);
             notesSaving = false;
             if (!res || !res.ok) {
-              const ri = notesData.findIndex(x => x.noteId === notesFormNoteId);
+              const ri = notesData.findIndex(x => x.noteId === editId);
               if (backup && ri >= 0) notesData[ri] = backup;
               renderNotesList();
               setMainStatus(`<span class="error">Save failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
@@ -4293,13 +4327,14 @@
           })
           .withFailureHandler(() => {
             _inFlightNoteWrites--;
+            _notesActionInFlight.delete(editId);
             notesSaving = false;
-            const ri = notesData.findIndex(x => x.noteId === notesFormNoteId);
+            const ri = notesData.findIndex(x => x.noteId === editId);
             if (backup && ri >= 0) notesData[ri] = backup;
             renderNotesList();
             setMainStatus('<span class="error">Save failed — please try again.</span>');
           })
-          .apiUpdateNote({ noteId: notesFormNoteId, patch: { Category: category, Title: title, Note: note, Tags: tags, Pinned: pinned, 'Related Item ID': relatedItemId }, _syncClientId: syncClientId });
+          .apiUpdateNote({ noteId: editId, patch: { Category: category, Title: title, Note: note, Tags: tags, Pinned: pinned, 'Related Item ID': relatedItemId }, _syncClientId: syncClientId });
       } else {
         const savedContent = { title, category, note, tags, pinned, relatedItemId };
         const tempId = 'NOTE_TEMP_' + Date.now();
@@ -4314,7 +4349,12 @@
         function restoreNoteForm_() {
           notesData = notesData.filter(x => x.noteId !== tempId);
           renderNotesList();
-          if (commandMode !== 'notes') return false;
+          if (commandMode !== 'notes') {
+            // User navigated away — don't pop the form over another tab; stash the
+            // content so it's restored next time the Notes tab opens (no data loss).
+            pendingFailedNote = savedContent;
+            return false;
+          }
           openNoteForm('add', null, savedContent.relatedItemId);
           document.getElementById('noteFormTitle').value    = savedContent.title;
           document.getElementById('noteFormCategory').value = savedContent.category;
@@ -4597,6 +4637,13 @@
       goldSheetMutated = false;
       goldSheetScope = 'party';
       if (ledgerEditTarget && ledgerEditTarget.resource !== 'gold') ledgerEditTarget = null;
+      // The amount/note inputs are static (outside goldSheetBody), so a dismiss-
+      // without-submit leaves stale values behind. Clear them on open so a hurried
+      // Got Paid/Pay/Split can't fire for a leftover amount.
+      const amtEl  = document.getElementById('goldSheetAmount');
+      const noteEl = document.getElementById('goldSheetNote');
+      if (amtEl)  { amtEl.value = ''; amtEl.readOnly = false; }
+      if (noteEl) noteEl.value = '';
       renderGoldSheetBody();
       renderGoldSheetButtons();
       sheet.classList.add('active');
@@ -4863,6 +4910,14 @@
       const noteInput = document.getElementById('deleriumSheetNote');
       const status    = document.getElementById('deleriumSheetStatus');
       const note      = (noteInput && noteInput.value.trim()) || '';
+      // The "Gold received" field is only consumed by Sell. If it's filled and the
+      // user taps Received, the gold would be silently dropped — warn instead.
+      const goldEl  = document.getElementById('deleriumSheetGold');
+      const goldVal = goldEl ? parseFloat(goldEl.value) : NaN;
+      if (Number.isFinite(goldVal) && goldVal > 0) {
+        if (status) status.innerHTML = '<span class="error">That gold amount is only logged by <b>Sell</b>. Tap Sell to record the sale, or clear the gold field to just receive crystals.</span>';
+        return;
+      }
       // Guard: reject if any size is in sell mode
       const hasForSale = DELERIUM_SIZES.some(s => (deleriumOriginalQtys[s] || 0) > (deleriumSellQtys[s] !== undefined ? deleriumSellQtys[s] : (deleriumOriginalQtys[s] || 0)));
       if (hasForSale) return;
@@ -5143,7 +5198,9 @@
       }
       const isDMGoldScope = isDMUser && goldSheetScope !== 'party';
       const showSplit = !isDMGoldScope && isTreasurer && (goldSheetScope === 'party' || isDMUser);
-      const showUndo  = !isDMGoldScope && isTreasurer && lastResourceUndo['gold'];
+      // Undo is available to anyone who can Pay (Pay/Got-Paid are not treasurer-gated),
+      // so a non-treasurer member-send can be reversed in-app.
+      const showUndo  = !isDMGoldScope && lastResourceUndo['gold'];
       container.innerHTML = isDMGoldScope ? `
         <button class="secondary" style="width:100%;margin-top:14px;" type="button" onclick="closeGoldSheet()">Done</button>
       ` : `
@@ -5159,6 +5216,7 @@
 
     function undoGoldPay() {
       undoResourcePay('gold');
+      renderGoldSheetBody();    // repaint the ledger list so the reversed entry disappears
       renderGoldSheetButtons();
     }
 
@@ -5889,14 +5947,14 @@
         if (res.ledgerEntry) {
           inventoryResourceLedger = [res.ledgerEntry, ...inventoryResourceLedger].slice(0, 60);
         }
-        if (isTreasurer) {
-          if (isMember && res.poolDeduct) {
-            lastResourceUndo['gold'] = { item: res.poolDeduct, creditItem: res.item || null, ledgerEntry: res.ledgerEntry };
-          } else if (!isMember && res.item) {
-            lastResourceUndo['gold'] = { item: res.item, creditItem: null, ledgerEntry: res.ledgerEntry };
-          }
-          renderGoldSheetButtons();
+        // Store the undo handle for all users (not just treasurer) so a member-send
+        // by a non-treasurer can still be reversed in-app.
+        if (isMember && res.poolDeduct) {
+          lastResourceUndo['gold'] = { item: res.poolDeduct, creditItem: res.item || null, ledgerEntry: res.ledgerEntry };
+        } else if (!isMember && res.item) {
+          lastResourceUndo['gold'] = { item: res.item, creditItem: null, ledgerEntry: res.ledgerEntry };
         }
+        renderGoldSheetButtons();
         cacheInventoryRows(inventoryRows, inventoryResourceLedger);
         goldSheetMutated = true;
         renderGoldSheetBody();
@@ -7211,7 +7269,9 @@
         if (newQty > 0) acc.push({ ...r, 'Qty': newQty });
         return acc;
       }, []);
-      cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+      // Don't cache here — _inFlightWrites is still 0, so the cacheInventoryRows guard
+      // wouldn't fire and an unconfirmed sell would persist to localStorage. The
+      // success/fail handlers re-cache once the write has cycled.
       renderInventory();
 
       gasCall('apiSellInventoryBatch', { items, goldAmount, note, clientCharacter: myCharacterName || '', _syncClientId: syncClientId },
@@ -7280,7 +7340,8 @@
       const qty      = descActionQty;
       closeDescActionSheet();
       closeDescriptionSheet();
-      cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+      // Don't cache here — _inFlightWrites is still 0, so an unconfirmed remove would
+      // persist to localStorage. The success/fail handlers re-cache after the call.
       renderInventory();
 
       descActionInFlight = true;

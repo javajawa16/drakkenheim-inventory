@@ -819,7 +819,7 @@ function apiGiveInventoryBatch(payload) {
       const targetRowObj = { ...template, 'Holder': newHolder };
       const existing = findMatchingInventoryRow_(sheet, freshHeaders, targetRowObj);
       if (existing) {
-        mergeIntoExistingRow_(sheet, freshHeaders, existing, qty);
+        mergeIntoExistingRow_(sheet, freshHeaders, existing, qty, targetRowObj);
       } else {
         const valueGp = Number(template['Value GP']) || 0;
         const newRow  = {
@@ -1887,12 +1887,31 @@ function findMatchingInventoryRow_(sheet, headers, rowObj) {
   return null;
 }
 
-function mergeIntoExistingRow_(sheet, headers, found, addQty) {
+function mergeIntoExistingRow_(sheet, headers, found, addQty, incoming) {
   const existing = found.rowObj;
   const newQty = Number(existing['Qty'] || 0) + addQty;
   const valGp  = existing['Value GP'];
   const newTotal = (valGp === '' || valGp === null || valGp === undefined) ? '' : newQty * Number(valGp);
   const merged = Object.assign({}, existing, { 'Qty': newQty, 'Total Value GP': newTotal });
+
+  // Preserve the just-submitted row's Notes / Faction Relevance instead of
+  // silently dropping them. Mirrors apiCombineInventoryItems (existing = target,
+  // incoming = source): keep the existing faction when both differ, adopt the
+  // incoming one when existing is empty; concatenate distinct notes.
+  if (incoming) {
+    const exFaction  = safeText_(existing['Faction Relevance']);
+    const incFaction = safeText_(incoming['Faction Relevance']);
+    if (!exFaction && incFaction) merged['Faction Relevance'] = incFaction;
+
+    const exNotes  = safeText_(existing['Notes']).trim();
+    const incNotes = safeText_(incoming['Notes']).trim();
+    if (incNotes && !exNotes) {
+      merged['Notes'] = incNotes;
+    } else if (incNotes && exNotes && incNotes !== exNotes) {
+      merged['Notes'] = `${exNotes}\n\n${incNotes}`;
+    }
+  }
+
   writeInventoryRow_(sheet, headers, found.rowNumber, merged);
   return merged;
 }
@@ -2387,7 +2406,7 @@ function apiAddInventory(payload) {
     const existing = findMatchingInventoryRow_(sheet, headers, rowObj);
     let resultObj;
     if (existing) {
-      resultObj = mergeIntoExistingRow_(sheet, headers, existing, qty);
+      resultObj = mergeIntoExistingRow_(sheet, headers, existing, qty, rowObj);
     } else {
       const newRow = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
       sheet.appendRow(newRow);
@@ -2497,7 +2516,7 @@ function apiAddCustomInventory(payload) {
     const existing = findMatchingInventoryRow_(sheet, headers, rowObj);
     let resultObj;
     if (existing) {
-      resultObj = mergeIntoExistingRow_(sheet, headers, existing, qty);
+      resultObj = mergeIntoExistingRow_(sheet, headers, existing, qty, rowObj);
     } else {
       sheet.appendRow(headers.map(h => rowObj[h] !== undefined ? rowObj[h] : ''));
       resultObj = rowObj;
@@ -3140,86 +3159,63 @@ function apiSplitGold(payload) {
     const splitNote  = note ? `${note} (${mathStr})` : mathStr;
     const nowStr     = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
     const ledgerEntries = [];
+    const clientChar = safeText_(payload && payload.clientCharacter);
 
     const invSheet = getOrCreateSheet_(ss, CONFIG.INVENTORY_SHEET);
     if (invSheet.getLastRow() < 1) writeHeaderOnly_(invSheet, INVENTORY_HEADERS);
     ensureInventoryHeaders_(invSheet);
     const headers = invSheet.getRange(1, 1, 1, invSheet.getLastColumn()).getValues()[0].map(String);
 
-    // Deduct total from party pool first (Holder = '' = unassigned pool)
-    const poolDeduct = {
+    const goldRow_ = (qty, holder) => ({
       'Inventory ID':    makeInventoryId_(),
       'Item':            'Gold',
       'Library Item ID': '',
       'Category':        'Currency',
       'Rarity':          '',
-      'Qty':             -amount,
-      'Holder':          '',
+      'Qty':             qty,
+      'Holder':          holder,
       'Shared?': '', 'Identified?': '', 'Attunement?': '',
       'Value GP':        1,
-      'Total Value GP':  -amount,
+      'Total Value GP':  qty,
       'Status': '', 'Faction Relevance': '', 'Risk': '',
       'Notes':           splitNote,
       'Date Added':      new Date()
-    };
-    invSheet.appendRow(headers.map(h => poolDeduct[h] !== undefined ? poolDeduct[h] : ''));
-    appendResourceLedger_({ userEmail, action: 'SPLIT_DEDUCT', resource: 'gold', subtype: 'gold',
-      qty: -amount, valueGp: 1, inventoryId: poolDeduct['Inventory ID'],
-      item: 'Gold (party pool deduct)', notes: splitNote,
-      character: safeText_(payload && payload.clientCharacter) });
-    ledgerEntries.push(sanitizeResourceLedgerForClient_({ 'Timestamp': nowStr, 'Action': 'SPLIT_DEDUCT', 'Resource': 'gold',
-      'Subtype': 'gold', 'Qty': -amount, 'Value GP': 1,
-      'Inventory ID': poolDeduct['Inventory ID'], 'Item': 'Gold (party pool deduct)', 'Notes': splitNote,
-      'Character': safeText_(payload && payload.clientCharacter) }));
-
-    // Credit each member their share (Holder = character name)
-    const items = charRows.map(character => {
-      const rowObj = {
-        'Inventory ID':    makeInventoryId_(),
-        'Item':            'Gold',
-        'Library Item ID': '',
-        'Category':        'Currency',
-        'Rarity':          '',
-        'Qty':             perMember,
-        'Holder':          character,
-        'Shared?': '', 'Identified?': '', 'Attunement?': '',
-        'Value GP':        1,
-        'Total Value GP':  perMember,
-        'Status': '', 'Faction Relevance': '', 'Risk': '',
-        'Notes':           splitNote,
-        'Date Added':      new Date()
-      };
-      invSheet.appendRow(headers.map(h => rowObj[h] !== undefined ? rowObj[h] : ''));
-      appendResourceLedger_({ userEmail, action: 'SPLIT', resource: 'gold', subtype: 'gold',
-        qty: perMember, valueGp: 1, inventoryId: rowObj['Inventory ID'],
-        item: `Gold (${character})`, notes: splitNote,
-        character: safeText_(payload && payload.clientCharacter) });
-      ledgerEntries.push(sanitizeResourceLedgerForClient_({ 'Timestamp': nowStr, 'Action': 'SPLIT', 'Resource': 'gold',
-        'Subtype': 'gold', 'Qty': perMember, 'Value GP': 1,
-        'Inventory ID': rowObj['Inventory ID'], 'Item': `Gold (${character})`, 'Notes': splitNote,
-        'Character': safeText_(payload && payload.clientCharacter) }));
-      return sanitizeInventoryForClient_(rowObj);
     });
 
-    // Return excess to party pool if amount didn't divide evenly
+    // Build every row up front and commit them in ONE setValues write.
+    // LockService gives mutual exclusion, not atomicity — N separate appendRows
+    // could die partway (quota/timeout) and leave the pool debited but members
+    // un-credited, silently destroying gold. A single batched write is
+    // all-or-nothing for the inventory side.
+    const poolDeduct = goldRow_(-amount, '');                       // party pool deduct
+    const memberRows = charRows.map(c => goldRow_(perMember, c));    // each member's share
+    const remRow     = remainder > 0 ? goldRow_(remainder, '') : null;
+
+    const allRows = [poolDeduct, ...memberRows];
+    if (remRow) allRows.push(remRow);
+
+    const startRow = invSheet.getLastRow() + 1;
+    invSheet.getRange(startRow, 1, allRows.length, headers.length)
+      .setValues(allRows.map(o => headers.map(h => o[h] !== undefined ? o[h] : '')));
+
+    // Ledger is a reconciliation log (not the balance source), appended after the
+    // atomic inventory write.
+    const pushLedger_ = (action, qty, invId, label) => {
+      appendResourceLedger_({ userEmail, action, resource: 'gold', subtype: 'gold',
+        qty, valueGp: 1, inventoryId: invId, item: label, notes: splitNote, character: clientChar });
+      ledgerEntries.push(sanitizeResourceLedgerForClient_({ 'Timestamp': nowStr, 'Action': action,
+        'Resource': 'gold', 'Subtype': 'gold', 'Qty': qty, 'Value GP': 1,
+        'Inventory ID': invId, 'Item': label, 'Notes': splitNote, 'Character': clientChar }));
+    };
+
+    pushLedger_('SPLIT_DEDUCT', -amount, poolDeduct['Inventory ID'], 'Gold (party pool deduct)');
+    const items = memberRows.map((rowObj, i) => {
+      pushLedger_('SPLIT', perMember, rowObj['Inventory ID'], `Gold (${charRows[i]})`);
+      return sanitizeInventoryForClient_(rowObj);
+    });
     let remainderItem = null;
-    if (remainder > 0) {
-      const remRow = {
-        'Inventory ID': makeInventoryId_(), 'Item': 'Gold', 'Library Item ID': '',
-        'Category': 'Currency', 'Rarity': '', 'Qty': remainder, 'Holder': '',
-        'Shared?': '', 'Identified?': '', 'Attunement?': '', 'Value GP': 1,
-        'Total Value GP': remainder, 'Status': '', 'Faction Relevance': '', 'Risk': '',
-        'Notes': splitNote, 'Date Added': new Date()
-      };
-      invSheet.appendRow(headers.map(h => remRow[h] !== undefined ? remRow[h] : ''));
-      appendResourceLedger_({ userEmail, action: 'SPLIT_REMAINDER', resource: 'gold', subtype: 'gold',
-        qty: remainder, valueGp: 1, inventoryId: remRow['Inventory ID'],
-        item: 'Gold (remainder to pool)', notes: splitNote,
-        character: safeText_(payload && payload.clientCharacter) });
-      ledgerEntries.push(sanitizeResourceLedgerForClient_({ 'Timestamp': nowStr, 'Action': 'SPLIT_REMAINDER', 'Resource': 'gold',
-        'Subtype': 'gold', 'Qty': remainder, 'Value GP': 1,
-        'Inventory ID': remRow['Inventory ID'], 'Item': 'Gold (remainder to pool)', 'Notes': splitNote,
-        'Character': safeText_(payload && payload.clientCharacter) }));
+    if (remRow) {
+      pushLedger_('SPLIT_REMAINDER', remainder, remRow['Inventory ID'], 'Gold (remainder to pool)');
       remainderItem = sanitizeInventoryForClient_(remRow);
     }
 
