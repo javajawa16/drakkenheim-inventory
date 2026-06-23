@@ -1,9 +1,98 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
+Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
 
 ## Sessions
+
+### 2026-06-23 (run 56) — Sections audited: 4
+
+Section 4 = Code.js lines 1701–2300 ("sell, combine, gold ops"). The physical
+range is the helper/ledger/sync/notes backbone: validators (`validateMoney_`
+1705, `normalizeOptionalMoney_` 1717), client sanitizers (1724–1790),
+`getResourceLedgerForClient_` 1792, the inventory merge/find helpers
+`findMatchingInventoryRow_` 1860 / `mergeIntoExistingRow_` 1890, quick-edit
+classifiers (`classifyQuickEdit_` 1900, `getQuickAddDefinition_` 1922),
+audit/ledger writers (`auditWrite_` 1932, `appendResourceLedger_` 1962,
+`deleteResourceLedgerRowsForInventory_` 1989), `apiGetInventory` 2084, sync
+(`bumpSync_` 2122, `apiGetSyncState` 2132), the Party-Notes write APIs
+(`apiCreateNote` 2233, `apiUpdateNote` 2274, `apiArchiveNote` 2305, plus
+`apiGetNotes` 2185), and the head of `apiAddInventory` 2327. Client callers read
+in full: notes flow `saveNoteForm` 4259, `toggleNotePin` 4395, `archiveNote`
+4366, `deleteNoteFromForm` 4231, `loadNotes` 4080, `renderNotesList` 4106, and
+the add/combine reconcilers (`primeInventoryCacheAfterAdd`, `apiAddInventory`).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every write path):
+
+- **Create note** — optimistic temp `NOTE_TEMP_` card; success replaces by tempId
+  (and now re-inserts if `loadNotes` clobbered mid-flight, run-30 bug FIXED);
+  failure re-opens the form pre-filled only when still on the notes tab (the
+  cross-tab pop-open RISK from run 48 still stands at 4314).
+- **Edit note** — optimistic `Object.assign`; backup-by-id restore on failure.
+  See new RISK below on the optimistic timestamp format.
+- **Pin note / Archive note / Delete-from-form** — all now guarded by
+  `_notesActionInFlight` (Set) against double-tap and `_inFlightNoteWrites`
+  (counter) defers poll-driven `loadNotes(true)`; `pollSync` honours both
+  (4024). The run-30 double-tap and clobber findings are now CLOSED by these
+  guards. `renderNotesList` re-sorts pinned-first/newest-first (4132), so the
+  `unshift`-on-rollback position concerns from older runs are also moot.
+- **Combine duplicate / Add library item** — server auto-combine via
+  `findMatchingInventoryRow_` + `mergeIntoExistingRow_`. See new RISK below on
+  dropped Notes.
+- **Collaborative sync interference** — `bumpSync_` writes both `SYNC_*` and
+  `SYNC_*_BY`; `apiGetSyncState` returns both pairs; notes branch honours
+  `_inFlightNoteWrites`. Clean for notes.
+
+#### RISK · Code.js:1890 · Auto-combine on add silently drops the newly typed Notes (and Faction Relevance)
+
+Story: **Add library item / Add custom item**, happy path with a pre-existing
+duplicate. `findMatchingInventoryRow_` (1860) matches on
+Item/Category/Rarity/Holder/Value GP only — it does **not** include Notes or
+Faction Relevance in the match key. `mergeIntoExistingRow_` (1890) then does
+`Object.assign({}, existing, {Qty, Total Value GP})`, keeping the *existing*
+row's Notes/Faction Relevance and discarding the values the user just typed on
+this add. Because a library item's Value GP defaults to the library value,
+adding the same item to the same holder a second time is an exact match, so the
+second add's Notes are silently lost: the client reconciles by Inventory ID to
+`res.item`, which carries the old notes, so the UI shows no trace of the dropped
+text and gives no "combined" warning that differs from a normal add. Reachable
+whenever a player re-adds a held item to annotate it (e.g. "cursed", "for
+Marek"). The earlier `Note · Code.js:1754` validated qty conservation on this
+same merge but did not cover field loss. Fix options: include Notes in the match
+key so annotated re-adds append a distinct row; or, on merge, append/concatenate
+the new Notes onto the existing row rather than discarding; or surface a
+combine-confirm when only Notes differ (as the client already does when Holder
+or Value differ).
+
+#### RISK · Index.html:4274 · Optimistic edit stamps ISO `updatedAt`, mis-sorting the note until the next reload
+
+Story: **Edit note**, happy path + ordering. `saveNoteForm`'s edit branch sets
+the optimistic `updatedAt = new Date().toISOString()` (4274 → 4279), e.g.
+`2026-06-23T19:30:00.000Z`, while the server (`apiUpdateNote` 2285) stores
+`Utilities.formatDate(... 'yyyy-MM-dd HH:mm:ss')`, e.g. `2026-06-23 19:30:00`
+(space-separated, script-timezone). `renderNotesList` sorts newest-first with
+`localeCompare` on the raw string (4134). At char index 10 the ISO `'T'` (84)
+out-ranks the server `' '` (32), so an optimistically-edited note lexically
+sorts **above every server-format note**, regardless of which was actually
+updated more recently — and unlike the create path (which replaces the
+optimistic row with `res.note`'s server-format timestamp on success), the edit
+success handler keeps the optimistic ISO string, so the mis-ordering persists
+until the next full `loadNotes`. Concretely: Alice's "Loot plan" updated at
+server `2026-06-23 22:00`; I edit "Shopping list" at 19:30 → mine floats to the
+top of its pin group above the genuinely-newer "Loot plan". Self-heals on
+reload; display-only (no data loss). Fix: format the optimistic timestamp with
+the same `yyyy-MM-dd HH:mm:ss` shape (or have `apiUpdateNote` return the updated
+note and replace local state on success, mirroring create).
+
+#### Note · Code.js:2233 · Notes write APIs — lock discipline and sync bumps are clean
+`apiCreateNote`/`apiUpdateNote`/`apiArchiveNote` each `tryLock(10000)`, return a
+busy error on contention, do their single sheet mutation, `bumpSync_('notes', …)`,
+and release the lock in `finally` on every path including the auth-failure and
+not-found early returns. `apiUpdateNote` whitelists patch fields (Category falls
+back to the existing value when invalid; Pinned coerced to boolean). Traced
+Create/Edit/Pin/Archive note end-to-end against their client handlers — no stuck
+lock, no missing `bumpSync_`, no rollback gap on the server side.
 
 ### 2026-06-20 (run 55) — Sections audited: 3
 
