@@ -1,11 +1,106 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
+Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
 
 ## Sessions
 
-### 2026-06-20 (run 55) — Sections audited: 3
+### 2026-06-23 (run 56) — Sections audited: 4
+
+Section 4 = "sell, combine, gold ops". The physical 1701–2300 range is
+validators / sanitizers / ledger helpers / sync / notes-v2 scaffolding, so I
+traced the *named* endpoints wherever they live and their client callers.
+
+Server endpoints read: `apiSellInventoryBatch` (663), `apiDepleteResource`
+(2691), `apiUpdateLedgerNote` (2823), `apiReceiveResource` (2879),
+`apiSellInventoryItem` (2964), `apiSellDelerium` (3019), `apiSplitGold` (3104),
+`apiSendGoldToMember` (3242), `apiUndoMemberSend` (3490),
+`apiCombineInventoryItems` (3528), `apiDeleteInventory` (3417), plus helpers
+`appendResourceLedger_` (1962), `deleteResourceLedgerRowsForInventory_` (1989),
+`bumpSync_` (2122), `validateQuantity_` (1687).
+
+Client callers traced: `gasCall` (2891), `confirmCombineInventoryItem` (3530),
+`receivedGold` (5165), `splitGold` (5927), `confirmPayWithReason` (5829),
+`payResource` (6414), `undoResourcePay`/`undoGoldPay` (6483/5160),
+`selectLedgerRowForEdit`/`updateLedgerNoteFromBottom` (6112/6160),
+`confirmSellItem` (5334), `confirmDescRemove` (~6780), `sellDelerium` (4959),
+`receiveDelerium` (4862), and the sync poll `pollSync` (4008).
+
+Stories traced (happy path / failure-at-step / navigate-away / friction):
+Receive gold, Pay gold (Purchase + member-send + personal scope), Split gold
+evenly, Edit ledger note, Undo last pay, Sell item (description sheet),
+Remove item, Combine duplicate, Receive crystals, Sell crystals, plus the
+cross-cutting "Collaborative sync interference" and "Tab switch during
+in-flight".
+
+#### BUG · Index.html:5160 · Undo Last Pay on Gold tab leaves reversed entry visible in the ledger
+Story "Undo last pay", final step. On the Gold tab the treasurer taps
+`↩ Undo Last Pay` → `undoGoldPay()` (5160) calls `undoResourcePay('gold')` then
+only `renderGoldSheetButtons()`. `undoResourcePay` (6483) removes the reversed
+entry from `inventoryResourceLedger` and the rows from `inventoryRows`, then
+calls **`renderInventory()`** (6499) — which repaints the hidden inventory list,
+not the gold sheet. The gold sheet ledger list is produced by
+`renderGoldSheetBody()` → `renderResourceLedger('gold',60)` (5124), which is
+never called on the optimistic or success path (only the failure `rollback()`
+calls it, 6508). Result: after a successful undo the now-deleted PAY /
+SEND_DEDUCT entry stays on screen in the Gold tab ledger until some other action
+re-renders the body or the app reloads. The server *does* reverse the ledger
+(`apiDeleteInventory` with `reverseLedgerEntry:true`, and `apiUndoMemberSend`
+deletes both ledger rows), and client state is already corrected — this is
+purely a missing re-render. This is the live remnant of the README "Undo Last
+Pay … ledger history shows the original payment after undo until the next
+reload" TODO; the README's framing ("does not reverse RESOURCE_LEDGER entries")
+is now inaccurate. Fix: add `renderGoldSheetBody()` to `undoGoldPay()` (and to
+`undoResourcePay`'s success handlers for parity). The dashboard-breakout undo
+path is unaffected because it re-renders via `renderInventory()`.
+
+#### RISK · Index.html:4862 · "Gold received" field silently dropped when tapping "Received" on delerium sheet
+Stories "Receive crystals" / "Sell crystals". For a treasurer
+`renderDeleriumSheetActions()` (4647–4662) renders a shared `deleriumSheetGold`
+("Gold received (gp)") input next to both the **Received** and **Sell** buttons.
+`receiveDelerium()` (4862) reads only `deleriumSheetNote` — it never reads
+`deleriumSheetGold`, and `apiReceiveResource`'s delerium branch (Code.js
+2923–2952) has no goldAmount parameter at all. So a treasurer who types a gold
+amount and then taps **Received** (intentionally, or by hitting the wrong of two
+adjacent buttons) loses that value silently: no gold row, no gold ledger entry,
+no warning, and the field isn't cleared. Only `sellDelerium()` consumes the
+field. Fix: hide/disable the gold input unless the pending action is a sell, or
+surface a warning when Received is tapped with a non-empty gold field.
+
+#### IDEA · Index.html:6414 · Dashboard inline Pay has no optimistic balance update (inconsistent with Gold tab)
+Story "Pay gold". The Gold-tab pay (`confirmPayWithReason`, 5829) and Got-Paid
+(`receivedGold`, 5165) both insert an optimistic inventory row + pending ledger
+entry so the balance and ledger move instantly. The dashboard resource-breakout
+inline Pay (`payResource`, 6414) does neither — it only flips the button to
+"Recording…" and waits for the round-trip before `primeInventoryCacheAfterAdd`.
+On a slow GAS call the gold/delerium total sits stale for the whole round-trip,
+which reads as "did my tap register?" friction and is inconsistent with the
+adjacent Gold/Delerium sheets. Suggest mirroring the optimistic pattern (insert
+a negative-qty row keyed by a temp id, remove on resolve).
+
+#### Note · Index.html:4008 · Collaborative-sync deferral is correct under in-flight writes
+Cross-cutting "Collaborative sync interference" traced. `pollSync` (4008): when a
+foreign `inventory.ts` change is seen while `_inFlightWrites > 0`, it sets
+`pendingForeignReload = true` and crucially does **not** advance
+`syncState.inventory.ts`, so the next idle poll still detects the change and runs
+`loadInventory(true)` (4012–4022). A subsequent *own* write that bumps sync to
+`syncClientId` still triggers the deferred reload via the `|| pendingForeignReload`
+clause (4017), so a foreign edit can't be masked by a later self-write. `gasCall`
+(2891) increments/decrements `_inFlightWrites` symmetrically on both success and
+failure handlers, so the counter can't get stuck and strand the poll. No stuck
+state found.
+
+#### Note · Code.js:3490 · Undo/sell/combine server rollback + lock discipline clean
+Stories "Undo last pay", "Sell item", "Combine duplicate" server side.
+`apiUndoMemberSend` (3490) deletes deduct+credit rows in descending row order
+(3512) so earlier deletes don't shift later row numbers, and reverses both ledger
+rows. `apiCombineInventoryItems` (3528) deletes the source then writes the merged
+target at the row-shift-adjusted index (3604–3606). `apiSellInventoryBatch` (663)
+sorts resolved rows by descending rowNumber before mutating (699). All
+gold/sell/combine endpoints release the document lock in `finally` on every
+path including auth failure and validation throws. Double-tap on Got Paid / Pay /
+Split is incidentally guarded because each handler clears the amount input
+synchronously, so a queued second click reads an empty amount and bails.
 
 Section 3 = Code.js lines 1101–1700 (inventory write — add, edit, delete). The
 physical 1101–1700 range is the helper/validation/identity layer that every
