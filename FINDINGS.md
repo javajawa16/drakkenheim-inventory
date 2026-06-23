@@ -1,9 +1,109 @@
 # Audit Findings — Drakkenheim Inventory
 
 ## Audit Cursor
-Next section: 4. Code.js lines 1701–2300 (sell, combine, gold ops)
+Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
 
 ## Sessions
+
+### 2026-06-23 (run 56) — Sections audited: 4
+
+Section 4 = Code.js lines 1701–2300 (sell, combine, gold ops). The physical
+1701–2300 range is the validation/sanitizer/ledger-helper layer plus sync and
+Party Notes writes: validators (`validateMoney_` 1705, `normalizeOptionalMoney_`
+1717), client sanitizers (`sanitizeInventoryForClient_` 1760,
+`sanitizeResourceLedgerForClient_` 1777), ledger read (`getResourceLedgerForClient_`
+1792), row mappers/merge (`inventoryRowToObject_` 1832, `writeInventoryRow_` 1855,
+`findMatchingInventoryRow_` 1860, `mergeIntoExistingRow_` 1890),
+`classifyQuickEdit_` 1900, audit/ledger writers (`auditWrite_` 1932,
+`appendResourceLedger_` 1962, `deleteResourceLedgerRowsForInventory_` 1989),
+sync (`bumpSync_` 2122, `apiGetSyncState` 2132) and notes writes (`apiCreateNote`
+2233, `apiUpdateNote` 2274, `apiArchiveNote` 2305). These are the shared spine of
+the **gold/sell/combine** stories, traced out to the endpoints that consume them:
+`apiDepleteResource` (2691 — Pay/Purchase), `apiUpdateLedgerNote` (2823 — edit
+ledger note), `apiReceiveResource` (2879 — Got Paid / delerium receive),
+`apiSellInventoryItem` (2964), `apiSellDelerium` (3019), `apiSplitGold` (3104),
+`apiSendGoldToMember` (3242 — member Pay), `apiDeleteInventory` (3417 — undo
+purchase), `apiUndoMemberSend` (3490), `apiCombineInventoryItems` (3528). Client
+callers in Index.html: `receivedGold` (5165), `confirmPayWithReason` (5829),
+`splitGold` (5927), `undoResourcePay` (6483), `selectLedgerRowForEdit`/
+`updateLedgerNoteFromBottom` (6112/6160), `confirmSellItem` (5334),
+`sellDelerium`/`receiveDelerium` (4959/~4840), `confirmCombineInventoryItem`
+(3530), and the sync spine `gasCall`/`pollSync`/`loadInventory` (2891/4008/3718).
+
+Stories traced (a–d): Receive gold (Got Paid), Pay gold (Purchase + member),
+Split Evenly, Undo last pay, Edit ledger note, Sell item (description sheet),
+Combine duplicate, plus Delerium receive/sell which share `apiReceiveResource`/
+`appendResourceLedger_`.
+
+#### RISK · Code.js:3104 · apiSplitGold commits many rows with no atomicity or rollback
+Split Evenly story, "confirm → apiSplitGold" step (failure-at-step-N). The handler
+writes, sequentially and under one document lock, a pool-deduct inventory row +
+ledger entry, then one credit row + ledger entry **per active member**, then an
+optional remainder row + ledger entry — up to ~2(N+1) sheet writes (≈14 appends
+for a 6-player party). LockService gives mutual exclusion, not transactionality:
+if execution dies partway (GAS 6-min/quota cutoff, transient SpreadsheetApp
+failure), the party pool is already debited `-amount` while some/all members are
+un-credited — gold is silently destroyed or stranded. The client failure handler
+in `splitGold` (Index.html:5927) only restores its *own* optimistic ledger entry
+and inputs; it has no way to learn the server committed partway, so the next
+`loadInventory` surfaces the corrupted balance as fact. Compounded by
+`appendResourceLedger_` (Code.js:1962) swallowing its own write errors (known
+TODO): a ledger append can fail while the inventory row lands, leaving inventory
+and ledger permanently disagreeing about the same split. Same multi-write,
+no-rollback class also affects `apiSendGoldToMember` (3242, two rows) and the
+delerium branch of `apiReceiveResource` (2879, N rows). Suggest building the full
+2D values array and writing it in a single `setValues`/batched append so a failure
+is all-or-nothing, and surfacing `appendResourceLedger_` failures to the caller so
+the optimistic UI can roll back.
+
+#### IDEA · Index.html:5829 · Member-send Pay flickers the live gold total down by the sent amount
+Pay gold story (route → character). A member-send moves gold from the pool to a
+party member, so total party gold is unchanged. But `confirmPayWithReason`
+optimistically inserts only the `-amount` pool-deduct inventory row (line ~5855)
+— it does not insert the offsetting `+amount` credit row for the recipient (that
+only arrives via `primeInventoryCacheAfterAdd(res.item)` on success). For the
+in-flight window the header "Gold = XXX gp" therefore drops by the full sent
+amount and then snaps back up when the server confirms, which reads as money
+briefly vanishing. (Purchase pays correctly drop the total, since those really do
+reduce party gold.) Suggest also inserting an optimistic credit row for the
+member-send branch so the net optimistic delta is zero, matching the real effect.
+
+#### Note · Code.js:3445 · README "Undo Last Pay doesn't reverse ledger" TODO is stale
+The known-TODO claim that Undo removes inventory rows but leaves RESOURCE_LEDGER
+entries no longer holds. The purchase-undo path calls `apiDeleteInventory` with
+`reverseLedgerEntry: true` (client `undoResourcePay`, Index.html:6526), and
+`apiDeleteInventory` honours it via `deleteResourceLedgerRowsForInventory_`
+(Code.js:3445–3447). The member-send-undo path (`apiUndoMemberSend`, 3490) deletes
+the ledger rows for *both* the deduct and credit IDs (3515–3516). Client-side,
+`undoResourcePay` also strips the matching ledger entry by `Inventory ID`
+(Index.html:6496). Ledger is reversed on both ends; the README TODO at line 184
+can be retired.
+
+#### Note · Code.js:1962 · Gold/sell/combine write+rollback spine traced clean
+Traced Got Paid, Pay (Purchase + member), Split, Undo, Edit ledger note, Sell
+(batch FIFO), and Combine duplicate end-to-end. Double-submit is guarded
+indirectly but reliably: currency flows (`receivedGold`, `confirmPayWithReason`,
+`splitGold`) clear/lock the amount input before the round-trip so a second tap
+fails the `amount <= 0` check; delerium flows (`receiveDelerium`, `sellDelerium`)
+call `refreshDeleriumStateFromInventory_` which folds the optimistic rows into
+stock and zeroes the counter variance, so a re-tap computes an empty `items`
+list and returns; combine nulls `pendingCombineChoice` before the call and
+restores it only on failure. Edit-ledger-note matches by `entryId` (every ledger
+entry now carries a unique Inventory ID), so the save survives a foreign-sync
+`loadInventory(true)` replacing `inventoryResourceLedger` mid-edit, and
+`closeGoldSheet` clears `ledgerEditTarget`/unlocks the amount input on exit.
+Optimistic→confirmed handoff (`removePending` then `primeInventoryCacheAfterAdd`)
+neither double-counts nor drops rows. Sync deferral via `_inFlightWrites` +
+`pendingForeignReload` correctly defers foreign reloads while a write is in flight.
+
+#### Note · Code.js:2964 · apiSellInventoryItem has no client caller
+The "Sell item" story (description sheet → Sell for Gold → stepper → confirm)
+routes through `apiSellInventoryBatch` (FIFO drain across rollup rows,
+`confirmSellItem` Index.html:5384), not `apiSellInventoryItem`. The singular
+endpoint — which deletes the entire row regardless of qty (3005) — is not reachable
+from the current client. Recorded as a coverage observation, not flagged as a
+defect.
+
 
 ### 2026-06-20 (run 55) — Sections audited: 3
 
