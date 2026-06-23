@@ -25,9 +25,121 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
+Next section: 6. Code.js lines 2901–3500 (batch sell, give, remove)
 
 ## Sessions
+
+### 2026-06-23 (run 57) — Sections audited: 5
+
+Section 5 = Code.js 2301–2900 (`apiUpdateNote`/`apiArchiveNote` tails,
+`apiAddInventory`, `apiAddCustomInventory`, `apiQuickAddInventory`,
+`apiDepleteResource`, `apiUpdateLedgerNote`, `apiReceiveResource`), plus the
+`apiGetNotes`/`apiCreateNote` heads just above and the helpers these feed
+(`findMatchingInventoryRow_`, `mergeIntoExistingRow_`, `appendResourceLedger_`,
+`sanitizeResourceLedgerForClient_`). Stories traced end-to-end through client +
+server: **Add library item**, **Add custom item**, **Quick-adjust currency**,
+**Receive gold**, **Pay gold**, **Receive crystals**, **Edit ledger note** (gold
++ delerium), **Create/Edit/Pin/Archive note**, and the cross-cutting
+**Collaborative sync interference** / **Tab-switch during in-flight** scenarios.
+Most server-side defects in this range were already caught in earlier runs (the
+`mergeIntoExistingRow_` Notes/Faction drop — run 56 BUG, now fixed; the
+own-write-masks-foreign-write sync hole — runs documented at FINDINGS lines
+3233/3259; the create-note success handler that skips `renderNotesList()` —
+FINDINGS line 3340). The one genuinely new, high-value defect is the
+Gold/Delerium sheet never repainting after a poll-driven reload (below).
+
+#### RISK · Index.html:3785 · Poll-driven inventory reload never repaints the Gold or Delerium sheet
+**Stories: Receive gold, Pay gold, Receive/Sell crystals, Edit ledger note —
+cross-cutting "Collaborative sync interference."** Every section-5 resource write
+(`apiReceiveResource`, `apiDepleteResource`, `apiUpdateLedgerNote`, plus
+`apiSellDelerium`) calls `bumpSync_('inventory', …)`. On another player's
+machine the 20 s `pollSync` (4010) sees the inventory ts move and fires
+`loadInventory(true)` (4021). `loadInventory`'s success handler (3776-3788)
+refetches `res.resourceLedger` into `inventoryResourceLedger` and the rows into
+`inventoryRows`, caches them, and then **only ever calls `renderInventory()`**
+(3786) — and that render is itself gated behind `inventorySignature_()`, whose
+signature covers inventory **rows** only (count/IDs/Qty/Holder/Value GP/Notes),
+not the resource ledger. Neither `loadInventory` nor `pollSync` ever calls
+`renderGoldSheetBody()` / `renderDeleriumSheetBody()` (a full-file grep shows all
+~30 call sites live inside local-action handlers — received/sell/pay/undo/
+ledger-note-edit — never the sync path). Concrete failure: User B is sitting on
+the **Gold** tab. User A taps "Got Paid" for 200 gp (or edits a ledger note, or
+pays). Within 20 s B's poll quietly updates B's in-memory ledger + rows, but the
+visible `Gold = XXX gp` header and the ledger list keep the **old** numbers
+indefinitely — until B performs any gold action or switches tabs (which re-runs
+`openGoldSheet`/`renderGoldSheetBody`). Same for the Delerium tab and its live
+"Purple Rocks = XX crystals" counter. This is the exact navigate-away asymmetry
+documented for the create-note bug (FINDINGS 3340): **navigate-away-and-return
+recovers, but staying on the tab is stuck.** No data loss (memory + cache are
+correct), so RISK not BUG, but in a multiplayer treasurer app a wrong gold/
+crystal total shown for an unbounded window is materially misleading. Fix: after
+`loadInventory`'s reload commits, if `commandMode` is the gold or delerium view,
+also call the matching `renderGoldSheetBody()` / `renderDeleriumSheetBody()`
+(and counters) — or have `pollSync` re-render the active resource sheet when it
+triggers a foreign reload.
+
+#### IDEA · Index.html:8514 · Main Add flow flashes a transient duplicate row on a duplicate add; the description-sheet "add more" path does not
+**Story: Add library item (happy path, adding an item the party already holds for
+the same holder/value).** `addInventoryItem` (8479) always prepends a fresh
+optimistic row keyed by a brand-new `optId` (8515-8532) regardless of whether a
+matching row is already on screen. The server (`apiAddInventory` →
+`findMatchingInventoryRow_`/`mergeIntoExistingRow_`, 2406-2414) auto-combines on
+the same Item+Category+Rarity+Holder+Value GP key and returns the **merged** row
+(carrying the pre-existing row's Inventory ID). So for the whole round-trip the
+user sees **two** rows — the pre-existing one plus the optimistic `optId` clone —
+which then collapse into one when `onAddSuccess` removes `optId` and
+`primeInventoryCacheAfterAdd` updates the existing row in place (3088-3101,
+verified correct, no lasting duplicate). The sibling description-sheet "add more"
+path already solved this: `_confirmDescActionAdd_` (7179-7195) pre-checks the
+same 5-key `existingMatch` and increments the matching row in place "so there's
+no duplicate flash." Mirror that pre-increment in `addInventoryItem` so the two
+add entry points behave consistently.
+
+#### IDEA · Code.js:2569 · Quick-add buttons skip the server-side auto-merge that library/custom adds perform
+**Story: Add library item vs quick-add (potion/gemstone/scroll/etc.).**
+`apiAddInventory` (2406) and `apiAddCustomInventory` (2516) both run
+`findMatchingInventoryRow_` + `mergeIntoExistingRow_` so re-adding an identical
+item silently bumps the existing row's Qty. `apiQuickAddInventory` (2569) does
+**not** — it unconditionally `sheet.appendRow(...)` (2652). For currency and
+delerium-crystal quick-adds this is required (each pickup needs its own ledger
+row), but for the non-resource quick items (health potion, gemstone, art object,
+trade goods, rations, scroll) it means tapping the quick-add button twice leaves
+**two** Qty-1 rows and then surfaces a combine suggestion, whereas adding the
+same potion via library search merges with no prompt. Two paths to "add a health
+potion" give different results. Consider routing non-resource quick-adds through
+the same `findMatchingInventoryRow_`/`mergeIntoExistingRow_` merge (gating the
+append-always behavior to `editType === 'currency' || 'delerium crystal'`).
+
+#### RISK · Index.html:5283 · `receivedGold` server-error branch omits `renderInventory()` that the transport-error branch includes
+**Story: Receive gold (failure at the server step).** Both rollback branches call
+`removePending()` (which strips the optimistic `optGoldId` row from
+`inventoryRows`) and restore the ledger, but the application-error branch
+(`!res.ok`, 5278-5284) repaints only `renderGoldSheetBody()`, while the transport
+`withFailureHandler` (5295-5303) repaints `renderGoldSheetBody()` **and**
+`renderInventory()`. After a server-rejected "Got Paid" the just-removed optimistic
+Gold row therefore lingers in the inventory-tab DOM until the next render. Impact
+is small (the user is on the Gold tab; Currency rows are excluded from the
+inventory groups, and the in-memory array is already correct), but the asymmetry
+is gratuitous — add the trailing `renderInventory()` to the `!res.ok` branch to
+match its twin.
+
+#### Note · Code.js:2252 · Notes write paths (create / edit / pin / archive) trace clean
+**Stories traced: Create note, Edit note, Pin note, Archive note.** Server
+`apiCreateNote`/`apiUpdateNote`/`apiArchiveNote` (2252-2344) all take the document
+lock with a finally-release on every path including auth failure, validate the
+Category against `PARTY_NOTES_CATEGORIES` (falling back to the existing value, not
+erroring), key the target row by Note ID at handler time (no stale index), and
+`bumpSync_('notes', …)`. Client handlers (`saveNoteForm` edit branch 4307,
+`toggleNotePin` 4439, `archiveNote` 4410) each snapshot a per-note `backup`,
+update optimistically, share the `_notesActionInFlight` per-note guard against
+double-tap, bump `_inFlightNoteWrites` so a concurrent poll defers
+`loadNotes(true)`, and restore the backup by ID on both `!ok` and transport
+failure. The patch keys sent from the edit form (`{Category,Title,Note,Tags,
+Pinned,'Related Item ID'}`, 4340) match the server's `allowed` whitelist exactly.
+The only outstanding notes defect remains the previously-logged create-success
+no-render (FINDINGS 3340). The auto-combine reconcile on the add path
+(`primeInventoryCacheAfterAdd` updating in place when the merged row's Inventory
+ID already exists) was also re-verified correct.
 
 ### 2026-06-23 (run 56, consolidated) — Sections audited: 4
 
