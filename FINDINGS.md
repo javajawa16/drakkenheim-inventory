@@ -25,9 +25,105 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 6. Code.js lines 3900+ (remaining server utilities, helpers)
+Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js fully swept; begin Index.html
 
 ## Sessions
+
+### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–end: remaining server utilities + tail of `apiSetItemQuantity`)
+
+Section 6 = Code.js 3900–4045 (file end). In-range code: tail of `apiSetItemQuantity`
+(quick-adjust "set" writer, 3830–3939) plus utilities `normalizeForClient_` (3941),
+`ensureInventoryHeaders_` (3956), `fillMissingInventoryRarity_` (3973), and
+`findInventoryRowById_` (4033). Stories traced through this section: **Quick-adjust
+currency/delerium** (set path → `apiSetItemQuantity`), and the read-path utilities feed
+**Add/Edit/Delete/Combine inventory** and the **Collaborative sync** cross-cutting story.
+Prior runs (46, 57) marked these helpers "clean"; this run re-traced them under the
+concurrency and navigate-away lenses and found two issues not previously flagged.
+
+#### BUG · Index.html:7576,7605 · Stale quick-edit handler unlocks the in-flight guard for a *fresh* op → double-submit
+
+**Story: Quick-adjust currency/delerium — navigate-away (c) + double-tap (b).**
+`confirmQuickEdit` (7549) sets the global `quickEditInFlight = true` (7572) and disables
+the shared `${prefix}ConfirmBtn` (7570) before firing `apiSetItemQuantity` /
+`apiAdjustInventory`. Both completion handlers reset that shared state
+**unconditionally**: `finishSuccess` sets `quickEditInFlight = false` and re-enables the
+button at 7576–7577, and `fail` does the same at 7605–7606 — *before* the
+`capturedItemId` guard (7598) that only protects the status message and panel close.
+
+The Cancel button (`closeQuickEditPanel`, 7524) also sets `quickEditInFlight = false`
+(7526) without aborting the pending `google.script.run` call (GAS has no abort). So:
+
+1. User confirms a gold/delerium adjust → call A in flight, `quickEditInFlight = true`.
+2. User taps **Cancel** → `quickEditInFlight = false`, `selectedQuickEdit = null`
+   (server write A is *not* cancelled).
+3. User reopens the same card — `openQuickEditPanel` passes its `if (quickEditInFlight) return`
+   guard (7421) because the flag is now false — re-enters the amount, taps Confirm →
+   call B in flight, `quickEditInFlight = true`, `capturedItemId = B`.
+4. Call A returns and runs `finishSuccess`/`fail`, which sets `quickEditInFlight = false`
+   and re-enables ConfirmBtn even though **call B is still in flight**.
+5. The button is now live again with B unresolved → user taps Confirm → call C.
+
+For the **add/remove** mode (`apiAdjustInventory`, delta-based) A, B, and C each apply
+the delta, so the user's single intended adjustment is applied two or three times —
+silent currency/crystal-count corruption plus duplicate ADJUST ledger entries. For
+**set** mode the qty is idempotent but it still emits multiple ADJUST ledger rows with
+deltas computed against shifting `oldQty`.
+
+Root cause: the in-flight flag and button-disabled state are reset by whichever call
+finishes, with no operation/generation token confirming the handler owns the *current*
+op. Fix: capture a per-call generation id (or reuse `capturedItemId`) and only clear
+`quickEditInFlight` / re-enable the button when the completing handler is the current
+operation — i.e. move the `quickEditInFlight = false` and `confirmBtn.disabled = false`
+resets *inside* a `selectedQuickEdit && selectedQuickEdit.itemId === capturedItemId`
+check, the same guard already used at 7598. Prior runs (771, 1207–1209, 1261) called
+this flow "clean" against an older `confirmQuickEdit` that bracketed with `_inFlightWrites`;
+the current code (7549) no longer does, so the earlier "clean" Note is stale.
+
+#### RISK · Index.html:7604 · Quick-edit `fail` handler writes the error into the shared status element with no current-op guard
+
+**Story: Quick-adjust currency/delerium — failure (b) after reopen.** Same root cause as
+the BUG above, narrower symptom. `getQuickStatusElement()` (7416) returns a single shared
+element per layout (`quickSheetStatus` / `quickDesktopStatus`). The `finishSuccess` error
+branch guards the status write with `selectedQuickEdit.itemId === capturedItemId` (7579),
+but `fail` (7604) writes `status.innerHTML = 'Quick edit failed…'` with no such guard. If
+the user cancelled/closed and reopened the quick-edit panel for any item before a failed
+call returns, the stale failure message paints into the now-current panel, confusing the
+fresh edit. Fold the fix into the BUG above (gate the `fail` body on the current-op check).
+
+#### RISK · Code.js:4029 (via apiGetInventory 2114) · Read-path `fillMissingInventoryRarity_` does an **unlocked** full-column write → transient lost-update
+
+**Story: Collaborative sync interference (cross-cutting) + Edit inventory item.**
+`apiGetInventory` (2103) acquires **no** `LockService` lock, yet at line 2114 it calls
+`fillMissingInventoryRarity_`, which writes the entire Rarity column back to the sheet
+(`getRange(2, rarityCol, numRows, 1).setValues(rarities)`, 4029) whenever any blank
+rarity was backfilled (`changed`, 4028). The written array holds the values *read at
+4009/3990*; unchanged rows are rewritten with their stale snapshot.
+
+Because every write API path (`apiUpdateInventory`, `apiAdjustInventory`, edit, combine)
+*does* hold the document lock but this read path does not, a concurrent locked edit that
+changes any Rarity cell between this function's read (3990) and its write (4029 — a window
+that spans an EQUIPMENT_LIBRARY sheet read at 4009) is silently reverted to the stale
+value. This is most likely under the sync story: when one player writes, every other
+client's 20 s poll fires `loadInventory(true)` → `apiGetInventory` simultaneously, so
+multiple unguarded readers race a locked writer. The clobber is transient — it only fires
+while backfill-eligible blank-rarity rows still exist (items imported pre-library-rehash
+never match, so they don't trigger `changed`); once populated, `changed` stays false and
+no further writes occur. Still, the correct fix is to either (a) take the document lock
+around the backfill write, or (b) write only the specific changed cells individually rather
+than the whole column. Prior runs (1195, 1271) reviewed this helper and reported "no
+issues"; the unlocked-write-from-read-path angle was not previously considered.
+
+#### Note · Code.js:3941,3956,4033 · Pure helpers and the `apiSetItemQuantity` server path trace clean
+
+Traced **Quick-adjust currency/delerium (set)** server-side: `apiSetItemQuantity`
+(3830–3939) acquires `tryLock(10000)`, validates id/qty/note, reads the row, writes via
+`writeInventoryRow_`, appends a ledger entry only when `qty !== oldQty` for currency/
+delerium, audits success/failure, bumps sync, and releases the lock in `finally` on every
+path (including the early `item not found` and `tryLock` returns). `normalizeForClient_`
+(3941) safely handles null/invalid Date; `ensureInventoryHeaders_` (3956) appends only
+missing headers idempotently; `findInventoryRowById_` (4033) uses an entire-cell
+case-insensitive literal `createTextFinder` (no regex-injection surface). No new issues in
+these four units beyond the unlocked-write RISK logged above for `fillMissingInventoryRarity_`.
 
 ### 2026-06-23 (run 57) — Sections audited: 5 (Code.js 2301–3900, Index.html 4200–4800)
 
