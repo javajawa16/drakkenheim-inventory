@@ -25,9 +25,101 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 6. Code.js lines 3900+ (remaining server utilities, helpers)
+Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully covered end-to-end; rotation moves into fresh Index.html territory.
 
 ## Sessions
+
+### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–end: quick-adjust writers `apiAdjustInventory`/`apiSetItemQuantity` + utilities)
+
+Section 6 = Code.js lines 3900–end. The tail of the file is the second quick-adjust
+writer (`apiSetItemQuantity` 3830–3939, body straddles the section boundary) plus
+pure helpers `normalizeForClient_` (3941), `ensureInventoryHeaders_` (3956),
+`fillMissingInventoryRarity_` (3973), `findInventoryRowById_` (4033). To trace the
+**Quick-adjust currency/delerium** user story end-to-end I read `apiAdjustInventory`
+(3710), `apiAdjustCurrency` (3700), `apiCombineInventoryItems` tail (3535), the
+validators `validateQuantity_` (1687), `classifyQuickEdit_` (1919),
+`appendResourceLedger_` (1981), `bumpSync_` (2141), and the full client flow
+`openQuickEditPanel` (Index.html:7420) → `confirmQuickEdit` (7549) → `finishSuccess`.
+
+#### BUG · Index.html:7564 · `confirmQuickEdit` treats a blank Amount as 0 — "Set total" silently zeroes the gold/delerium balance
+
+**Story: Quick-adjust currency/delerium → choose "Set total" → tap Confirm with the
+Amount field left blank (or cleared).** `confirmQuickEdit` reads
+`const amount = Number(rawAmount)`. For an empty number input `rawAmount === ''`, and
+`Number('') === 0`. The only guard is `if (!Number.isFinite(amount) || amount < 0)` —
+`Number.isFinite(0)` is `true` and `0 < 0` is `false`, so a blank field sails straight
+through as a valid amount of **0**. In `set` mode this fires
+`apiSetItemQuantity({ quantity: 0 })`; server-side `validateQuantity_(0)` passes
+(default `min` is 0, line 1696) and `writeInventoryRow_` sets `Qty` to 0. The party's
+entire gold pool — or a whole delerium stack — is wiped to 0 with a single tap and **no
+confirmation**. This is reachable accidentally (select "Set total", tap Confirm before
+typing) and even an *intentional* set-to-0 gets no "are you sure?" guard, in stark
+contrast to the delerium 0-gp sell which has an inline confirmation (README line 69).
+The `add`/`remove` paths are less destructive (delta 0 → no-op) but share the same hole.
+Fix: reject a blank amount explicitly (`if (rawAmount.trim() === '')`), and require a
+confirmation when `set` mode would drop the balance to 0.
+
+#### RISK · Code.js:3710 · `apiAdjustInventory` performs a no-op write + bogus "ADJUST +0" ledger entry on a 0 delta
+
+**Story: Quick-adjust currency/delerium → Add/Remove with a blank/0 amount.** Unlike
+`apiSetItemQuantity`, which guards its ledger append with `&& qty !== oldQty` (line
+3872), `apiAdjustInventory` always appends a RESOURCE_LEDGER row when
+`quickType === 'currency' || 'delerium crystal'` (line 3761) with no delta-zero check.
+Combined with the blank-amount hole above, an accidental Confirm rewrites the row to its
+current value (an unnecessary `setValues` + `bumpSync_`, which makes every *other*
+client's 20 s poll fire a full `loadInventory(true)`), and stamps a meaningless
+"ADJUST gold qty:0" entry into the ledger that then shows up in the gold/delerium history.
+Fix: short-circuit `apiAdjustInventory` when `delta === 0`, mirroring the
+`qty !== oldQty` guard already in `apiSetItemQuantity`.
+
+#### RISK · Code.js:3859 · Quick-edit delerium size change can create duplicate same-size rows and silently ignores invalid sizes
+
+**Story: Quick-adjust currency/delerium → delerium row → change "Delerium size".** When
+`quickType === 'delerium crystal'`, both `apiAdjustInventory` (3749) and
+`apiSetItemQuantity` (3861) **rename** the row's `Item` to `Delerium <Size>`. If the
+party already holds a *separate* inventory row at the target size (e.g. they hold both
+"Delerium Chip" and "Delerium Shard" rows and re-size the Chip row to Shard), the result
+is two distinct rows of the same size with no merge and — unlike the Add flow — no
+combine suggestion offered. The two rows then total/render independently until someone
+manually combines them. Secondary inconsistency: `apiAdjustInventory` *throws*
+"Size is not allowed" on an out-of-range size (3745–3747) while `apiSetItemQuantity`
+*silently ignores* it (3861 only renames when the size is in `DELERIUM_SIZE_VALUES`).
+Low likelihood (sizes come from a fixed dropdown) but a genuine data-consistency gap.
+
+#### IDEA · Index.html:7549 · Quick-adjust is non-optimistic, inconsistent with the Gold-tab Pay/Got Paid flows
+
+**Story: Quick-adjust currency/delerium, efficiency/friction.** `confirmQuickEdit` shows
+"Saving…", disables Confirm, and waits for the full `apiAdjustInventory`/
+`apiSetItemQuantity` round-trip before the card and ledger update (`finishSuccess`
+applies `updateInventoryRowFromServer` + ledger prepend only on resolution). Meanwhile
+the Gold tab's Pay/Got Paid and the dashboard inline Pay (made optimistic in run 56,
+commit `6b17cde`) update immediately and reconcile in the background. Tapping a gold
+card to add coin therefore *feels* slower than doing the same on the Gold tab — an
+inconsistency between two paths to the same write. Consider an optimistic qty bump +
+ledger insert reconciled on resolve, matching the gold flows.
+
+#### Note · Index.html:7575 · `confirmQuickEdit` navigate-away / wrong-item-close is now handled
+
+Traced scenarios (b) failure and (c) navigate-away for the quick-adjust story. The
+prior run's concern (panel A's success force-closing a freshly-opened panel B, because
+`closeQuickEditPanel` clears `quickEditInFlight`) is addressed: `finishSuccess` now
+captures `capturedItemId` and applies data updates (`updateInventoryRowFromServer`,
+ledger prepend, re-cache, `renderInventory`) regardless of panel state, then guards
+`if (!selectedQuickEdit || selectedQuickEdit.itemId !== capturedItemId) return;` before
+touching status or calling `closeQuickEditPanel`. On `fail`/`{ok:false}` the amount and
+note inputs are preserved and Confirm is re-enabled, so retry works without reload.
+Closing mid-flight applies the server result silently and does not reopen the panel.
+No stuck state found on these paths.
+
+#### Note · Code.js:1981 · Quick-adjust inherits the documented `appendResourceLedger_` error-swallow
+
+Confirming the quick-adjust write path is subject to the known limitation (README
+"Known TODOs"): the success response builds `ledgerEntry` from server data and the
+client prepends it to `inventoryResourceLedger`, but `appendResourceLedger_` (1981)
+catches and logs its own write failure rather than surfacing it. If the ledger append
+fails while the inventory row write succeeds, `res.ok` is still `true`, the phantom
+ledger entry shows client-side, and it vanishes on the next sync-triggered
+`loadInventory(true)`. Not re-filed as a new bug — referencing the existing TODO.
 
 ### 2026-06-23 (run 57) — Sections audited: 5 (Code.js 2301–3900, Index.html 4200–4800)
 
