@@ -25,11 +25,93 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 6. Code.js lines 3900+ (remaining server utilities, helpers)
+Next section: 7. Index.html lines 1–1500 (HTML structure, CSS)
 
 ## Sessions
 
-### 2026-06-23 (run 57) — Sections audited: 5 (Code.js 2301–3900, Index.html 4200–4800)
+### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–end: apiSetItemQuantity tail + helpers; traced quick-edit write path through Code.js 3658–3939 and Index.html 7393–7630)
+
+Stories traced this run: **Quick-adjust currency/delerium** (tap gold/delerium card →
+quick-edit sheet → add/remove/set → amount → Confirm), end-to-end through both server
+entrypoints (`apiAdjustInventory` 3710, `apiSetItemQuantity` 3830) and the client
+`openQuickEditPanel`/`confirmQuickEdit` flow. Helpers in the section
+(`normalizeForClient_`, `ensureInventoryHeaders_`, `fillMissingInventoryRarity_`,
+`findInventoryRowById_`) reviewed for correctness — no behavioral bugs found.
+
+#### BUG · Index.html:7570 · Quick-edit Confirm button stays stuck-disabled after cancel-and-reopen during a slow round-trip
+
+**Story: Quick-adjust currency/delerium — failure / navigate-away (steps b & c).**
+`confirmQuickEdit()` disables the shared Confirm button
+(`confirmBtn = document.getElementById(\`${prefix}ConfirmBtn\`)`, line 7569-7570 — a
+single DOM element, `quickSheetConfirmBtn` on mobile / `quickDesktopConfirmBtn` on
+desktop) and only ever re-enables it inside `finishSuccess`/`fail` (7577, 7606).
+Neither `closeQuickEditPanel()` (7524) nor `openQuickEditPanel()` (7420) resets
+`disabled`. So this sequence strands the button:
+
+1. Open quick-edit on the gold card, tap **Confirm** (add N) — button disabled,
+   `apiAdjustInventory` in flight.
+2. Network is slow; user taps **Cancel** → `closeQuickEditPanel` clears
+   `selectedQuickEdit` and `quickEditInFlight`, hides the sheet — **but leaves the
+   shared Confirm button `disabled`.**
+3. User re-opens the quick-edit (same card or any other currency/delerium card).
+   `openQuickEditPanel` passes its `if (quickEditInFlight) return;` guard (flag is
+   false) and shows the sheet — **with Confirm still disabled.** The user cannot
+   submit and gets no explanation.
+
+It self-heals only when the orphaned step-1 call finally resolves (its
+`finishSuccess`/`fail` re-enables the shared element) — or never, if that call is
+lost (closed webview, dropped GAS round-trip). Fix: set
+`confirmBtn.disabled = false` in `openQuickEditPanel` (and/or `closeQuickEditPanel`)
+so every fresh open starts from a known-enabled state.
+
+#### RISK · Index.html:7576 · Orphaned quick-edit handler clobbers a newly-started quick edit's in-flight guard and re-enables its button → double submit
+
+**Story: Quick-adjust currency/delerium — double-tap / navigate-away race.** Both the
+in-flight guard (`quickEditInFlight`, a single global) and the Confirm button are
+shared across every quick-edit operation. Sequence: Confirm A (in-flight=true,
+captured A) → Cancel (in-flight=false) → open & Confirm B (in-flight=true, captured
+B) → **A's handler resolves**: `finishSuccess`/`fail` unconditionally run
+`quickEditInFlight = false` (7576/7605) and `confirmBtn.disabled = false`
+(7577/7606). Because `confirmBtn` is the same DOM element B disabled, A's late
+handler **re-enables B's Confirm and clears the global guard while B is still in
+flight** — the user can now tap Confirm again and double-write B (e.g. add the same
+gold twice). Root cause is the same as the BUG above: per-operation state
+(`capturedItemId`) exists for the *status/close* guard but not for the *in-flight
+flag* or the *button*. Fix: only clear `quickEditInFlight`/re-enable the button when
+the resolving handler's `capturedItemId` still matches the active
+`selectedQuickEdit`, or scope the guard per operation.
+
+#### RISK · Code.js:3742 · `apiAdjustInventory` add/remove silently relabels a delerium row's size, converting all accumulated crystals to the new size
+
+**Story: Quick-adjust delerium — add/remove with the size dropdown.** For a delerium
+row, `confirmQuickEdit` always sends the size-dropdown value whenever the size field
+is `.active`, regardless of mode (7559-7562). In add/remove mode `apiAdjustInventory`
+takes that `size` and **renames the row** to `Delerium <Size>` (3749-3752) while
+keeping `oldQty + delta`. So if the user opens the quick-edit on a *Delerium Chip*
+row holding qty 5, changes the dropdown to *crystal*, and taps **Add 3**, the server
+writes `Item = "Delerium Crystal", Qty = 8` — the 5 existing chips are silently
+relabeled as crystals and folded into the crystal delta. The resource-ledger entry
+is likewise logged under the wrong subtype (`subtype` derived from the renamed Item,
+3768, with `qty = delta` only). `apiSetItemQuantity` has the same rename-on-size
+behavior (3859-3864). Fix: in adjust mode, ignore a size that differs from the row's
+current size (size changes belong to a dedicated move/split endpoint that creates a
+separate target row), or refuse the write when `size` ≠ existing size and delta ≠
+full-qty move.
+
+#### Note · Code.js:3810 · Quick-adjust failure path restores inputs cleanly; lock released on all paths
+
+**Story: Quick-adjust currency/delerium — failure recovery (step b).** Verified the
+server-side failure handling for `apiAdjustInventory`/`apiSetItemQuantity`: the
+`LockService` document lock is released in `finally` on success, validation-throw,
+and auth-failure paths (3821-3827 / 3932-3938); an out-of-range result
+(`validateQuantity_(oldQty + delta)` with default `min: 0`, 3739) returns
+`{ok:false}` without writing. On the client, the `fail`/`ok:false` handlers
+(7578-7608) re-enable Confirm, clear `quickEditInFlight`, preserve `selectedQuickEdit`
+and the typed amount/note, and leave the panel open — so the user can retry without
+reload. Data-update side effects (`updateInventoryRowFromServer`, ledger prepend,
+re-render) run only on `res.ok`. This part of the write path is sound; the issues
+above are all client UI-state/race problems, not data-integrity problems on the
+happy path.
 
 > **✅ RESOLUTION — all findings fixed (2026-06-23).**
 > - **BUG `Index.html:4299+4334`** — FIXED commit `aed031c`: removed `tags`/`pinned`
