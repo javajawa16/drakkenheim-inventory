@@ -25,9 +25,75 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 6. Code.js lines 3900+ (remaining server utilities, helpers)
+Next section: 7. Index.html lines 1–1500 (HTML structure, CSS)
 
 ## Sessions
+
+### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3535–4045: combine, currency/delerium quick-edit, read-path helpers)
+
+Stories traced: **Combine duplicate**, **Quick-adjust currency/delerium**, plus the
+read-path helpers in the cursor range (`normalizeForClient_`, `ensureInventoryHeaders_`,
+`fillMissingInventoryRarity_`, `findInventoryRowById_`).
+
+#### RISK · Code.js:3742 (and 3859) · Quick-edit size change silently relabels the entire delerium stack
+In `apiAdjustInventory` (line 3742) and `apiSetItemQuantity` (line 3859), when
+`quickType === 'delerium crystal'` and the payload `size` differs from the row's current
+size, the row's `Item` is renamed to `Delerium {Size}` while qty is adjusted/set — the
+**whole pre-existing stack** is relabeled, not just the delta.
+Story *Quick-adjust delerium*, confirm step: user opens quick edit on "Delerium Shard"
+(qty 10), changes the size dropdown to "crystal", enters 3, taps Add → the 10 existing
+shards become "Delerium Crystal" qty 13. The client always sends `size` for delerium
+(`confirmQuickEdit`, Index.html:7559 — `size` = the active dropdown value), so this is a
+one-tap footgun, not an edge case. Worse: if a separate "Delerium Crystal" row already
+exists, the adjust path never merges, so this creates a **duplicate row** (later surfaced
+as a combine suggestion or silently double-counted in the rollup). Suggest: in the
+add/remove path ignore `size` when it differs from the row's current size (only allow size
+*correction* when qty is unchanged), or split the delta into its own row.
+
+#### RISK · Code.js:3973 · `fillMissingInventoryRarity_` performs an unlocked write inside the read path
+`apiGetInventory` (Code.js:2103) is a read with **no LockService lock**, yet it calls
+`fillMissingInventoryRarity_`, which `setValues` back into the Rarity column by **absolute
+row index** (line 4029). Story *Collaborative sync interference*: user A reads inventory
+while user B's `apiCombineInventoryItems` (which holds the doc lock) calls
+`sheet.deleteRow(...)` — if the delete lands between this helper's read of `numRows`/`combined`
+(3986–3990) and its write-back (4029), row indices shift and rarities are written onto the
+wrong items. Low probability (only fires when rows lack rarity *and* the equipment library
+has a matching ID, i.e. typically once after an import), but it is silent data corruption
+on a code path users hit on every inventory load. Suggest: acquire the document lock around
+the backfill, or perform the backfill from a write API that already holds the lock.
+
+#### BUG · Code.js:3761 · Zero-delta currency/delerium adjust writes a junk ledger entry
+`apiAdjustInventory` appends a RESOURCE_LEDGER entry for every currency/delerium adjust
+unconditionally (line 3761, `if (quickType === 'currency' || ...)`), with **no
+`delta !== 0` guard** — unlike `apiSetItemQuantity`, which correctly guards
+`qty !== oldQty` (line 3872). Story *Quick-adjust currency*, confirm step: client-side
+`confirmQuickEdit` only rejects `amount < 0` (Index.html:7564), so an Add/Remove of `0`
+passes, reaches the server with `delta = 0`, writes the row unchanged, and appends a
+`qty:0` ADJUST row that then shows up in the gold/delerium ledger history. Suggest: skip
+`appendResourceLedger_` when `delta === 0` (mirror `apiSetItemQuantity`), and/or reject
+`amount === 0` in `confirmQuickEdit`.
+
+#### Note · Code.js:3535 · Combine duplicate + Quick-adjust traced clean (state machine + failure + navigate-away)
+**Combine duplicate** (`apiCombineInventoryItems` ↔ `confirmCombineInventoryItem`,
+Index.html:3528) and **Quick-adjust currency/delerium** (`apiGetCurrencyQuickEdit` /
+`apiAdjustInventory` / `apiSetItemQuantity` ↔ `openQuickEditPanel` / `confirmQuickEdit`)
+traced end-to-end. Findings:
+- **Happy path** reaches goal in minimum steps; success updates `inventoryRows`, prepends
+  the returned `ledgerEntry` (sliced to 60), busts cache, re-renders.
+- **Failure at confirm**: combine restores `pendingCombineChoice = choice` and keeps the
+  sheet open for retry; quick-edit clears `quickEditInFlight`, re-enables the button, keeps
+  the typed amount, shows the error only if the panel still belongs to the same item
+  (`capturedItemId` guard) — retry works without reload.
+- **Double-tap** guarded both ways: combine nulls `pendingCombineChoice` before the call
+  (second tap early-returns); quick-edit guards on `quickEditInFlight` in both
+  `confirmQuickEdit` and `openQuickEditPanel`.
+- **Navigate-away during in-flight**: the write still applies to `inventoryRows` + ledger
+  and re-renders; closed-panel guards (`!selectedQuickEdit` / `!pendingCombineChoice`) skip
+  the now-irrelevant status write — no stuck state, no data loss.
+- Client rollup key `Item|Category|Rarity` (Index.html:6420) exactly matches the server
+  combine equality check (Code.js:3566–3572), so the UI never suggests a combine the server
+  will reject. LockService is released on all paths (happy/validation-error/auth-failure)
+  via `finally` in every write function reviewed.
 
 ### 2026-06-23 (run 57) — Sections audited: 5 (Code.js 2301–3900, Index.html 4200–4800)
 
