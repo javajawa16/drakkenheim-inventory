@@ -25,9 +25,83 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 6. Code.js lines 3900+ (remaining server utilities, helpers)
+Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js fully covered through EOF (4045)
 
 ## Sessions
+
+### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust write path 3658–3939)
+
+**Stories traced:** *Quick-adjust currency/delerium* (tap gold/delerium card → quick-edit
+sheet → add/remove/set → amount → Confirm) end-to-end, plus the *Collaborative sync
+interference* and *Tab switch / navigate-away during in-flight* cross-cutting stories as they
+intersect this write path. Server write path: `apiGetCurrencyQuickEdit` (3658), `apiAdjustCurrency`
+(3700), `apiAdjustInventory` (3710), `apiSetItemQuantity` (3830). Client: `openQuickEditPanel` /
+`confirmQuickEdit` / `closeQuickEditPanel` (Index.html 7420–7630). Helpers in literal section
+range (`normalizeForClient_`, `ensureInventoryHeaders_`, `fillMissingInventoryRarity_`,
+`findInventoryRowById_`) reviewed.
+
+#### BUG · Index.html:7524,7420 · Confirm button stays disabled after Cancel-during-in-flight, then reopen
+
+**Story: Quick-adjust currency/delerium → navigate-away (c) / retry (b).** `confirmQuickEdit`
+disables the shared confirm button (`document.getElementById(\`${prefix}ConfirmBtn\`).disabled = true`,
+line 7570) and sets `quickEditInFlight = true`. The button is only re-enabled inside the
+`finishSuccess` / `fail` handlers. `closeQuickEditPanel()` (line 7524) — invoked by the Cancel
+button and by tapping another card — resets `quickEditInFlight = false` and `selectedQuickEdit = null`
+but does **not** re-enable the confirm button. `openQuickEditPanel` (line 7420) gates only on
+`quickEditInFlight` (now false) and likewise never resets `confirmBtn.disabled`.
+
+Repro: tap gold card → Confirm (round-trip starts, button disabled) → tap Cancel → reopen the
+quick-edit sheet (same or different currency/delerium card). The sheet opens but its Confirm
+button is still `disabled`, so the user cannot submit until the *original* in-flight request
+resolves (1–3 s typical GAS latency) and its handler happens to re-enable the shared element.
+On mobile the confirm element (`quickSheetConfirmBtn`) is shared across all opens, so the soft-lock
+is guaranteed, not incidental. Fix: re-enable the confirm button in `closeQuickEditPanel` (and/or at
+the top of `openQuickEditPanel`), e.g. `const b = document.getElementById(\`${quickPrefix()}ConfirmBtn\`); if (b) b.disabled = false;`.
+
+#### RISK · Code.js:3761 · `apiAdjustInventory` logs a phantom qty:0 ledger entry (and bumps sync) on a zero-amount adjust
+
+**Story: Quick-adjust currency/delerium → efficiency (d).** The client allows `amount === 0`
+(`confirmQuickEdit` rejects only `amount < 0`, line 7564), so an "add 0" / "remove 0" reaches the
+server with `delta === 0`. `apiAdjustInventory`'s ledger block (line 3761) is gated only on
+`quickType === 'currency' || quickType === 'delerium crystal'` — there is **no** `delta !== 0`
+guard, unlike the sibling `apiSetItemQuantity` which correctly guards `qty !== oldQty` (line 3872).
+Result: a no-op adjust still (a) rewrites the inventory row, (b) appends a `ADJUST` ledger row with
+`qty: 0` to RESOURCE_LEDGER, (c) calls `bumpSync_` — which forces every *other* player's client to
+run `loadInventory(true)` for a change that changed nothing. Low severity but a real
+consistency/noise gap. Fix: wrap the ledger+sync side effects in `if (delta !== 0)`, or reject
+`amount === 0` (for add/remove) client-side.
+
+#### RISK · Index.html:7604 · `confirmQuickEdit` network-fail handler writes to the shared status element without an item-identity guard
+
+**Story: Quick-adjust → failure at submit (b) + navigate-away (c).** The success handler's
+`!res.ok` branch correctly guards before touching status: `if (selectedQuickEdit && selectedQuickEdit.itemId === capturedItemId)` (line 7579). The `fail` handler (network/transport failure, line 7604)
+has no such guard — it unconditionally sets `status.innerHTML = '<span class="error">Quick edit
+failed…'`. Because `status` is the shared `quickSheetStatus`/`quickDesktopStatus` element captured at
+confirm time, a slow failing request whose user has already Cancelled and reopened the quick-edit
+sheet for a *different* currency/delerium item will splash a stale "Quick edit failed" error onto the
+new item's panel. Cosmetic (no data effect) but inconsistent with the guarded success path. Fix:
+mirror the `capturedItemId` guard in `fail`.
+
+#### Note · Code.js:3710,3830 · Clean traces — quick-adjust write path is concurrency-safe and navigate-away-safe
+
+Confirmed for the *Quick-adjust currency/delerium* story plus the *Collaborative sync interference*
+and *Tab switch during in-flight* cross-cutting stories:
+- **No lost update:** both `apiAdjustInventory` and `apiSetItemQuantity` take `LockService.getDocumentLock()`
+  (10 s tryLock) and `apiAdjustInventory` recomputes `newQty = oldQty + delta` *server-side* under the
+  lock, so concurrent quick-adjusts from two players serialize correctly. Lock released in `finally`
+  on every path (success, validation throw, auth failure).
+- **Navigate-away preserves the write:** in `finishSuccess`, `updateInventoryRowFromServer(res.item)`,
+  the ledger prepend, cache write, and `renderInventory()` all run *before* the `selectedQuickEdit`/
+  `capturedItemId` guard (line 7598) — so closing/tab-switching the panel mid-flight still commits the
+  server-confirmed data locally; only the (now-irrelevant) status+auto-close are skipped. No data loss.
+- **Sync deferral is correct:** a foreign write arriving while `_inFlightWrites > 0` sets
+  `pendingForeignReload` (pollSync line 4011) without advancing `syncState.inventory.ts`; after our
+  write resolves, the next poll honors `pendingForeignReload` and runs `loadInventory(true)` even though
+  the latest writer is now us — the other player's change is not dropped.
+- **Helper correctness:** `findInventoryRowById_` (4033) searches column 1 via `createTextFinder`
+  (`matchEntireCell`, `matchCase(false)`); `Inventory ID` is `INVENTORY_HEADERS[0]` (column A), so the
+  lookup targets the right column. `apiAdjustCurrency` (3700) is an unused defensive wrapper (client
+  calls `apiAdjustInventory` directly) — noted, not flagged.
 
 ### 2026-06-23 (run 57) — Sections audited: 5 (Code.js 2301–3900, Index.html 4200–4800)
 
