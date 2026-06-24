@@ -3002,6 +3002,11 @@ function apiSellInventoryItem(payload) {
     const itemName = safeText_(found.rowObj['Item']);
     const holder   = safeText_(found.rowObj['Holder']);
 
+    // Delete the item first. If we abort after this point the item is gone but
+    // no gold was credited — recoverable by a manual add. The reverse order
+    // (gold added, item not deleted) creates phantom inventory + gold value.
+    sheet.deleteRow(found.rowNumber);
+
     let goldItem = null;
     if (goldAmount > 0) {
       const sellNote = note || `Sold ${itemName}`;
@@ -3020,8 +3025,6 @@ function apiSellInventoryItem(payload) {
         character: safeText_(payload && payload.clientCharacter) });
       goldItem = sanitizeInventoryForClient_(gRow);
     }
-
-    sheet.deleteRow(found.rowNumber);
 
     auditWrite_({ userEmail, action: 'SELL_ITEM', itemId: inventoryId,
       itemName, note: note || `Sold for ${goldAmount} gp`, status: 'SUCCESS' });
@@ -3270,12 +3273,6 @@ function apiSendGoldToMember(payload) {
       'Notes':           note || `Sent to ${character}`,
       'Date Added':      new Date()
     };
-    sheet.appendRow(headers.map(h => rowObj[h] !== undefined ? rowObj[h] : ''));
-    appendResourceLedger_({ userEmail, action: 'SEND', resource: 'gold', subtype: 'gold',
-      qty: amount, valueGp: 1, inventoryId: rowObj['Inventory ID'],
-      item: `Gold → ${character}`, notes: rowObj['Notes'],
-      character: safeText_(payload && payload.clientCharacter) });
-
     // Deduct from the source (party pool or sender's personal gold)
     const deductHolder = fromHolder || '';
     const deductAction = fromHolder ? 'PERSONAL_SEND_DEDUCT' : 'SEND_DEDUCT';
@@ -3289,7 +3286,21 @@ function apiSendGoldToMember(payload) {
       'Total Value GP': -amount, 'Status': '', 'Faction Relevance': '', 'Risk': '',
       'Notes': note || `Sent to ${character}`, 'Date Added': new Date()
     };
-    sheet.appendRow(headers.map(h => poolDeduct[h] !== undefined ? poolDeduct[h] : ''));
+
+    // Batch both rows into one setValues write — same pattern as apiSplitGold.
+    // Two separate appendRows can be interrupted between them by a timeout/quota
+    // error, silently creating or destroying gold.
+    const startRow = sheet.getLastRow() + 1;
+    sheet.getRange(startRow, 1, 2, headers.length).setValues([
+      headers.map(h => rowObj[h]     !== undefined ? rowObj[h]     : ''),
+      headers.map(h => poolDeduct[h] !== undefined ? poolDeduct[h] : '')
+    ]);
+
+    // Ledger is a reconciliation log appended after the atomic inventory write.
+    appendResourceLedger_({ userEmail, action: 'SEND', resource: 'gold', subtype: 'gold',
+      qty: amount, valueGp: 1, inventoryId: rowObj['Inventory ID'],
+      item: `Gold → ${character}`, notes: rowObj['Notes'],
+      character: safeText_(payload && payload.clientCharacter) });
     appendResourceLedger_({ userEmail, action: deductAction, resource: 'gold', subtype: 'gold',
       qty: -amount, valueGp: 1, inventoryId: poolDeduct['Inventory ID'],
       item: deductItem, notes: poolDeduct['Notes'],

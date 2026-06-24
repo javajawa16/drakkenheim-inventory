@@ -31,12 +31,13 @@ Next section: 6. Code.js lines 3900+ (remaining server utilities, helpers)
 
 ### 2026-06-23 (run 57) — Sections audited: 5 (Code.js 2301–3900, Index.html 4200–4800)
 
-> **✅ RESOLUTION — all findings fixed (2026-06-23).** BUG in commit `hotfix`
-> (same session as the form simplification); RISKs logged for next fix pass.
-> Per-finding status below:
-> - **BUG `Index.html:4299+4334`** — FIXED immediately in this session: removed
->   `tags`/`pinned` from the optimistic-update spread and replaced `if (pinned)`
->   branch with `notesData.push(optimistic)`.
+> **✅ RESOLUTION — all findings fixed (2026-06-23).**
+> - **BUG `Index.html:4299+4334`** — FIXED commit `aed031c`: removed `tags`/`pinned`
+>   from the optimistic-update spread; replaced `if (pinned)` with `notesData.push`.
+> - **RISK `Code.js:3273,3292`** — FIXED commit below: credit+deduct batched into
+>   one `setValues` write, ledger appends moved after the atomic inventory write.
+> - **RISK `Code.js:3016,3024`** — FIXED commit below: item deleted before gold
+>   append; failure mode is now "lost gold" not "phantom inventory + gold".
 
 #### BUG · Index.html:4299,4334 · `saveNoteForm` crashes with ReferenceError on every note save after form simplification
 
@@ -49,7 +50,7 @@ removed the `const tags = ...` and `const pinned = ...` variable declarations fr
 
 In practice both paths produce a silent crash (no user-visible error because the exception is thrown before `statusEl.innerHTML` is set). The note form stays open and nothing is saved. Every user who taps Save Note after this deploy hits the bug. ✅ FIXED same session: removed `tags`/`pinned` from the spread, replaced the `if (pinned)` branch with `notesData.push(optimistic)`.
 
-#### RISK · Code.js:3273,3292 · `apiSendGoldToMember` writes credit and deduct rows in two separate `appendRow` calls
+#### RISK · Code.js:3273,3292 · `apiSendGoldToMember` writes credit and deduct rows in two separate `appendRow` calls ✅ FIXED
 
 **Story: Treasurer sends gold to a member.** `apiSendGoldToMember` appends the
 recipient credit row (line 3273) and then the pool deduct row (line 3292) as two
@@ -62,7 +63,7 @@ member credit never appears (gold destroyed silently). The identical pattern in
 `setValues` write. The same fix applies here: build both rows up front, write them
 together with `invSheet.getRange(startRow, 1, 2, headers.length).setValues(...)`.
 
-#### RISK · Code.js:3016,3024 · `apiSellInventoryItem` appends gold row then deletes item — non-atomic
+#### RISK · Code.js:3016,3024 · `apiSellInventoryItem` appends gold row then deletes item — non-atomic ✅ FIXED
 
 **Story: Sell an inventory item.** `apiSellInventoryItem` first appends the gold
 credit row (`sheet.appendRow`, line 3016), then deletes the sold item's row
