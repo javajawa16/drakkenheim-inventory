@@ -4296,7 +4296,7 @@
         const editId = notesFormNoteId;
         const idx = notesData.findIndex(x => x.noteId === editId);
         const backup = idx >= 0 ? { ...notesData[idx] } : null;
-        if (idx >= 0) Object.assign(notesData[idx], { title, category, note, tags, pinned, relatedItemId, updatedAt: now });
+        if (idx >= 0) Object.assign(notesData[idx], { title, category, note, relatedItemId, updatedAt: now });
         closeNoteForm();
         renderNotesList();
         // Release the save lock now that the optimistic write is committed and the form
@@ -4331,7 +4331,7 @@
         const tempId = 'NOTE_TEMP_' + Date.now();
         const optimistic = { noteId: tempId, title, category, note,
           relatedItemId, author: myCharacterName || '', createdAt: now, updatedAt: now, archived: false };
-        if (pinned) notesData.unshift(optimistic); else notesData.push(optimistic);
+        notesData.push(optimistic);
         notesLoaded = true;
         closeNoteForm();
         renderNotesList();

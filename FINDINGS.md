@@ -25,9 +25,55 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 5. Code.js lines 2301–2900 (delerium, custom inventory, notes)
+Next section: 6. Code.js lines 3900+ (remaining server utilities, helpers)
 
 ## Sessions
+
+### 2026-06-23 (run 57) — Sections audited: 5 (Code.js 2301–3900, Index.html 4200–4800)
+
+> **✅ RESOLUTION — all findings fixed (2026-06-23).** BUG in commit `hotfix`
+> (same session as the form simplification); RISKs logged for next fix pass.
+> Per-finding status below:
+> - **BUG `Index.html:4299+4334`** — FIXED immediately in this session: removed
+>   `tags`/`pinned` from the optimistic-update spread and replaced `if (pinned)`
+>   branch with `notesData.push(optimistic)`.
+
+#### BUG · Index.html:4299,4334 · `saveNoteForm` crashes with ReferenceError on every note save after form simplification
+
+**Story: Save any note (create or edit).** The form simplification (commit `e4540de`)
+removed the `const tags = ...` and `const pinned = ...` variable declarations from
+`saveNoteForm()`, but two downstream uses were missed:
+
+- **Line 4299 (edit path):** `Object.assign(notesData[idx], { title, category, note, tags, pinned, relatedItemId, updatedAt: now })` — both `tags` and `pinned` are undeclared. In any ES5+ strict-mode context (which GAS webviews use), this is a `ReferenceError` that aborts `saveNoteForm` before the `gasCall` fires. The optimistic update never happens, the form never closes, and the note is never saved.
+- **Line 4334 (create path):** `if (pinned) notesData.unshift(optimistic); else notesData.push(optimistic);` — `pinned` is undeclared; same `ReferenceError`, same abort.
+
+In practice both paths produce a silent crash (no user-visible error because the exception is thrown before `statusEl.innerHTML` is set). The note form stays open and nothing is saved. Every user who taps Save Note after this deploy hits the bug. ✅ FIXED same session: removed `tags`/`pinned` from the spread, replaced the `if (pinned)` branch with `notesData.push(optimistic)`.
+
+#### RISK · Code.js:3273,3292 · `apiSendGoldToMember` writes credit and deduct rows in two separate `appendRow` calls
+
+**Story: Treasurer sends gold to a member.** `apiSendGoldToMember` appends the
+recipient credit row (line 3273) and then the pool deduct row (line 3292) as two
+separate `sheet.appendRow` calls. If the GAS execution times out, hits a quota
+error, or throws between the two writes, one row is committed and the other is not.
+Depending on which call fails, either (a) the member is credited gold that was never
+deducted from the pool (phantom gold created), or (b) the pool is debited but the
+member credit never appears (gold destroyed silently). The identical pattern in
+`apiSplitGold` was fixed in run 56 (`6b17cde`) by batching all rows into a single
+`setValues` write. The same fix applies here: build both rows up front, write them
+together with `invSheet.getRange(startRow, 1, 2, headers.length).setValues(...)`.
+
+#### RISK · Code.js:3016,3024 · `apiSellInventoryItem` appends gold row then deletes item — non-atomic
+
+**Story: Sell an inventory item.** `apiSellInventoryItem` first appends the gold
+credit row (`sheet.appendRow`, line 3016), then deletes the sold item's row
+(`sheet.deleteRow`, line 3024). These are two separate writes with no rollback
+coordination. If the server aborts between them, the gold credit exists but the item
+is not removed — the party has both the gold and the item. The lower-risk failure
+(gold not added but item deleted) would actually be preferable by comparison.
+Mitigation: swap the order (delete first, then append gold), which ensures the more
+reversible failure path on abort. Alternatively, use a single batched write after
+marking the item deleted (e.g. setting a `Status: Sold` flag) and filtering it out
+on read, though that is a larger refactor.
 
 ### 2026-06-23 (run 56, consolidated) — Sections audited: 4
 
