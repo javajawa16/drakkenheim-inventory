@@ -25,9 +25,70 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 6. Code.js lines 3900+ (remaining server utilities, helpers)
+Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js coverage complete; rotation moves into Index.html
 
 ## Sessions
+
+### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900+ remaining server utilities/helpers; quick-adjust write tails `apiAdjustInventory`/`apiSetItemQuantity`)
+
+> Story traced: **Quick-adjust currency/delerium** (tap gold/delerium card →
+> quick-edit sheet → add/remove/set → amount → Confirm). Server tails
+> `apiAdjustInventory` (3710) and `apiSetItemQuantity` (3830) + helpers
+> `normalizeForClient_` (3941), `ensureInventoryHeaders_` (3956),
+> `fillMissingInventoryRarity_` (3973), `findInventoryRowById_` (4033) read in
+> full; client flow `openQuickEditPanel` (7420) / `confirmQuickEdit` (7549) re-read.
+
+#### RISK · Index.html:7576,7604 · Overlapping quick-edit writes: an earlier write's handler prematurely clears the second write's in-flight guard → possible double-apply
+
+**Story: Quick-adjust currency/delerium, at the Confirm step.** This is a residual
+of the now-fixed BUG `Index.html:6844` ("Stale quick-edit success handler closes a
+reopened panel"). That fix added an identity guard (`selectedQuickEdit.itemId !==
+capturedItemId → return`) around only the **status message + `closeQuickEditPanel()`**
+(7598). It did **not** guard the two side effects at the top of `finishSuccess`
+(7576–7577) — `quickEditInFlight = false` and `confirmBtn.disabled = false` — and the
+`fail` handler (7604–7608) has **no** identity guard at all (it clears
+`quickEditInFlight`, re-enables `confirmBtn`, and writes its error into `status`
+regardless of which item is now showing).
+
+Because `closeQuickEditPanel` (7524) clears `quickEditInFlight = false` and
+`selectedQuickEdit = null`, the `openQuickEditPanel` re-entry gate (`if
+(quickEditInFlight) return;`, 7421) reopens. Reproduction:
+
+1. Tap Gold card A → Confirm → `quickEditInFlight=true`, `capturedItemId=A`, request A in flight.
+2. Tap Done/backdrop → `closeQuickEditPanel` → `quickEditInFlight=false`, `selectedQuickEdit=null` (request A still in flight).
+3. Tap Delerium card B → panel opens (gate is now false) → confirm B → `quickEditInFlight=true`, `capturedItemId=B`, request B in flight.
+4. Request A resolves → `finishSuccess(A)` runs `quickEditInFlight=false` and `confirmBtn.disabled=false` **before** the identity guard. B's double-tap guard is now defeated and the shared confirm button (same `${prefix}ConfirmBtn` element) is re-enabled while B is still in flight.
+5. User taps Confirm on B again → `confirmQuickEdit` is no longer blocked → a **second** B write fires. For currency/delerium that double-applies the adjust (e.g. +100 gp applied twice), an irreversible data error with no undo.
+
+Secondary symptom: if A *fails*, `fail` writes A's "Quick edit failed: …" into B's
+status element (no guard) and still clears B's in-flight flag. Fix: capture
+`capturedItemId` and gate the flag-clear / button-re-enable / status writes on
+`selectedQuickEdit?.itemId === capturedItemId` in **both** `finishSuccess` and
+`fail` — or (simpler, matching the original fix's second suggestion) stop clearing
+`quickEditInFlight` inside `closeQuickEditPanel` so no panel can reopen while a
+confirm is in flight.
+
+#### Note · Code.js:3710 · Quick-adjust server tails + helpers trace clean
+
+**Story traced: Quick-adjust currency/delerium (server side).** `apiAdjustInventory`
+and `apiSetItemQuantity` both acquire the document lock with `tryLock(10000)`,
+read-before-write via `getInventoryRowObjectById_`, recompute `Total Value GP`,
+write atomically with `writeInventoryRow_` (single `setValues`), append the ledger
+**after** the inventory write, `bumpSync_` with the caller's `_syncClientId` (so the
+writer's own poll skips the reload), and release the lock in `finally` on every path
+including auth failure and validation throw. `validateQuantity_` (min 0) correctly
+rejects a remove that would drive a balance negative (returns a clean error; inputs
+are preserved client-side for retry). The `clientCharacter` omission previously logged
+at Index.html:7379 is now fixed — both the `set` (7611) and add/remove (7622) calls
+pass `clientCharacter: myCharacterName || ''`. Helpers verified: `findInventoryRowById_`
+(4033) searches column 1, which `INVENTORY_HEADERS[0]` confirms is `Inventory ID`;
+`fillMissingInventoryRarity_` (3973) reads `EQUIPMENT_LIBRARY_CLEAN` (CONFIG.EQUIPMENT_SHEET)
+whose 20-col schema puts Rarity at index 5, matching `row[5]`; `ensureInventoryHeaders_`
+and `normalizeForClient_` are side-effect-correct. The known `appendResourceLedger_`
+error-swallow (phantom ledger entry on a swallowed write) applies here too but is
+already tracked as a README TODO and in prior runs. Pre-existing RISK `Code.js:3636`
+(delerium size-change merges two crystal sizes) also reachable via these tails — not
+re-logged.
 
 ### 2026-06-23 (run 57) — Sections audited: 5 (Code.js 2301–3900, Index.html 4200–4800)
 
