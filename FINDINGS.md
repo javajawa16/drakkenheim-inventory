@@ -25,11 +25,34 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 6. Code.js lines 3900+ (remaining server utilities, helpers)
+Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited (ends at 4045); rotation continues into Index.html
 
 ## Sessions
 
-### 2026-06-23 (run 57) — Sections audited: 5 (Code.js 2301–3900, Index.html 4200–4800)
+### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity at 3700–3939 and Index.html confirmQuickEdit 7420–7630)
+
+**Stories traced:** *Quick-adjust currency/delerium* (tap card → quick-edit sheet → add/remove/set → amount → Confirm) end-to-end across happy path, per-step failure, navigate-away, and double-tap; *Edit inventory item* and *Delete inventory item* insofar as they pass through the shared helpers `findInventoryRowById_` / `getInventoryRowObjectById_` / `ensureInventoryHeaders_` / `writeInventoryRow_`; *swipe remove one* (Index.html:7916 → `apiAdjustInventory delta:-1`). Section helpers `normalizeForClient_`, `fillMissingInventoryRarity_` reviewed (read-path only, no write).
+
+#### BUG · Index.html:7526 · "Cancel" during an in-flight quick-adjust does not cancel the write, yet clears the in-flight guard
+
+**Story: Quick-adjust currency/delerium — navigate-away / double-tap.** `confirmQuickEdit` (7549) sets `quickEditInFlight = true` and fires `apiAdjustInventory` / `apiSetItemQuantity` (no way to abort a `google.script.run` call). If the user taps **Cancel** (buttons at Index.html:2248 / 2610) while the round-trip is in flight, `closeQuickEditPanel` (7524) unconditionally sets `quickEditInFlight = false`, nulls `selectedQuickEdit`, and hides the sheet. Two consequences:
+
+1. **Silent commit after a "Cancel".** The server write still lands — the user believes they aborted a gold/delerium change, but the pool balance changes anyway. Because `selectedQuickEdit` is now null, `finishSuccess` still runs `updateInventoryRowFromServer` + `renderInventory` (good — no data loss) but the guard at 7598 suppresses any success toast, so the user gets *no* feedback that the "cancelled" adjustment actually happened. The ledger entry appears silently.
+2. **Double-apply via Cancel → reopen → Confirm.** With `quickEditInFlight` reset to false, the `openQuickEditPanel` guard at 7421 no longer blocks reopening. User reopens the same card and taps Confirm again → a *second* `apiAdjustInventory` fires. The document lock serializes both, so an "add 100 gp" becomes +200, a "remove 3 crystals" becomes −6, etc. This is a real resource-state corruption (currency/delerium qty is the domain value being doubled).
+
+Suggested fix: in `closeQuickEditPanel`, do **not** reset `quickEditInFlight` when a request is genuinely in flight — keep the guard set until the handler resolves, and either disable/hide the Cancel button while in flight or have Cancel only detach the UI (set a "cancelled" flag) while leaving the in-flight guard owned by the pending handler. At minimum, gate reopen on a still-pending request.
+
+#### RISK · Code.js:3761 · `apiAdjustInventory` writes a phantom row + zero-qty ledger entry when delta is 0
+
+**Story: Quick-adjust currency/delerium — add/remove path.** The client validation at Index.html:7564 only rejects `amount < 0`, so an amount of **0** in add/remove mode reaches the server as `delta: 0`. `apiAdjustInventory` then: re-writes the (unchanged) inventory row via `writeInventoryRow_` (3758), and unconditionally appends a `RESOURCE_LEDGER` ADJUST entry with `qty: 0` for currency/delerium (3761–3777) — a noise entry that shows up in the gold/delerium history. The sibling `apiSetItemQuantity` already guards this correctly (`qty !== oldQty` at 3872). Recommend the same guard in `apiAdjustInventory` (skip ledger + skip write when `delta === 0`), or reject `amount === 0` client-side in `confirmQuickEdit`.
+
+#### IDEA · Code.js:3739 · Over-removing currency surfaces the generic numeric-range error
+
+**Story: Quick-adjust currency/delerium — remove, failure at the validate step.** When a user removes more gold/delerium than they hold, `validateQuantity_(oldQty + delta)` (3739, default `min: 0`) throws `"Quantity must be between 0 and 999999."`, which `publicValidationError_` passes to the quick-edit status line. In the gold/delerium context this reads as a confusing internal constraint rather than "you only have N to remove." Friction: a domain-specific message ("Cannot remove more than the N currently held.") would let the treasurer correct the amount without guessing. Inputs are preserved on failure (good — `confirmQuickEdit` does not clear fields on error), so retry works.
+
+#### Note · Code.js:3830 · Quick-adjust lock + rollback discipline is clean
+
+`apiAdjustInventory` (3710) and `apiSetItemQuantity` (3830) both acquire the document lock with `tryLock(10000)`, release it in a `finally` wrapped in its own try/catch, and release safely on **every** path including the auth-failure path (`requireAllowedUser_` throws before `tryLock`, the catch logs an audit FAILED row, and the finally releases a never-acquired lock without error). The client `finishSuccess`/`fail` handlers (Index.html:7575, 7604) both reset `quickEditInFlight`, re-enable the Confirm button, preserve the typed amount/note on failure for retry, and apply the server row even when the user navigated away (no data loss) — only the success toast is gated behind the still-selected guard. The single defect in this otherwise-correct flow is the Cancel/in-flight interaction logged above. Traced: Quick-adjust currency/delerium (all four sub-paths).
 
 > **✅ RESOLUTION — all findings fixed (2026-06-23).**
 > - **BUG `Index.html:4299+4334`** — FIXED commit `aed031c`: removed `tags`/`pinned`
