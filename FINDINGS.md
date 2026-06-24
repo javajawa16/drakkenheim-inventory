@@ -25,9 +25,87 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 6. Code.js lines 3900+ (remaining server utilities, helpers)
+Next section: 7. Index.html lines 1–1500 (HTML structure, CSS)
 
 ## Sessions
+
+### 2026-06-24 (run 58) — Sections audited: 6 (Code.js lines 3900+ — remaining server utilities, helpers)
+
+In-range functions: tail of `apiSetItemQuantity` (3830–3939, the "set" quick-adjust
+writer), `normalizeForClient_` (3941), `ensureInventoryHeaders_` (3956),
+`fillMissingInventoryRarity_` (3973), `findInventoryRowById_` (4033). Read out of
+range to close traces: `apiAdjustInventory` (3710), `apiGetInventory` (2103, the
+sole caller of `fillMissingInventoryRarity_`), `appendResourceLedger_` (1981),
+`validateQuantity_` (1687), `classifyQuickEdit_` (1919), and client
+`confirmQuickEdit` (Index.html 7549).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every write path):
+
+- **Quick-adjust currency/delerium — "set" branch** (tap gold/delerium card →
+  quick-edit sheet → Set → amount → Confirm → `apiSetItemQuantity`). Happy path,
+  per-step failure, and navigate-away all traced; one new concurrency RISK below
+  affects the read that precedes every quick-adjust. The write itself is sound.
+- **Cross-cutting: collaborative sync interference** — re-traced through the read
+  path (`apiGetInventory`) because the in-range `fillMissingInventoryRarity_`
+  performs a sheet *write* during that read. See RISK below.
+
+#### RISK · Code.js:3973 · `fillMissingInventoryRarity_` does an unlocked read-modify-write of the entire Rarity column during `apiGetInventory`, and can revert a concurrent edit
+
+**Story: Cross-cutting collaborative sync interference** (and any concurrent
+*Edit inventory item*). `apiGetInventory` (2103) is a **read** endpoint and holds
+**no `LockService` lock**, yet at line 2114 it calls `fillMissingInventoryRarity_`,
+which writes back to the sheet: it reads `numRows = lastRow-1` and the
+`Library Item ID`+`Rarity` columns (3986–3994), backfills blanks from the equipment
+library, and — whenever at least one blank was filled (`changed`) — writes the
+**full** `rarities` array for **all** rows in one `setValues`
+(`getRange(2, rarityCol, numRows, 1).setValues(rarities)`, 4029). Two failure modes,
+both live in a 5-player collaborative session where loads fire constantly:
+
+1. **Reverts a concurrent rarity edit.** The write pushes back the *entire* column,
+   including rows the function did not change — for those rows it writes the value it
+   read at 3994. If another client runs `apiUpdateInventory` (which *does* hold the
+   doc lock) and changes some row's Rarity in the window between this function's read
+   (3990) and its write (4029), the backfill clobbers that just-saved rarity with the
+   stale value it read moments earlier. Silent data loss; the editor saw a success.
+2. **Row-shift misalignment.** If a concurrent locked writer `deleteRow`s/`appendRow`s
+   an inventory row in the same window, `numRows` and the row order no longer match the
+   sheet at write time. `setValues` of the stale array writes rarities onto the wrong
+   items (off-by-one after a delete) and, after a delete, writes one row past the live
+   data into a now-blank row.
+
+The precondition for the write firing is "at least one row has a Library Item ID but a
+blank Rarity" — which is exactly the state the README's known-TODO describes for items
+added before the equipment-library import, so it commonly holds until every legacy row
+is backfilled. Fix: either acquire the document lock around the backfill (it is a write,
+not a read), or write back **only the cells it actually changed** (per-row `setValue`
+on the missing ones) instead of the whole column, or move the backfill into a locked
+maintenance endpoint instead of running it on every read. Run 46 reviewed this function
+and reported "no behavioral issues," but did not consider the unlocked-write/concurrency
+angle.
+
+#### Note · Code.js:3830 · `apiSetItemQuantity` write path + section utilities re-traced clean
+
+Traced *Quick-adjust currency/delerium — set branch* end to end. Server side:
+`requireAllowedUser_` gates before `lock.tryLock(10000)`; lock released in `finally`
+on success / validation-failure / auth-failure (no leak);
+`validateId_`/`validateQuantity_`/`validateText_` all run before any write;
+`Total Value GP` recomputed from the new qty; the ADJUST ledger row is written only
+for currency/delerium and only when `qty !== oldQty` (3872) with the correct signed
+`delta`; the row carries an `Inventory ID` so the returned `ledgerEntry` and a later
+note-edit reconcile by ID (the cosmetic gap that `ledgerTs` at 3875 is a separate
+`new Date()` from `appendResourceLedger_`'s own `new Date()` at 1991 — up to ~1s of
+skew — is therefore moot for these entries, since matching is by ID, not Timestamp).
+Client `confirmQuickEdit.finishSuccess` (Index.html 7575) clears `quickEditInFlight`,
+re-enables the button, applies `res.item` + prepends `res.ledgerEntry`, re-caches and
+re-renders, then guards on `selectedQuickEdit.itemId === capturedItemId` before
+touching the panel — so a navigate-away during the round-trip still commits the data
+and leaves no stuck in-flight flag; the double-tap early-return plus button-disable
+hold. Utilities `normalizeForClient_`, `ensureInventoryHeaders_` (idempotent
+header-append), and `findInventoryRowById_` (column 1 = `Inventory ID`, literal
+`matchEntireCell` TextFinder) reviewed — no behavioral issues. (Minor: the set branch
+silently ignores an out-of-range delerium `size` where `apiAdjustInventory` throws —
+harmless, since the client only sends `currentSize`/valid options.)
 
 ### 2026-06-23 (run 57) — Sections audited: 5 (Code.js 2301–3900, Index.html 4200–4800)
 
