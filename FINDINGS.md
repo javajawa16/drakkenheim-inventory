@@ -25,9 +25,42 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 6. Code.js lines 3900+ (remaining server utilities, helpers)
+Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js now fully audited (1–4045); rotation moves to Index.html.
 
 ## Sessions
+
+### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 tail + quick-adjust write paths 3700–3939)
+
+Traced the **Quick-adjust currency/delerium** story end-to-end (tap card → quick-edit sheet → add/remove/set → amount → Confirm) across client `confirmQuickEdit`/`openQuickEdit`/`closeQuickEditPanel` (Index.html ~7430–7630) and server `apiAdjustInventory` / `apiSetItemQuantity` / `apiAdjustCurrency` (Code.js 3700–3939), plus the cross-cutting **collaborative sync interference** story against the section's read-path helpers (`fillMissingInventoryRarity_`, `ensureInventoryHeaders_`, `findInventoryRowById_`, `normalizeForClient_`).
+
+#### BUG · Index.html:7526 · `closeQuickEditPanel` clears `quickEditInFlight` mid-flight — reopening the same card lets the prior op force-close the new panel and discard input
+
+**Story: Quick-adjust currency/delerium — navigate-away-and-return (step c).** State-machine trace of the in-flight → close → reopen-same-card sequence:
+
+1. User taps Confirm on the gold card (add 50). `confirmQuickEdit` sets `quickEditInFlight = true`, disables `…ConfirmBtn`, captures `capturedItemId`, and fires `apiAdjustInventory` (Index.html:7572–7573, 7622).
+2. Before the round-trip returns, the user closes the sheet (backdrop/Done). `closeQuickEditPanel` (line 7524) sets `selectedQuickEdit = null` **and `quickEditInFlight = false`** — clearing the in-flight flag for an op that is still genuinely in flight — but does **not** re-enable `…ConfirmBtn`.
+3. User reopens the **same** gold card. `openQuickEdit` rebuilds `selectedQuickEdit` with the same `itemId`, clears the Amount/Note fields, and reopens the sheet — but never resets `quickEditInFlight` or the disabled Confirm button.
+4. The first op's `finishSuccess` finally fires. Its post-write guard `if (!selectedQuickEdit || selectedQuickEdit.itemId !== capturedItemId) return;` (line 7598) is meant to suppress completion UI after navigate-away — but because the reopened panel is on the **same item**, `selectedQuickEdit.itemId === capturedItemId`, so the guard **passes**. It shows "Saved." and calls `closeQuickEditPanel()`, slamming shut the freshly reopened panel and **discarding whatever new amount the user just typed**.
+
+Root cause: the guard keys on `itemId`, which cannot distinguish a *new editing session on the same item* from the original one. Suggested fix: introduce a per-open generation counter (e.g. `quickEditGen++` in `openQuickEdit`, capture it alongside `capturedItemId`, and bail in `finishSuccess`/`fail` when the captured gen no longer matches). Don't clear `quickEditInFlight` in `closeQuickEditPanel` — let the op's own handler own that flag.
+
+#### RISK · Index.html:7460 · Quick-edit Confirm button stays disabled after close/reopen while a prior adjust is in flight
+
+**Story: Quick-adjust currency/delerium — navigate-away (step c), different card.** `…ConfirmBtn.disabled = true` is set in `confirmQuickEdit` (line 7570) and re-enabled **only** in `finishSuccess`/`fail` (lines 7577/7606). Neither `closeQuickEditPanel` nor `openQuickEdit` resets it. So if a user starts an adjust, closes the sheet, and reopens *any* quick-edit (same or different card) before the round-trip returns, the Confirm button is rendered disabled with no status text explaining why — the user appears unable to confirm until the unrelated prior op completes. Fix: reset `confirmBtn.disabled = false` and `quickEditInFlight = false` at the top of `openQuickEdit` (companion to the BUG above; the generation-counter fix makes this safe).
+
+#### BUG · Code.js:3761 · `apiAdjustInventory` writes a ledger entry even when delta === 0; sibling `apiSetItemQuantity` correctly guards with `qty !== oldQty`
+
+**Story: Quick-adjust currency/delerium — happy-path edge.** Client `confirmQuickEdit` rejects only `amount < 0` (Index.html:7564), so an amount of **0** passes validation; for mode add/remove this sends `delta: 0` to `apiAdjustInventory`. Server-side, `validateQuantity_(delta, {min:-999999})` accepts 0, and the ledger branch at line 3761 fires for any `currency`/`delerium crystal` item **unconditionally** — appending a meaningless `ADJUST … qty: 0` row to RESOURCE_LEDGER and returning it as `ledgerEntry`, so the client optimistically shows a "+0 gold" ledger line. The set-quantity sibling `apiSetItemQuantity` already guards this correctly at line 3872 (`(quickType === … ) && qty !== oldQty`). Fix: mirror that guard in `apiAdjustInventory` (skip ledger + skip the no-op row write when `delta === 0`), and/or tighten the client to require `amount > 0`.
+
+#### RISK · Code.js:4029 · `fillMissingInventoryRarity_` does a lock-free full-column `setValues` on the `apiGetInventory` read path — can clobber a concurrent rarity write
+
+**Story: Cross-cutting collaborative sync interference.** `apiGetInventory` (Code.js:2103) takes **no LockService lock** — it is a read API — yet it calls `fillMissingInventoryRarity_` (line 2114), which performs a read-modify-**write**: it reads the whole Library-Item-ID + Rarity range at function entry (line 3990), back-fills missing rarities from the equipment sheet, and, when anything changed, writes the **entire** Rarity column back with `inventorySheet.getRange(2, rarityCol, numRows, 1).setValues(rarities)` (line 4029).
+
+Because no lock is held, this races with any lock-holding write that touches rarity (e.g. an edit/add running `writeInventoryRow_`): if user B updates row 5's rarity while user A is between the read and the write inside `fillMissingInventoryRarity_`, A's stale full-column `setValues` silently reverts B's change. The blast radius is limited to the Rarity column and the path is self-limiting (it only writes when at least one *fillable* missing rarity exists, and stops once all are filled), but per the README this back-fill state is the norm for items added before the equipment-library import, so the race window recurs on ordinary loads until the column is fully populated. Fix options: only back-fill inside a write API under the document lock (or a short `tryLock` here), or write just the individual changed cells rather than the whole column.
+
+#### Note · Code.js:3710 / Index.html:7549 · Clean traces in the quick-adjust write path
+
+Positive confirmations from the **Quick-adjust currency/delerium** trace: (a) double-tap is correctly blocked while an op is in flight by the combined `if (quickEditInFlight) return;` guard (Index.html:7551) and the disabled Confirm button; (b) on **failure** (`!res.ok` or the failure handler), `quickEditInFlight` is reset, the button re-enabled, and the Amount/Note fields are left intact so the user can retry without reload (lines 7575–7608); (c) on navigate-away, the server write still applies to `inventoryRows` and the in-memory ledger via `updateInventoryRowFromServer`/`inventoryResourceLedger` before the completion-UI guard bails, so no data is lost; (d) both `apiAdjustInventory` and `apiSetItemQuantity` release the document lock on every path via `finally` (3821/3932), including the auth-failure path (`requireAllowedUser_` runs before/at `tryLock`); (e) `findInventoryRowById_` hardcodes column 1, which is correct since `INVENTORY_HEADERS[0] === 'Inventory ID'`. The ledger-write-after-row-write ordering in both functions inherits the already-logged "`appendResourceLedger_` swallows its own errors" TODO (README Known TODOs) — a swallowed ledger failure leaves the inventory row updated but the returned `ledgerEntry` non-persistent; referenced, not re-filed.
 
 ### 2026-06-23 (run 57) — Sections audited: 5 (Code.js 2301–3900, Index.html 4200–4800)
 
