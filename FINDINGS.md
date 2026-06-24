@@ -25,9 +25,40 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 6. Code.js lines 3900+ (remaining server utilities, helpers)
+Next section: 7. Code.js lines 3501–end (sync, audit, utilities) — wraps to Index.html sections next; restart rotation at 1 if all Code.js covered
 
 ## Sessions
+
+### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–end: `apiSetItemQuantity` tail + helpers `normalizeForClient_`, `ensureInventoryHeaders_`, `fillMissingInventoryRarity_`, `findInventoryRowById_`)
+
+**Stories traced:** *Quick-adjust currency/delerium* (the **set** mode → `apiSetItemQuantity`, plus adjacent **add/remove** → `apiAdjustInventory`/`apiAdjustCurrency` for contrast), and the cross-cutting *Collaborative sync interference* and *Tab switch / navigate-away during in-flight* stories as they pass through `confirmQuickEdit` and `apiGetInventory`'s read path. Happy path, per-step failure, navigate-away, and efficiency examined for each.
+
+#### RISK · Code.js:2114,4029 · Inventory **read** endpoint performs an unlocked sheet **write** (rarity backfill) that bypasses LockService
+
+**Story: Collaborative sync interference.** `apiGetInventory()` (line 2103) takes **no** `LockService` lock — it is a pure read endpoint — yet on every call it invokes `fillMissingInventoryRarity_()` (line 2114), which, whenever any row has a Library Item ID but a blank Rarity, issues a `setValues` **write** to the whole Rarity column (line 4029: `inventorySheet.getRange(2, rarityCol, numRows, 1).setValues(rarities)`).
+
+Because this write is taken outside the document lock, it bypasses the mutual exclusion that every real writer (`apiSetItemQuantity`, `apiAdjustInventory`, sell/delete/give, etc.) relies on. Two concrete failure modes:
+
+1. **Row-shift corruption.** `fillMissingInventoryRarity_` computes `numRows` and the per-row Rarity values from its own read at T0, then writes them back at T1. If a *locked* writer deletes or appends a row between T0 and T1 (e.g. a swipe-delete or a combine that removes a row), the cached Rarity array is now misaligned with the sheet, and `setValues` writes every rarity to the **wrong row**, silently corrupting rarity across the inventory.
+2. **Clobbering a concurrent edit.** A locked writer mid-transaction can have its row update overwritten by the unlocked backfill flushing a stale Rarity value, because the reader never participated in the lock.
+
+This is not hypothetical for this app: `loadInventory()` fires `apiGetInventory` on initial load, on every tab switch, and from the 20 s sync poll — so with 5 players polling, multiple unlocked backfill writers can race each other *and* the locked writers during the window before all rarities are filled. **Fix:** acquire `LockService.getDocumentLock()` (or reuse the inventory write lock) around the backfill, re-reading row positions under the lock immediately before `setValues`; or move rarity backfill out of the read path into a write-time/maintenance routine. The backfill is purely cosmetic (it repairs missing Rarity for display grouping) and should never be allowed to corrupt data.
+
+#### RISK · Index.html:7604 · `confirmQuickEdit` failure handler is unguarded — stale error bleeds into a reopened quick-edit panel
+
+**Story: Quick-adjust currency/delerium — failure + navigate-away.** In `confirmQuickEdit` the success handler `finishSuccess` (line 7575) guards every user-visible message on the captured item — `if (selectedQuickEdit && selectedQuickEdit.itemId === capturedItemId)` for the error branch, and a second guard before `closeQuickEditPanel()`. The `fail` handler (line 7604), however, has **no** such guard: it unconditionally writes `status.innerHTML = '<span class="error">Quick edit failed…'`.
+
+`status` is resolved once via `getQuickStatusElement()` and is the **shared** per-prefix status element. Sequence that breaks: user taps Confirm on item A (in-flight) → closes the panel or switches tabs (`closeQuickEditPanel` nulls `selectedQuickEdit`) → reopens quick-edit on item B (new `selectedQuickEdit`, same status element) → A's round-trip *then* fails → `fail` writes "Quick edit failed" into B's freshly-opened panel, attributing A's failure to B. The user sees a spurious error on an item they haven't even submitted. **Fix:** mirror `finishSuccess` — early-return from `fail` when `!selectedQuickEdit || selectedQuickEdit.itemId !== capturedItemId`. (Note: `finishSuccess` is correctly ordered — data updates apply before the guard, only messaging/close is gated — so the in-flight set still persists correctly on navigate-away; only the failure path is inconsistent.)
+
+#### RISK · Code.js:3859 · Delerium "set" silently renames an item to `Delerium <size>` from a defaulted dropdown, destroying non-canonical names
+
+**Story: Quick-adjust delerium — set mode.** For a row classified `delerium crystal`, `apiSetItemQuantity` (lines 3859–3864) rewrites `rowObj['Item'] = 'Delerium ' + Size` whenever `payload.size` is a valid size — and the client *always* sends a size for delerium (the size field is `.active`, so `confirmQuickEdit` line 7560 takes `sizeSelect.value`). `classifyQuickEdit_` (line 1934) classifies a row as `delerium crystal` if **`Category === 'delerium'`** even when the Item name does not follow the `Delerium <size>` convention (e.g. "Aqua Delerium", referenced in the README description-sheet example).
+
+For such an item, `apiGetCurrencyQuickEdit` returns `currentSize = normalizeDeleriumSize_("Aqua Delerium")` → `"aqua delerium"`, which is **not** in `DELERIUM_SIZE_VALUES`. `populateQuickSize` (Index.html:7494) sets `select.value = "aqua delerium"`, but no such `<option>` exists, so the browser falls back to the **first** option (`chip`). The user, intending only to set a quantity, never touches the dropdown; on Confirm, `size = "chip"` is sent and the server renames "Aqua Delerium" → **"Delerium Chip"**, silently losing the descriptive name. The identical rename exists in `apiAdjustInventory` (line 3750), so add/remove are equally affected. **Fix:** only apply the rename when `payload.size` actually differs from the current normalized size *and* the current name already matches the canonical convention; or have `populateQuickSize` insert the current (non-standard) value as a selected option / a "keep current" sentinel so an untouched dropdown never forces a rename.
+
+#### Note · Code.js:3830 · `apiSetItemQuantity` set-path trace is otherwise sound
+
+Traced *Quick-adjust currency/delerium — set mode* end-to-end. Lock acquired with `tryLock(10000)` and released in `finally` on success, validation-failure, and auth-failure paths; ledger entry written only when `currency`/`delerium` *and* `qty !== oldQty` (no phantom zero-delta ledger rows); `validateQuantity_` default `min:0` correctly permits set-to-zero (e.g. zeroing gold); audit row written on both SUCCESS and FAILED. Navigate-away on **success** is handled correctly — `finishSuccess` applies `updateInventoryRowFromServer` + ledger + cache + render *before* the `selectedQuickEdit`/`capturedItemId` guard, so the write survives a tab switch or panel close, and the double-tap guard (`if (quickEditInFlight) return` + disabled Confirm button) is in place. `findInventoryRowById_` (line 4033) correctly searches column 1, which `INVENTORY_HEADERS` confirms is `Inventory ID`; `ensureInventoryHeaders_` (3956) appends only genuinely missing headers.
 
 ### 2026-06-23 (run 57) — Sections audited: 5 (Code.js 2301–3900, Index.html 4200–4800)
 
