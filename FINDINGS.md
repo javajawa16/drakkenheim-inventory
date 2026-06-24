@@ -25,9 +25,108 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 6. Code.js lines 3900+ (remaining server utilities, helpers)
+Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — begins the Index.html sweep; all Code.js ranges are now covered.
 
 ## Sessions
+
+### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–end: remaining server utilities + helpers)
+
+Section = Code.js lines 3900–4045 (file end). In-range code: the tail of
+`apiSetItemQuantity` (3830–3939, the quick-adjust **set** writer) and the
+utilities `normalizeForClient_` (3941), `ensureInventoryHeaders_` (3956),
+`fillMissingInventoryRarity_` (3973), `findInventoryRowById_` (4033). Read out of
+range for the traces: `apiAdjustInventory`/`apiAdjustCurrency` (3700/3710, the
+add/remove sibling writers), `apiGetInventory` (2103, the read endpoint that calls
+`fillMissingInventoryRarity_`), `validateQuantity_`/`validateMoney_` (1687/1705),
+`getInventoryRowObjectById_` (1842), `writeInventoryRow_` (1855), and the client
+quick-edit flow (`openQuickEditPanel`/`confirmQuickEdit`/`gasCall`, Index.html
+7486/7549/2887).
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every write path):
+
+- **Quick-adjust currency/delerium** (tap gold/delerium card → quick-edit sheet →
+  add/remove/**set** → amount → Confirm). The **set** branch (`confirmQuickEdit`,
+  Index.html 7610) → `apiSetItemQuantity` (3830). Re-confirmed the write path is
+  sound: lock via `tryLock(10000)` released in `finally` on success / validation
+  failure / auth failure; `requireAllowedUser_` gates before the lock;
+  `validateId_`/`validateQuantity_`/`validateText_` run before any write; `Total
+  Value GP` recomputed from the new qty; the ledger row is appended only for
+  currency/delerium and only when `qty !== oldQty` (3872 — stricter than
+  `apiAdjustInventory`, which always appends). Client `finishSuccess` re-enables the
+  button, applies `res.item` + prepends `res.ledgerEntry`, busts/re-caches, and the
+  item-mismatch guard (7598) bails on navigate-away. One new RISK below (the rarity
+  backfill that fires on the read side of this same flow).
+- **Edit inventory item** (full editor) and **Add library/custom item** — only
+  touched here through the shared helpers `ensureInventoryHeaders_` (header
+  self-heal, append-only, correct) and `findInventoryRowById_` (column-1 / Inventory
+  ID match — `matchEntireCell(true)` + `matchCase(false)`; IDs are generated hashes
+  so the case-insensitivity is harmless). No new issues.
+
+#### RISK · Code.js:4029 · `fillMissingInventoryRarity_` rewrites the whole Rarity column from the read path with no lock — concurrent row-delete corrupts rarities
+
+**Story: any inventory read (`loadInventory` → `apiGetInventory`), background and
+foreground.** `apiGetInventory` (2103) holds **no LockService lock** yet calls
+`fillMissingInventoryRarity_` (2114), which **writes**. The helper reads the full
+Library-Item-ID + Rarity block once (`getRange(2, minCol, numRows, …)`, 3990),
+builds a `rarities` array indexed by row position, backfills blank rarities from the
+equipment sheet, then writes the **entire** column back in one shot:
+`inventorySheet.getRange(2, rarityCol, numRows, 1).setValues(rarities)` (4029) —
+*all* `numRows` rows, not just the changed cells, using positions captured at read
+time.
+
+Because the read endpoint takes no lock, this read→(equipment read)→write sequence
+runs concurrently with the locked writers that **delete rows** —
+`apiCombineInventoryItems`, `apiSellInventoryItem`/`apiSellInventoryBatch`,
+`apiDeleteInventory`, the `_confirmDescActionRemove_` path. If any of them deletes a
+row between line 3990 and line 4029, every row at/below the deletion point has
+shifted up by one, but `setValues` writes the **stale, pre-shift** rarity values to
+those positions → each shifted item receives its former neighbour's rarity. The
+whole-column write also clobbers any rarity another op set in that window
+(last-writer-wins with stale data). `numRows` is likewise stale, so on a delete the
+write also targets one row past the current data.
+
+This is not theoretical: the backfill fires on **every** `apiGetInventory` until all
+rows have a rarity (README known-TODO: items added before the equipment-library
+import have no rarity), so during that transitional period multiple clients' loads
+and the locked writers overlap repeatedly. Two concurrent loads writing identical
+data are benign; a load overlapping a row-deleting write is not.
+
+Note: run 46 reviewed this exact helper and recorded "no behavioral issues"
+(`Code.js:3860`, 2026-06-20) — it checked the alignment math but not the
+no-lock-on-the-read-path concurrency angle; this finding corrects that clearance.
+
+Fix options: (a) wrap the read+write in `LockService.getDocumentLock().tryLock(...)`
+inside `apiGetInventory` for the backfill only; (b) re-read the Library-Item-ID
+column immediately before writing and match by ID instead of by captured position;
+or (c) write only the specific blank→filled cells with per-row `setValue` after
+re-locating each row by ID, and move the backfill off the hot read path into a
+locked maintenance routine.
+
+#### Note · Code.js:3830 · `apiSetItemQuantity` set-path traced clean; prior quick-adjust findings still open; sync ledger-dup mitigated for this path
+
+**Stories traced: Quick-adjust currency/delerium (set/add/remove), Edit inventory
+item, Add item (helpers only).** The `apiSetItemQuantity` write path is sound (see
+session header) and the client `confirmQuickEdit` state machine
+(idle→in-flight→success/error) holds: `quickEditInFlight` + `confirmBtn.disabled`
+block double-tap; `closeQuickEditPanel` resets both and the navigate-away guard
+(7598) prevents a stale success from re-rendering a closed panel; data is still
+applied (cache + row update happen before the guard) so nothing is lost on
+navigate-away.
+
+Two run-46 findings on this same flow remain **open in current code** (line numbers
+shifted) and are not re-logged per protocol rule 7: the delerium **size-change
+conflation** (`apiAdjustInventory` 3742–3752 and `apiSetItemQuantity` 3859–3864
+reclassify existing units to the new size while keeping `oldQty±delta`/`qty`) and
+the **potion quick-edit routing IDEA** (server `classifyQuickEdit_` supports
+`health potion` but the client gate never routes potions to the quick editor).
+
+The **collaborative-sync ledger-dup** class logged earlier (FINDINGS `Code.js:6063`
+split/pay re-prepend) does **not** persist for the quick-adjust path: `gasCall`
+(2887) brackets `_inFlightWrites++/--`, and the sync poll defers a foreign
+`loadInventory(true)` while `_inFlightWrites > 0` (3771/4011), so the deferred full
+reload runs after `finishSuccess` and overwrites the ledger array with the server's
+single copy — any transient duplicate self-heals.
 
 ### 2026-06-23 (run 57) — Sections audited: 5 (Code.js 2301–3900, Index.html 4200–4800)
 
