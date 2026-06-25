@@ -25,9 +25,37 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure/CSS; traced through the body markup at 2177–2845 and the desktop media query at 1623–1673)
+
+Stories traced through this section's CSS-driven visibility state machines: **View item details** (descriptionSheet), **Sell item / Give item / Remove item** (descriptionSheet → descActionSheet stepper), **Add library/custom item** (`.section`, `.selected-item-card`, `.library-only`/`.custom-only`, `.quick-size-field` toggles), **Quick-adjust currency/delerium** (quickEditSheet), and tab switching (`.section.active`). The CSS in 1–1500 holds no server round-trips; the analysis is purely the show/hide cascade for each sheet/section and the z-index stacking order that the Sell/Give/Pay sub-sheets depend on.
+
+#### BUG · Index.html:1367 · `#descActionSheet` is stuck permanently visible on every viewport narrower than 700px
+
+**Stories: Sell item / Give item / Remove item (and, in practice, the whole app).** The base rule
+
+```css
+#descActionSheet { background: rgba(6,10,20,.55); backdrop-filter: blur(4px); display: flex; align-items: flex-end; }
+```
+
+sets `display: flex` with **no `.active` qualifier**. Its ID specificity (1,0,0) beats `.mobile-sheet { display: none }` (0,1,0, line 1353), so the description-action sub-sheet is shown whenever it is *not* active — i.e. always, including on page load.
+
+The only thing that hides it is the `!important` override at line 1651, `.mobile-sheet { display: none !important; }`, which lives **inside `@media (min-width: 700px)`** — the single media query in the entire file (1623). The README documents that the iOS GAS webview renders at ~980px CSS width, so on the primary target that media query matches and masks the defect. But on **any viewport < 700px CSS width** the masking rule never applies and the base `display: flex` wins:
+
+- a standard mobile browser hitting the `/exec` URL directly (the `width=device-width` meta at line 5 is honored → ~390px);
+- an Android WebView reporting real device-independent width (~360–412px) rather than iOS's 980px;
+- a narrow/split desktop window.
+
+In those cases `#descActionSheet` (a `position: fixed; inset: 0; z-index: 81` overlay with a blurred backdrop) is permanently painted over the whole app from first render. Because `.mobile-sheet` has no `pointer-events: none`, the backdrop intercepts every tap across the screen, so the app behind it is non-interactive — the empty "Action" bottom sheet with its Confirm/Cancel buttons sits on top of everything. This is the most severe failure mode in the section: it isn't a single broken flow, it's the entire UI locked behind a phantom overlay on sub-700px viewports.
+
+**Why it survived:** the author evidently relied on the 980px webview quirk (the same quirk that forced phone-detection onto `(pointer: coarse)` instead of width), so the unguarded base rule was never observed to misbehave on the deployed iOS device. **Fix:** delete `display: flex;` from the base `#descActionSheet` rule (line 1370) and keep it only on the already-present `#descActionSheet.active { display: flex; }` (line 1385). Then the base `.mobile-sheet { display: none }` correctly hides it when inactive at every width, and the desktop `!important` block continues to work unchanged. (The `background`/`backdrop-filter`/`align-items` declarations only render once the sheet is shown, so they can stay on the base rule or move to `.active` — only `display` is load-bearing.)
+
+#### Note · Index.html:2765 · Sheet visibility + z-index stacking + duplicate-ID scan are otherwise clean
+
+The full-file duplicate-static-ID scan surfaced only `dTotalLabel`, `deleriumReceivedBtn`, `deleriumSheetNote`, `deleriumSheetStatus` — all of which are mutually-exclusive branches of a single `innerHTML` template (`renderDeleriumSheetActions`, 4664–4713) so only one copy is ever in the DOM at a time; no real `getElementById`-returns-wrong-node hazard. Z-index stacking for the Sell/Give/Pay flows is consistent and correct: base `.mobile-sheet` 70 < `sellItemSheet`/`giveItemSheet`/`payReasonSheet` 80 < `descActionSheet` 81 < `sellBatchSheet` 82 < `identitySheet` 90, so every sub-sheet opens above its parent (descriptionSheet 70 → descActionSheet 81; goldSheet 70 → payReasonSheet 80). Aside from the `#descActionSheet` defect above, every section/sheet uses the clean `display:none` base + `.active` override pattern, with the desktop media query re-asserting each via `!important`. Stories View-details, Sell, Give, Remove, Add, and Quick-adjust all reach their sheets with no stuck-visibility or wrong-stacking states on the 980px target.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
