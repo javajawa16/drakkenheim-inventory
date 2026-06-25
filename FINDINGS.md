@@ -25,9 +25,27 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure + CSS; traced through sheet open/close JS, resize handler, tab-switch)
+
+Stories traced (the CSS layer for each): Edit inventory item, View item details / Give / Sell / Remove (description + descAction sheets), Quick-adjust currency/delerium, Combine duplicate, Receive/Pay gold, Delerium receive/sell, Create/Edit note, Identity pick, and the cross-cutting **navigate-away** + **tab-switch-during-in-flight** scenarios. This range is almost entirely `<style>`; findings are limited to CSS that produces *behavioral* effects (per audit scope — pure style/layout omitted).
+
+#### RISK · Index.html:44,1317,1532 · `--keyboard-offset` is defined and consumed but never assigned → keyboard-avoidance is permanently inert
+
+`--keyboard-offset` is declared as a `0px` design token (line 44) and consumed in two action-area rules: `.notes-sheet-actions` (line 1317, in-range) and the base `.mobile-sheet-actions` (line 1532). Both compute `padding-bottom: calc(12px + var(--safe-bottom) + var(--keyboard-offset))` — clearly intended to lift a sheet's bottom Confirm/Save button above the on-screen keyboard. **But no JS ever sets `--keyboard-offset` to a non-zero value** (grep across the whole file finds only the declaration and the two consumers; the `resize` handler at 8705 never touches it, and there is no `visualViewport` listener). So the variable stays `0px` forever and the compensation does nothing.
+
+Behavioral consequence: on iOS, where the soft keyboard *overlays* the layout viewport without resizing it, the bottom action button of every input-bearing sheet — **Create/Edit note (Save), Sell item (Sell), Quick-adjust (Confirm), Got Paid / Pay (amount + note)** — is not lifted and can sit behind the keyboard, forcing the user to dismiss the keyboard before they can confirm. The plumbing to fix this already exists; it just needs a driver. Suggested fix: add a `window.visualViewport` `resize`/`scroll` listener that sets `document.documentElement.style.setProperty('--keyboard-offset', Math.max(0, innerHeight - visualViewport.height) + 'px')`, and reset to `0px` on blur/close.
+
+#### BUG · Index.html:8710 · iOS/Android keyboard open can auto-close the inventory Edit sheet mid-edit, discarding unsaved field changes
+
+**Story: Edit inventory item — step "change fields → Save".** The global `resize` handler (8705) treats any `window.innerHeight` change `> 150px` as an orientation/layout change and calls `setInventoryEditorOpen(false)` *and* `closeDescriptionSheet()` (8711–8712). On platforms where the soft keyboard *resizes the layout viewport* (Android, and some iOS WKWebView/GAS-webview configurations), focusing a field in the inventory Edit sheet (`#sheetEditItem` / `#sheetEditNotes` / `#sheetEditQty` / `#sheetEditValueGp`, lines 2477+) shrinks `innerHeight` by ~250–300px, tripping the `> 150` threshold → the Edit sheet is closed out from under the user the instant they tap a field, and any edits typed before that are lost (no save fired). This is in direct tension with the previous finding: the app *neither* lifts the action button for an overlay keyboard *nor* tolerates a resizing keyboard — it has no coherent keyboard model. Suggested fix: distinguish keyboard-driven resizes (use `visualViewport` height, or ignore deltas while an input inside an active sheet has focus) from genuine orientation changes before closing sheets. (Anchored here because it was found tracing the same keyboard/viewport CSS mechanism the section's `--keyboard-offset` token targets; the close call lives just past the range but the trigger is the section's viewport handling.)
+
+#### Note · Index.html:1352,1583,3482 · Modal stacking, full-screen sheet over nav, and body-lock convergence all trace clean
+
+Positive baseline for the navigate-away / tab-switch stories. (1) **Stacking order is correct**: base `.mobile-sheet` is `z-index:70` (1352); sub-sheets layer above their parents — `sellItemSheet`/`giveItemSheet`/`payReasonSheet` z80, `descActionSheet` z81, `sellBatchSheet` z82, `identitySheet` z90 — so no sub-sheet (e.g. descAction opened over descriptionSheet) ever renders behind its parent. The give/sell/remove actions render *inside* `descActionSheet` rather than opening the lower-z legacy sheets, so the z80<z81 pairing never actually inverts in a live flow. (2) **`.mobile-sheet` is `position:fixed; inset:0`** and covers the `.bottom-nav` (z30, line 1585), so a user cannot tap a bottom-nav tab while a sheet is open — this CSS structurally blocks the "tab switch while a sheet is in flight" navigate-away hazard for all sheet-based write flows. (3) **`body.app-modal-open` scroll-lock** (line 110) converges: every sheet *close* path routes through `syncModalOpenState()` (3482), which recomputes the lock from any `.mobile-sheet.active`; the only direct `add`s (openDiceCalc 3580, showIdentitySheet 4575, openDescriptionSheet 6813) are idempotent, so no stuck-lock state results. One asymmetry noted but benign: identity-confirm (4603) removes the lock directly, but it only runs at first-open when no other sheet is active.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
