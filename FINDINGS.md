@@ -25,11 +25,90 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS) — Code.js fully audited; Index.html section 7 (lines 1–1500) done
 
 ## Sessions
 
-### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure + CSS; traced boot reveal, sheet z-index stacking, disabled-button feedback)
+
+This section is almost entirely CSS (design tokens, reset, component styles) with
+no inline JS. Per the audit rules, pure style/naming/best-practice issues were
+skipped; only CSS that drives a behavioral bug in a traced user-story flow is
+reported. Stories whose visual layer lives here: every flow with a mobile sheet
+(View item details, Give item, Sell item, Remove item, Quick-adjust, Combine,
+Notes create/edit, Identity pick), every write-confirm button (feedback), and the
+cross-cutting app-boot reveal.
+
+#### RISK · Index.html:118 · Cold-start app-shell reveal is gated behind `apiGetInventory` — no cache + slow/hung first load = invisible UI with zero feedback
+
+**Story: app boot → "View inventory" (first paint); cross-cutting.** The `<html>`
+element ships with class `app-booting` (line 2), and the rule at **118–123** holds
+`.app-header`, `main`, and `.bottom-nav` at `opacity: 0; transform: translateY(10px)`.
+The shell is revealed only by adding `inventory-ready` (125–130), which happens
+exclusively in `markInventoryReady()` (Index.html:3486). Tracing every call site
+(3730, 3741, 3767, 3771, 3784, 3790) shows `markInventoryReady()` fires only from
+`loadInventory()` — either when it paints from in-memory rows / localStorage cache,
+or inside `apiGetInventory`'s success/failure handlers.
+
+The boot sequence (8735–8742) calls `setCommandMode('inventory')` **before**
+`loadMyIdentity()`. `setCommandMode('inventory')` with default `skipLoad=false`
+reaches `else loadInventory()` (3394), so the very first thing the app does is fire
+`apiGetInventory`. On a **cold start with no cached inventory** (`inventoryRows`
+empty and `getCachedInventoryPayload()` empty — fresh webview, cleared/expired
+cache, or a returning user whose identity is cached but whose inventory cache is
+gone), `loadInventory` takes the `!paintedFromCache` branch (3748–3752): it sets
+`status.textContent = 'Loading…'` and clears the list, but does **not** call
+`markInventoryReady()`. Because `#mainStatus` and the list live inside `main`,
+that "Loading…" text is painted into a container still at `opacity: 0`. The reveal
+now waits for `apiGetInventory` to return.
+
+Two consequences:
+1. **Slow first load** (GAS cold starts routinely take 3–10 s): the user sees only
+   the wallpaper with no spinner, no "Loading…", no affordance — the one piece of
+   feedback the code does set is invisible.
+2. **Hung first load**: if `apiGetInventory` never resolves (neither success nor
+   failure handler fires — a known GAS webview failure mode on flaky connections),
+   the app is **permanently blank** with no error and no reload button. The user
+   must force-reload the page; nothing in the UI offers recovery.
+
+For a brand-new user (no cached identity) `showIdentitySheet()` (z-index 90) covers
+the blank shell, masking the problem — so this bites returning users and
+cache-miss cases hardest, exactly the population least likely to suspect a hang.
+
+Fix options: (a) call `markInventoryReady()` as soon as the cold-start "Loading…"
+status is shown (3748–3752), so the loading feedback is visible while the fetch is
+in flight; or (b) add a boot watchdog that reveals the shell after N seconds
+regardless of the fetch outcome. The failure handler already calls
+`markInventoryReady()` (3790) — the gap is purely the *pending* (no-response)
+window, which no path covers.
+
+#### Note · Index.html:1352,2536 · Mobile-sheet z-index stacking is correct for all description-sheet sub-flows
+
+**Stories traced: View item details, Give item to character, Sell item, Remove item.**
+`.mobile-sheet` base is z-index 70 (1352). `#descriptionSheet` (2536) has no override
+→ 70. The action sheets it spawns via `openDescActionSheet()` — `#descActionSheet`
+(z-index 81), and the standalone `#giveItemSheet`/`#sellItemSheet` (80) reachable from
+the edit/quick sheets (also base 70) — all carry higher z-indexes than their parent,
+so each sub-sheet renders above the sheet that opened it. `#sellBatchSheet` (82),
+`#payReasonSheet` (80) and `#identitySheet` (90) round out the stack with no inversion.
+No "open a sub-sheet and it renders behind the parent" stuck-overlay bug exists in the
+traced flows.
+
+#### Note · Index.html:513 · Disabled-button spinner rule fires only during genuine in-flight states
+
+**Stories traced: Quick-adjust Confirm, Sell item, Give to, Add to Inventory, Edit
+ledger note.** The rule at 513–519 attaches a CSS spinner (`::after`) to any
+*disabled* `.primary`/`.success` button — a potential "false loading" signal if such
+a button were disabled for validation while idle. Auditing every `.primary`/`.success`
+button (`quickSheetConfirmBtn`/`quickDesktopConfirmBtn`, `sellItemConfirmBtn`,
+`descActionConfirmBtn`, `addSubmitBtn`, `saveInventoryButton`, Got-Paid, Update-Note,
+Combine, Save-Note) confirms each is disabled only inside its in-flight guard (e.g.
+7574/7581, 6231/6237) — so the spinner always coincides with an actual server
+round-trip. Validation-gated disables in the section use `.secondary` (sellBatch
+"Select items to sell", 5742) or unclassed inline-styled buttons (descAction steppers,
+6967/6971), which the spinner rule does not target. Feedback is correct today. Latent
+footgun worth a comment: a future `.primary`/`.success` button disabled for input
+validation would silently inherit a misleading spinner.
 
 > **✅ RESOLUTION — all findings fixed (2026-06-24).**
 > - **BUG `Index.html:7526`** — FIXED: removed `quickEditInFlight = false` from `closeQuickEditPanel`; handlers own the guard and reset it on resolve.
