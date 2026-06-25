@@ -25,9 +25,40 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, the `<style>` block; traced sheet/swipe/scroll-lock components into JS at 3186, 3483, 4575, 6928)
+
+#### RISK · Index.html:1370 · `#descActionSheet` is forced `display:flex` at base → sheet stuck visible on any <700px viewport
+
+**Stories: Sell item / Remove item / Give item (description sheet → "Sell for Gold" / "Give to…" / "Remove" → descActionSheet stepper).**
+
+Every mobile sheet relies on the base rule `.mobile-sheet { display:none }` (line 1353) and is revealed by toggling `.active`. `#descActionSheet` breaks this: its base id-level rule sets `display:flex` unconditionally:
+
+```
+#descActionSheet {                 /* line 1367 — specificity (1,0,0) */
+  background: rgba(6,10,20,.55);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: flex-end;   /* ← line 1370 */
+}
+```
+
+Because an id selector (1,0,0) outranks the class selector `.mobile-sheet` (0,1,0), this `display:flex` overrides `display:none` at base. The only thing that hides the sheet when inactive is the desktop override at line 1651, `.mobile-sheet { display:none !important; }` — but that lives inside `@media (min-width: 700px)` (opened at line 1623). So:
+
+- **iOS GAS webview (~980px reported width):** ≥700px → desktop block applies → `display:none !important` wins → sheet correctly hidden until `.active`. **Works.**
+- **Any viewport < 700px** (Android webview reporting true device CSS width ~360–412px; desktop browser narrowed; some custom-tab embeds): the media block does *not* apply, the base id rule stands, and `#descActionSheet` computes `display:flex` **with no `.active` class** — i.e. on app load. Since it's `position:fixed; inset:0; z-index:81` with a translucent backdrop, the empty "Action" sheet covers the whole app on top of everything except the identity splash. `selectedInventory` is null, so Confirm no-ops; the only escape is Cancel (`closeDescActionSheet` removes `.active`, which has no effect on visibility here) — leaving the user stuck behind the overlay.
+
+The `display:flex; align-items:flex-end` is only needed to dock the panel to the bottom *while open*. Fix: remove `display:flex` from the base rule at line 1370 (keep `align-items:flex-end`); the existing `#descActionSheet.active { display:flex; }` at line 1385 already shows it on activation, and with the base override gone `.mobile-sheet { display:none }` will hide it when inactive on every viewport. `#descActionSheet` is the only sheet with an id-level `display` override — `#identitySheet` (1387) sets background only and is unaffected.
+
+#### Note · Index.html:587,1351,3186 · Swipe-delete geometry, scroll-lock state machine, and sheet z-index ladder all trace clean
+
+Stories traced through this section's CSS into their JS drivers: **Delete inventory item, View item details, Combine duplicate, Quick-adjust currency/delerium, Give/Sell/Remove (description sheet), Create/Edit note**.
+
+- **Swipe-delete geometry (`.inventory-delete-action`, 587):** CSS clamps the revealed action to `width:30%; min-width:168px; max-width:240px`. The renderer (3934/3950) sets the action's width inline to `getSwipeOpenPx()` and slides the card by the *same* value; `getSwipeOpenPx()` (3186) returns `Math.max(168, Math.min(240, round(innerWidth*0.3)))` — identical clamp. So the slid gap always equals the button width: no overhanging/dead tap zone, no partially-off-screen button. `resting()` (3204) reuses the same function, so a re-render of an already-swiped row keeps geometry consistent.
+- **Scroll-lock state machine (`body.app-modal-open`, 110):** centralized through `syncModalOpenState()` (3483), which recomputes the class from `document.querySelector('.mobile-sheet.active')`. Closing one sheet while another is still open keeps the body locked (no premature scroll unlock). `openDiceCalc` (3580) adds the class directly, but the dice button lives in the header and is unreachable while any sheet overlay is up, so it can't stack over a sheet; `closeDiceCalc` returns through `syncModalOpenState`. `confirmIdentity` (4603) removes the class directly, but the identity splash is exclusive (first-open, z-index 90), so no other sheet is open underneath it.
+- **Sheet z-index ladder:** descriptionSheet 70 (base) < sellItemSheet/giveItemSheet/payReasonSheet 80 < descActionSheet 81 < identitySheet 90. Every sub-sheet opens above its parent (e.g. description → descActionSheet 81 > 70; quick-edit 70 → giveItemSheet 80), so no later-opened sheet renders behind its launcher.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
