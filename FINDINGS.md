@@ -25,9 +25,86 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html lines 1–1500, HTML structure/CSS)
+
+**Scope note.** The cursor's "section 7 = Index.html 1–1500" is pure CSS: `</style>`
+is at Index.html:2174 and `<body>` at 2177, so the assigned range contains **zero**
+write paths or interactive JS — only design tokens, layout, and component styling.
+I therefore traced every user story by following the CSS for the component each story
+renders through, and read past 1500 where the styling mechanism demanded it (the
+sheet-visibility override lives at 1623–1664). Components/stories traced: Edit item
+(`#inventorySheet`), View details / Give / Sell / Remove (`#descriptionSheet`,
+`#descActionSheet`), Quick-adjust currency/delerium (`#quickEditSheet`), Combine
+duplicate (`#combineSheet`), Create/Edit note (`#noteFormSheet`), Receive/Pay gold
+(`#goldSheet`, `#payReasonSheet`), Receive/Sell crystals (`#deleriumSheet`), Sell
+batch (`#sellBatchSheet`, `#sellItemSheet`, `#giveItemSheet`), Identity first-open
+(`#identitySheet`), Delete inventory item (swipe-delete `.inventory-delete-action`).
+Every story in the catalog surfaces through a `.mobile-sheet` styled in this section,
+so the section's one behaviorally-critical surface is the sheet show/hide machinery.
+
+#### RISK · Index.html:1351,1651 · Sheet visibility on the GAS webview depends on a hand-maintained per-ID allow-list — silent total break if an entry is ever missed
+
+The base rule `.mobile-sheet.active { display: block }` (1358) is **not** marked
+`!important`. The desktop media query `@media (min-width: 700px)` then declares
+`.mobile-sheet { display: none !important }` (1651) — and per README's CSS notes the
+**iOS GAS webview renders at ~980px CSS width**, so this query matches on the *primary
+target device*, not just real desktops. The only thing that makes any sheet appear on
+the webview is the explicit per-ID re-enable block at 1652–1664
+(`#descriptionSheet.active { display: block !important }`, etc.). Because `!important`
+in the media query outranks the non-`!important` base `.active` rule, a sheet that is
+NOT listed there can never open at ≥700px — it would fail **silently** (no error, the
+confirm/open handler runs, state flips, but nothing renders), and only on the device
+players actually use.
+
+I verified all 13 current `.mobile-sheet` elements (`#inventorySheet`,
+`#descriptionSheet`, `#quickEditSheet`, `#noteFormSheet`, `#combineSheet`, `#goldSheet`,
+`#deleriumSheet`, `#sellItemSheet`, `#sellBatchSheet`, `#giveItemSheet`,
+`#payReasonSheet`, `#descActionSheet`, `#identitySheet`) **are** present in the
+allow-list — so there is no live bug today. The RISK is the fragility: this is a
+maintenance landmine where adding a new sheet without touching line 1652–1664 breaks
+that entire flow on the webview with no diagnostic. Suggested fix: make the base rule
+authoritative instead of the per-ID list — e.g. drop the blanket
+`.mobile-sheet { display: none !important }` and keep `display:none` only on
+`.mobile-sheet:not(.active)`, or move the active-display rule to
+`.mobile-sheet.active { display: block !important }` so every sheet shows by class
+alone. Either removes the need for the 13-line allow-list and the chance of forgetting it.
+
+#### IDEA · Index.html:513 · In-flight spinner only renders on `.primary`/`.success` buttons — destructive confirms (Remove, edit-form Delete, Sell-armed) give weaker "working…" feedback
+
+The disabled-state spinner is scoped to `button.primary:disabled::after` and
+`button.success:disabled::after` (513–519). Confirm buttons styled `.danger`,
+`.secondary`, or `.sell-confirm-armed` (504) get only `opacity:.5` (510) when disabled
+during a round-trip. So on exactly the flows the audit cares most about — **Remove
+item** and **edit-form Delete** (`.danger`) and **Sell item** (`.sell-confirm-armed`,
+its own gradient, no spinner) — a slow `google.script.run` leaves the button merely
+dimmed with no motion, which on a laggy GAS call reads as "frozen / did my tap
+register?" and invites a second tap. The primary-styled confirms (Quick-adjust Confirm,
+Add, descAction Confirm) all show the spinner, so the feedback is inconsistent across
+adjacent flows. Suggested improvement: extend the `::after` spinner rule to
+`button.danger:disabled` and `button.sell-confirm-armed:disabled` (or add a shared
+`.is-busy` class the JS toggles), so every confirm path shows the same in-flight
+affordance. Stories: Sell item, Remove item, Delete inventory item.
+
+#### Note · Index.html:179,1352,1585,1941 · Overlay stacking is internally consistent — no tab-switch-behind-modal hole
+
+Traced the z-index ladder against the navigate-away / modal scenarios. `.app-header`
+22 (179) < `.bottom-nav` 30 (1585) < `.dice-overlay` 50 (1941) < `.mobile-sheet` 70
+(1352), with per-sheet inline bumps (`#sellItemSheet`/`#giveItemSheet` 80,
+`#sellBatchSheet` 82, `#descActionSheet` 81, `#payReasonSheet` 80, `#identitySheet`
+90). Every sheet is `position:fixed; inset:0` and sits above the nav, so an open sheet
+physically covers the bottom-nav and a user cannot tab-switch *through* a modal — the
+"tab switch during in-flight" race is blocked at the CSS layer for any flow that runs
+inside a sheet. `pointer-events:none` is used only where intended
+(`.scope-slider-indicator` 326, `.note-card.note-pending` 2151 = saving-state lockout,
+the `html::before/::after` wallpaper layers). `is-phone` does not lower the nav's
+z-index (1793 leaves it at 30). Global `button { width:100% }` (474) is correctly
+overridden where buttons sit inline (`.resource-pay button { width:auto }` 669,
+`.header-reload`/`.delerium-counter-btn` fixed widths). No behavioral defect found in
+the assigned range beyond the two items above.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
