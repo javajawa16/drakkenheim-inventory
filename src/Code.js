@@ -3735,7 +3735,10 @@ function apiAdjustInventory(payload) {
 
     const quickType = classifyQuickEdit_(found.rowObj);
 
+    if (delta === 0) return { ok: true, message: 'No change.', item: sanitizeInventoryForClient_(found.rowObj) };
+
     const oldQty = Number(found.rowObj['Qty'] || 0);
+    if (oldQty + delta < 0) throw new Error(`Cannot remove more than the ${oldQty} currently held.`);
     const newQty = validateQuantity_(oldQty + delta);
     const rowObj = Object.assign({}, found.rowObj, { 'Qty': newQty });
 

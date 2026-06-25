@@ -25,9 +25,32 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 6. Code.js lines 3900+ (remaining server utilities, helpers)
+Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
 
 ## Sessions
+
+### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
+
+> **✅ RESOLUTION — all findings fixed (2026-06-24).**
+> - **BUG `Index.html:7526`** — FIXED: removed `quickEditInFlight = false` from `closeQuickEditPanel`; handlers own the guard and reset it on resolve.
+> - **RISK `Code.js:3761`** — FIXED: `apiAdjustInventory` early-returns `{ok:true}` when `delta === 0`; no write or ledger entry emitted.
+> - **IDEA `Code.js:3739`** — FIXED: domain-specific error thrown before `validateQuantity_` when `oldQty + delta < 0`.
+
+#### BUG · Index.html:7526 · Cancel during in-flight quick-adjust clears the guard → silent commit + double-apply ✅ FIXED
+
+**Story: Quick-adjust currency/delerium — Cancel mid-flight.** `closeQuickEditPanel` (7524) unconditionally set `quickEditInFlight = false`, nulled `selectedQuickEdit`, and hid the sheet regardless of whether a `google.script.run` was still pending. Two consequences: (1) the server write still lands silently with no user feedback (the "cancelled" adjustment actually commits); (2) with the guard cleared, the user could reopen the same card and tap Confirm again, firing a second `apiAdjustInventory` — a "add 100 gp" becomes +200, "remove 3 crystals" becomes −6. Fix: removed the `quickEditInFlight = false` line from `closeQuickEditPanel`. Both `finishSuccess` and `fail` handlers already reset the guard before calling `closeQuickEditPanel`, so no change to the normal flow.
+
+#### RISK · Code.js:3761 · `apiAdjustInventory` writes a phantom row + zero-qty ledger entry when delta is 0 ✅ FIXED
+
+**Story: Quick-adjust — add/remove path with amount = 0.** Client only rejected `amount < 0`, so `delta: 0` reached the server, which re-wrote the unchanged row and appended a noise `ADJUST qty:0` ledger entry. `apiSetItemQuantity` already guarded with `qty !== oldQty`. Fix: early-return `{ok:true, message:'No change.'}` in `apiAdjustInventory` when `delta === 0`.
+
+#### IDEA · Code.js:3739 · Over-removing currency surfaces the generic numeric-range error ✅ FIXED
+
+**Story: Quick-adjust — remove more than held.** `validateQuantity_(oldQty + delta)` threw `"Quantity must be between 0 and 999999."` when the result was negative — unhelpful in a gold/delerium context. Fix: explicit domain check (`if (oldQty + delta < 0) throw new Error('Cannot remove more than the N currently held.')`) before the generic validator.
+
+#### Note · Code.js:3830 · Quick-adjust lock + rollback discipline is clean
+
+`apiAdjustInventory` and `apiSetItemQuantity` both acquire the document lock with `tryLock(10000)`, release in a `finally`, and release safely on every path. Client `finishSuccess`/`fail` handlers both reset `quickEditInFlight`, re-enable Confirm, preserve typed amount/note on failure for retry, and apply the server row even when the user navigated away. The single defect in this flow is the Cancel/in-flight interaction logged above (now fixed).
 
 ### 2026-06-23 (run 57) — Sections audited: 5 (Code.js 2301–3900, Index.html 4200–4800)
 

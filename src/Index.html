@@ -7523,7 +7523,9 @@
 
     function closeQuickEditPanel() {
       selectedQuickEdit = null;
-      quickEditInFlight = false;
+      // Do NOT reset quickEditInFlight here — if Cancel is tapped mid-flight the
+      // handler still owns the guard and will reset it on resolve. Resetting here
+      // would let the user reopen the panel and double-apply the adjustment.
       setQuickEditorOpen(false);
       document.querySelectorAll('.inventory-card').forEach(c => c.classList.remove('selected'));
     }
