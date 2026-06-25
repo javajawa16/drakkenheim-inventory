@@ -25,9 +25,68 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500: HTML structure, CSS — sheet show/hide, swipe, layout)
+
+Traced every story whose UI is governed by this CSS range — sheet-based flows
+(View item details → description sheet → descActionSheet; Give / Sell / Remove;
+Quick-adjust → quickEditSheet; Identity selection; Notes create/edit →
+noteFormSheet + swipe cards; Combine; Sell batch; Gold/Delerium ledger) plus
+the inventory-card swipe-delete and bottom-nav. The section is pure CSS in
+`<style>`, so the technique applied was: which `display`/`z-index`/specificity
+rule decides visibility for each state (idle / open / closing), and can any
+state get stuck or have a sheet/backdrop cover interactive content.
+
+#### RISK · Index.html:1367 · `#descActionSheet` base `display:flex` (ID specificity) defeats `.mobile-sheet{display:none}` below 700px
+
+**Stories: View item details, Give item, Sell item, Remove item** — all route
+through the bottom action sheet `#descActionSheet`, which is shown/hidden purely
+by toggling the `.active` class (Index.html:6949 add / 6954 remove). Its base
+rule (1367–1370) declares `display:flex; align-items:flex-end` at **ID
+specificity (1,0,0)**, which outranks `.mobile-sheet { display:none }` (class,
+0,1,0) at 1351–1356. So when the sheet is *not* active, the ID rule still wins
+and the sheet renders — its full-screen semi-transparent backdrop
+(`rgba(6,10,20,.55)`) plus the bottom panel cover the inventory and swallow
+taps. This is masked **only** inside the `@media (min-width:700px)` block
+(1651–1653), which adds `.mobile-sheet { display:none !important }` and
+`#descActionSheet.active { display:flex !important }` — an `!important` hide
+that finally outranks the ID rule. Because the iOS GAS webview reports ~980px
+CSS width, production hits the ≥700px branch and the leak stays hidden, so the
+happy path on the deployed target is unaffected. Exposure is any viewport
+**<700px** (narrow desktop window, split-screen, some Android browsers opening
+the web-app URL directly): on load the description action sheet appears
+permanently open over the whole app, and because it isn't `.active`, the
+close handler / tap-outside dismiss has nothing to remove that would hide it —
+the backdrop blocks all interaction with no escape short of widening the
+window. `#descActionSheet` is the **only** sheet with a base `display`
+declaration at ID specificity (every other sheet — descriptionSheet,
+quickEditSheet, identitySheet, noteFormSheet, goldSheet, payReasonSheet,
+giveItemSheet, deleriumSheet, sellItemSheet, sellBatchSheet, combineSheet,
+inventorySheet — sets `display` only via `.mobile-sheet`/`.active`), so it is
+the only one affected. Fix: scope the base to `#descActionSheet.active {
+display:flex; align-items:flex-end }` (drop the always-on declaration), or add
+`!important` to `.mobile-sheet { display:none }` so the class-level hide is
+never silently outranked.
+
+#### Note · Index.html:1358 · Sheet show/hide and bottom-nav reveal are otherwise sound
+
+The `.mobile-sheet` / `.active` toggle is consistent across all sheets except
+the descActionSheet case above; on the ≥700px (production) branch the
+`display:none !important` base + per-sheet `#xSheet.active { display:… !important }`
+overrides leave no stuck/visible state when `.active` is removed, and on the
+sub-700px branch every non-descActionSheet sheet hides correctly via the class
+rule (no ID override). The Party-Notes 3rd bottom-nav tab starts inline
+`display:none` with the nav at `grid-template-columns:1fr 1fr` (2 tabs); on
+identity resolve `applyIdentity` (4514–4519) reveals the tab and upgrades the
+grid to `1fr 1fr 1fr` via inline style — the inline `gridTemplateColumns`
+outranks both the phone and desktop CSS, so the third tab lays out correctly in
+all modes (no behavioral defect). `body.app-modal-open { overflow:hidden }`
+(110) is driven by `syncModalOpenState` from `.mobile-sheet.active`, so a leaked
+non-active descActionSheet would *not* scroll-lock the body — consistent with
+the RISK above being a visual/interaction block rather than a scroll-lock trap.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
