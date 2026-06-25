@@ -25,9 +25,28 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML head + CSS)
+
+Section 1–1500 is entirely the `<style>` block (design tokens → identity-card CSS); no JS or body markup falls in range. Traced the interactive elements these rules style, reading their handlers out of range to decide whether any CSS rule produces a *behavioral* (not cosmetic) defect. Stories touched: **Sell item / Sell Items batch**, **Remove item**, **Delete inventory item**, **Create note** (pending state), and the cross-cutting **modal scroll-lock** behavior.
+
+#### IDEA · Index.html:513 · In-flight spinner is scoped to `.primary`/`.success` only — Sell/Remove/Delete buttons give no busy signal
+
+The animated busy spinner is `button.primary:disabled::after, button.success:disabled::after { … btn-spin }` (lines 513–519). Several write buttons that go disabled during their server round-trip are **not** in that selector, so their only in-flight signal is the global `button:disabled { opacity:.5 }` (line 510):
+- **Sell Items batch** — `#sellBatchConfirmBtn` is `class="secondary"` (line 5742); `confirmSellBatch` disables it (line 5774). No spinner.
+- **Sell item / Remove item** (description sheet) — `#descActionConfirmBtn` arms to `class="sell-confirm-armed"` via `_armSellBtn` (line 2900), which strips `primary/success/danger`; the in-flight disable then matches no spinner rule.
+- **Delete inventory item** — the swipe `.inventory-delete-action` (line 587) has its own `.deleting` color state but no spinner.
+
+Result: across these stories the button feedback is inconsistent with **Add item** (primary → spinner) and **Got Paid** (success → spinner). Each of these flows does set a `status`/`sellBatchStatus` line ("Selling…", "Saving…"), so feedback isn't absent — just inconsistent and easy to miss on the button itself, inviting a double-tap perception (the actual double-tap is separately guarded by `descActionInFlight` / button-disable, so no data bug). Suggest extending the spinner rule to `button.secondary:disabled::after`, `button.danger:disabled::after`, and `button.sell-confirm-armed:disabled::after`, or introduce a shared `.is-busy` class applied at the call sites.
+
+#### Note · Index.html:1288/2151 · Notes pending-state and modal scroll-lock traced clean
+
+**Create note — optimistic pending card.** README promises in-flight create cards are "dimmed + non-clickable". The **live** Party Notes render (line 4141) emits `class="note-card … note-pending"`, and `.note-card.note-pending` (line 2151) sets `opacity:.6; pointer-events:none` — matches the promise; the "Saving…" badge (line 4146) is present. The similarly-named `.notes-note.pending` in this section (line 1288) sets `opacity:.72` only (no `pointer-events`), but it belongs to the dormant v1 `CAMPAIGN_NOTES_FEED` UI — no live `class="notes-note"` markup exists — so its missing `pointer-events` is not a live defect (legacy backend is a known retire-candidate TODO).
+
+**Modal scroll-lock (`body.app-modal-open { overflow:hidden }`, line 110).** Lock management is centralized through `syncModalOpenState()` (line 3483), which recomputes the class from `Boolean(document.querySelector('.mobile-sheet.active'))`; all 28 sheet open/close sites call it, so closing sheet B while sheet A is open keeps the body correctly locked. Two sites use a blind `add('app-modal-open')` instead — `confirmIdentity` (4575, paired blind `remove` at 4603, boot-only single sheet → safe) and `openDiceCalc` (3580). `#diceOverlay` is gated by `.open`, not `.mobile-sheet.active`, so `syncModalOpenState()` does not count it; `closeDiceCalc` (3585) reconciles correctly on its own. No reachable trigger fires `syncModalOpenState()` while the dice calc is open (its overlay covers the header, blocking any other sheet from being opened), so the divergence is latent, not an active bug — but it is the one spot that would break if a future flow could close a sheet while the dice calc is up. No stuck-lock state found.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
