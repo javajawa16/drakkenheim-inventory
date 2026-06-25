@@ -4612,9 +4612,11 @@
           identityChoiceSaving = false;
           if (res && res.ok) applyIdentity(res, { forceDefaultScope: true });
         })
-        .withFailureHandler(err => {
+        .withFailureHandler(() => {
           identityChoiceSaving = false;
-          setMainStatus(`<span class="error">Could not remember character: ${escapeHtml(err.message || err)}</span>`);
+          // Identity is already applied locally and saved to localStorage, so
+          // the user is correctly logged in. Only the server-side profile row
+          // (Last Seen) failed — not worth alarming them about.
         })
         .apiSetMyCharacter(character, navigator.userAgent || '');
     }

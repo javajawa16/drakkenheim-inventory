@@ -246,7 +246,8 @@ function doGet(e) {
     Logger.log('doGet failed: ' + err.message);
     return HtmlService
       .createHtmlOutput('<p style="font-family:sans-serif;padding:2em">Inventory is temporarily unavailable — please reload in a moment.</p>')
-      .setTitle('Drakkenheim Inventory');
+      .setTitle('Drakkenheim Inventory')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
 }
 
@@ -698,25 +699,16 @@ function apiSellInventoryBatch(payload) {
     // Process highest rows first so row-number shifting only affects already-processed rows
     resolved.sort((a, b) => b.rowNumber - a.rowNumber);
 
-    const soldNames = [];
-    let totalUnitsSold = 0;
-    for (const { rowNumber, rowObj, sellQty, rowQty, itemName } of resolved) {
-      if (sellQty >= rowQty) {
-        sheet.deleteRow(rowNumber);
-      } else {
-        const newQty   = rowQty - sellQty;
-        const valueGp  = Number(rowObj['Value GP']) || 0;
-        writeInventoryRow_(sheet, headers, rowNumber,
-          { ...rowObj, 'Qty': newQty, 'Total Value GP': newQty * valueGp });
-      }
-      soldNames.push(itemName);
-      totalUnitsSold += sellQty;
-    }
-
-    const sellNote = note || `Sold ${totalUnitsSold} unit${totalUnitsSold !== 1 ? 's' : ''}`;
-
-    const uniqueNames = [...new Set(soldNames)];
-    const soldLabel = uniqueNames.length === 1 ? uniqueNames[0]
+    // Pre-compute aggregates without touching the sheet so we can credit gold
+    // before deleting any inventory rows. If the gold append throws (quota/
+    // timeout), nothing has been deleted — clean abort. If a delete/update
+    // fails mid-loop after gold is credited, the party keeps both gold and
+    // some items; that's safe to re-attempt without double-charging.
+    const soldNames      = resolved.map(r => r.itemName);
+    const totalUnitsSold = resolved.reduce((s, r) => s + r.sellQty, 0);
+    const sellNote       = note || `Sold ${totalUnitsSold} unit${totalUnitsSold !== 1 ? 's' : ''}`;
+    const uniqueNames    = [...new Set(soldNames)];
+    const soldLabel      = uniqueNames.length === 1 ? uniqueNames[0]
       : uniqueNames.length <= 3 ? uniqueNames.join(', ')
       : `${totalUnitsSold} items`;
 
@@ -746,6 +738,18 @@ function apiSellInventoryBatch(payload) {
         'Inventory ID': le.inventoryId, 'Item': le.item,
         'Notes': le.notes, 'Character': le.character
       });
+    }
+
+    // Mutate inventory rows after gold is safely credited.
+    for (const { rowNumber, rowObj, sellQty, rowQty } of resolved) {
+      if (sellQty >= rowQty) {
+        sheet.deleteRow(rowNumber);
+      } else {
+        const newQty  = rowQty - sellQty;
+        const valueGp = Number(rowObj['Value GP']) || 0;
+        writeInventoryRow_(sheet, headers, rowNumber,
+          { ...rowObj, 'Qty': newQty, 'Total Value GP': newQty * valueGp });
+      }
     }
 
     auditWrite_({ userEmail, action: 'SELL_BATCH', itemName: soldNames.join(', '),

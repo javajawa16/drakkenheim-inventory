@@ -470,7 +470,7 @@ total stays correct — only the ledger *history* keeps a phantom entry. Same cl
 as the documented "Undo Last Pay does not reverse RESOURCE_LEDGER" TODO; recorded
 for completeness, not a new behavioral total-desync.
 
-#### IDEA · Index.html:8168 · Combine-suggestion sheet can pop over an unrelated tab after navigate-away
+#### IDEA · Index.html:8168 · Combine-suggestion sheet can pop over an unrelated tab after navigate-away ✅ FIXED
 Add-then-combine story, navigate-away case. If the user taps Add and switches to
 the Gold/Notes tab before the round-trip returns, the success handler still runs
 `findDuplicateInventoryCandidate` → `showCombineChoice`, which adds `.active` to
@@ -552,7 +552,7 @@ Fix: give `showIdentitySheet` a terminal empty/error state with a Retry button
 when `chars.length === 0`, and have `loadCharacters`' failure handler re-render
 the identity sheet (if active) into that error state instead of only logging.
 
-#### RISK · Code.js:703 · apiSellInventoryBatch partial failure mutates the sheet but reports total failure → silent data loss on next sync
+#### RISK · Code.js:703 · apiSellInventoryBatch partial failure mutates the sheet but reports total failure → silent data loss on next sync ✅ FIXED
 
 Stories: **Sell item / Remove item** (description sheet) and **Sell Items batch**.
 The write loop (703–714) deletes/updates resolved rows one at a time, then appends
@@ -573,7 +573,7 @@ the gold row first (so a credit failure aborts before any inventory is destroyed
 or return a partial-success payload listing which `inventoryId`s were actually
 processed so the client can reconcile instead of blanket-rolling-back.
 
-#### IDEA · Index.html:4435 · confirmIdentity failure shows an alarming error for an operation that actually persisted locally
+#### IDEA · Index.html:4435 · confirmIdentity failure shows an alarming error for an operation that actually persisted locally ✅ FIXED
 
 Story: **Set character**. On `apiSetMyCharacter` failure (4435–4438) the optimistic
 identity has already been applied and `drakkenheim_character` written to
@@ -645,7 +645,7 @@ not a catalog story). Execution-trace/state-machine: `requireAdminUser_` runs be
 (`CLEAN_LIB_NEXT_READ_ROW/WRITE_ROW/COPIED_COUNT`) with `SpreadsheetApp.flush()`, so a 4.25-min
 timeout-abort resumes cleanly on the next run — clean resumable-batch trace.
 
-#### RISK · Code.js:247 · doGet error fallback omits setXFrameOptionsMode(ALLOWALL)
+#### RISK · Code.js:247 · doGet error fallback omits setXFrameOptionsMode(ALLOWALL) ✅ FIXED
 The happy path sets `.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)` (244),
 which is only meaningful if the web app is loaded inside an iframe (e.g. embedded in a
 campaign page / Google Site / the Wallpaper). The `catch` fallback (247–249) builds its
