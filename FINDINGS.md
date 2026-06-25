@@ -25,9 +25,74 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: Index.html lines 1–1500 (HTML structure, CSS) — re-audit of section first covered in run 47
+
+Section 1–1500 is entirely the `<head>` design-token + CSS block (no `<body>`
+markup or `google.script.run` calls in range). Audit focused on CSS rules that
+drive **behavioral state**, tracing each into the JS that toggles it. Re-audit of
+the same range run 47 covered: confirmed run 47's fixes hold (sell-batch confirm
+now swaps to `.secondary` while idle, 5636–5637) and found **one still-live
+instance of the same disabled-spinner anti-pattern that run 47's sell-batch finding
+did not catch** — on the Give-to-character flow.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every CSS-driven UI state):
+- **Give item to character** (description sheet → Give to… → pick character →
+  confirm) — bug below, at the "pick character" step.
+- **Sell item / Remove item** (description action sheet, `sell`/`remove` modes) —
+  confirm button is left enabled at sheet-open (`openDescActionSheet` only disables
+  for `mode === 'give'`, 6945), so no idle spinner; clean.
+- **Quick-adjust currency/delerium** — `confirmQuickEdit` (7573–7612) disables the
+  confirm button only between the server send and both handlers; correct in-flight
+  spinner, re-enabled on success and failure. Clean.
+- **Sell Items batch** (treasurer) — `updateSellBatchCount` (5630–5637) now toggles
+  `.success`/`.secondary` with `totalUnits`, so the run-47 idle-spinner RISK
+  (Index.html:5546) is resolved. Clean.
+- **Receive / Sell crystals** — `updateDeleriumButtonStates` (4880–4898) swaps
+  buttons to `.secondary` while validation-disabled; no spinner. Clean.
+- **All mobile-sheet scroll-lock flows** — `syncModalOpenState` (3482–3484)
+  recomputes `body.app-modal-open` from "is any `.mobile-sheet.active`" on every
+  open/close, so stacked sheets keep scroll locked until the last closes; the two
+  direct `add/remove('app-modal-open')` calls (identity confirm 4603, identity open
+  4575) run only when no other sheet can be stacked. Confirms run 47's clean trace.
+
+#### RISK · Index.html:513 · "Give to…" confirm button spins an infinite loader while idle, waiting for the user to pick a recipient
+
+**Story: Give item to character — at the "pick character" step.** The CSS rule
+`button.primary:disabled::after` (513–519) attaches an infinite `btn-spin` loader
+to every disabled `.primary` button. `descActionConfirmBtn` is declared
+`class="primary"` (2774). When the user opens the description action sheet in give
+mode, `openDescActionSheet('give')` sets `confirmBtn.disabled = true` (6945) —
+intentionally, so the user must select a recipient first — but never swaps the
+class. Net effect: the Confirm button sits at 0.5 opacity with a spinner whirring
+next to "Confirm" the entire time the user is reading the list of give-target cards,
+falsely signalling that a network operation is in flight before they have tapped
+anything. The spinner only stops once `selectDescGiveTarget` re-enables the button
+(7033). This is the **exact same disabled-spinner trap** run 47 flagged for the
+sell-batch confirm (RISK Index.html:5546, since fixed) and that the delerium buttons
+guard against — but run 47 traced the descAction give/sell sheets and missed this
+instance because, unlike sell-batch, it only manifests in give mode (sell/remove/add
+modes leave the button enabled at open). Fix: mirror the established pattern — set
+`descActionConfirmBtn` to `secondary` while disabled in give mode and back to
+`primary` in `selectDescGiveTarget`, OR (cleaner, fixes the class of bug everywhere)
+gate the spinner pseudo-element on an explicit `.is-loading` class set only during
+the in-flight write rather than on `:disabled`.
+
+#### Note · Index.html:513 · Disabled-spinner audit across all primary/success buttons — only give-confirm remains
+
+Swept every `.primary`/`.success` button against the 513–519 spinner CSS to find
+any other button disabled-at-rest (waiting on user input rather than a server
+round-trip): `saveInventoryButton`/`mobileInventorySaveButton` (2307/2525),
+`addSubmitBtn` (2451, `.success`), `sellItemConfirmBtn` (2720), `quickSheetConfirmBtn`
+(2605), `quickDesktopConfirmBtn` (2244) are all disabled only inside their write
+handlers (correct in-flight spinner), and `sellBatchConfirmBtn` / the delerium
+buttons class-swap to `.secondary` while idle. `descActionConfirmBtn` in give mode
+(above) is the sole remaining case where a `.primary`/`.success` button is disabled
+for a non-loading reason while keeping its spinner-triggering class.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
