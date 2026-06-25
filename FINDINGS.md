@@ -25,9 +25,34 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML head + CSS; mobile-sheet show/hide state machine traced across all sheet overlays)
+
+#### BUG · Index.html:1367 · `#descActionSheet` has an unconditional `display:flex` — the Sell/Give/Remove action sheet is permanently visible below 700px CSS width
+
+**Stories: Sell item / Give item to character / Remove item (all reached via the description sheet → descActionSheet).** Every mobile-sheet overlay in the app is hidden by the top-level rule `.mobile-sheet { display: none; }` (line 1351) and shown by `.mobile-sheet.active { display: block; }` (line 1358). `#descActionSheet` is the **only** sheet that breaks this contract: line 1367 declares
+
+```css
+#descActionSheet { background:…; backdrop-filter:…; display: flex; align-items: flex-end; }
+```
+
+with `display: flex` set **unconditionally** (not scoped to `.active`). By specificity, the ID selector `#descActionSheet` (1,0,0) beats `.mobile-sheet` (0,1,0), so the `display:none` base rule is overridden and the sheet is `display:flex` **whether or not `.active` is present**.
+
+The only thing that hides it when inactive is `.mobile-sheet { display: none !important; }` (line 1651) — but that rule lives inside `@media (min-width: 700px)`, the *only* media query in the stylesheet (line 1623). On the iOS GAS webview the viewport reports ~980px (README "CSS / Layout Architecture Notes"), so the query matches and the bug is masked. But on any viewport **below 700px CSS width** — a player opening the `/exec` link in normal mobile Safari/Chrome (device-width ≈ 390–430px) rather than the 980px embedded webview, Android, a narrow desktop window, or iPad split-screen — the media query does not apply and the cascade resolves to `display:flex`.
+
+Consequences at <700px:
+- On app load, before any item is selected, the (empty/stale) action sheet is docked at the bottom of the screen with a blurred backdrop, intercepting taps over the inventory list.
+- `closeDescActionSheet()` (line 6953) only removes `.active`; with the base `display:flex` still winning, the sheet **cannot be dismissed** — navigate-away/return leaves it stuck open, and `body.app-modal-open` (line 110, set by `syncModalOpenState`) may keep scroll locked.
+- `is-phone` (set via `(pointer: coarse)`) does **not** rescue it — there is no `html.is-phone .mobile-sheet { display:none }` rule.
+
+Fix: scope the display to active — drop `display: flex` from line 1367 (keep `background` / `backdrop-filter` / `align-items: flex-end`, which are harmless while hidden); the correct `#descActionSheet.active { display: flex; }` already exists at line 1385. This matches every other sheet, which relies solely on `.mobile-sheet.active`.
+
+#### Note · Index.html:1351 · Mobile-sheet show/hide state machine is otherwise clean
+
+Traced the open/close state machine for the full overlay system (`descriptionSheet`, `goldSheet`, `payReasonSheet`, `giveItemSheet`, `deleriumSheet`, `sellItemSheet`, `sellBatchSheet`, `combineSheet`, `inventorySheet`, `quickEditSheet`, `noteFormSheet`, `identitySheet`). All of these correctly toggle visibility through the top-level `.mobile-sheet` / `.mobile-sheet.active` pair (lines 1351/1358) and are hidden-by-default at every viewport; the `@media (min-width:700px)` block (1651–1664) re-asserts the same `.active`-scoped visibility with `!important` for the desktop/980px-webview path. `#payReasonSheet` (z-index 80) and `#descActionSheet` (inline z-index 81) sit above the base 70 so the description→pay/action layering is correct. The lone defect in this section is the unconditional `display:flex` on `#descActionSheet` logged above; no other overlay shares it.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
