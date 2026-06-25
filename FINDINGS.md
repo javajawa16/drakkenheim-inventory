@@ -25,11 +25,25 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
 
-### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500: design tokens, CSS, mobile-sheet/modal layering)
+
+Section is almost entirely CSS + design tokens (no HTML body, no JS in range). Per audit rules, style/naming/dead-code issues are out of scope; only CSS that produces a *behavioral* bug is reported. Stories traced through the components defined here: **View item details / Give to… / Sell for Gold / Remove** (descActionSheet), **Quick-adjust currency/delerium** (quickEditSheet), **Pay gold** (payReasonSheet), **Identity selection** (identitySheet), plus the global modal scroll-lock (`body.app-modal-open`, line 110) and the dice calculator overlay. Focus areas for behavioral CSS: z-index stacking, display-toggle specificity, pointer-events traps on invisible overlays, and scroll-lock lifecycle.
+
+#### RISK · Index.html:1370 · `#descActionSheet` base rule sets `display:flex`, defeating `.mobile-sheet { display:none }` on any sub-700px viewport
+
+The base rule `#descActionSheet { … display: flex; align-items: flex-end; }` (line 1370) collides with the modal's hide rule `.mobile-sheet { display: none }` (line 1352). `#descActionSheet` is an **ID** selector (specificity 0,1,0,0) and `.mobile-sheet` is a **class** (0,0,1,0), so the ID wins: at rest (no `.active`) `#descActionSheet` computes to `display:flex` — i.e. **visible**. Every other sheet (payReasonSheet, goldSheet, deleriumSheet, combineSheet, etc.) is hidden correctly at rest because none of them re-declare `display` at ID specificity; only descActionSheet does.
+
+Why production looks fine: the iOS GAS webview renders at ~980px CSS width, so the `@media (min-width:700px)` block matches and applies `.mobile-sheet { display:none !important }` (line 1651), which the base rule cannot beat — descActionSheet is hidden, and `#descActionSheet.active { display:flex !important }` (1653) re-shows it. The leak therefore only manifests when the desktop media block does **not** apply, i.e. any viewport reporting **< 700px CSS width**: a narrowed desktop browser window (no coarse pointer → `html.is-phone` not set, no `!important` hide), or an Android/other webview that renders at true device width (~360–412px) where `html.is-phone` *is* set but `html.is-phone` defines no `.mobile-sheet` display rule. In those cases the description action sheet's semi-transparent blurred backdrop (`rgba(6,10,20,.55)` + blur) and its bottom-anchored action panel (Sell for Gold / Give to… / Remove) sit permanently over the Inventory tab — **Story "View item details" and its child actions are broken before the user ever taps a card**, and the persistent backdrop also blocks taps on the inventory list behind it.
+
+Fix: remove `display:flex` from the base `#descActionSheet` rule (keep only `background`/`backdrop-filter`/`align-items: flex-end`). At rest `.mobile-sheet { display:none }` then applies, and the existing `#descActionSheet.active { display:flex }` (line 1385) plus the desktop `!important` variant (1653) both already supply `display:flex` when active. Net behavior in the 980px webview is unchanged; the sub-700px leak disappears.
+
+#### Note · Index.html:110,1483,3483 · Modal scroll-lock lifecycle and z-index ladder trace clean
+
+Traced the scroll-lock (`body.app-modal-open { overflow:hidden }`, line 110) and modal stacking for all sheet-based stories above. `syncModalOpenState()` (3483) derives the lock from the live DOM — `toggle('app-modal-open', Boolean(querySelector('.mobile-sheet.active')))` — and is called after virtually every sheet open/close (30+ call sites). Because the flag is *derived* rather than ref-counted, it cannot get stuck "on" after a failed/aborted open or a navigate-away that leaves a sheet active: as long as any sheet is genuinely `.active` the lock stays, and the instant the last one closes it clears. z-index ladder is internally consistent and non-overlapping for the intended layering: legacy header 20 / app-header 22 / bottom-nav 30 / dice overlay 50 / mobile-sheet 70 / payReasonSheet 80. The dice overlay (50) sits above the bottom-nav (30), so the nav is un-tappable while the calculator is open — that closes the one navigate-away gap where `openDiceCalc`'s raw `add('app-modal-open')` (3580, dice overlay is not a `.mobile-sheet`) could otherwise be cleared out of sync by a later `syncModalOpenState`; no such path is reachable. Swipe action buttons (`.notes-edit-action`/`.notes-delete-action`, opacity:0 at rest) are not pointer-event-disabled, but z-index 1 keeps them under the card (z-index 2) until a swipe reveals them, so no phantom taps. — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
 > **✅ RESOLUTION — all findings fixed (2026-06-24).**
 > - **BUG `Index.html:7526`** — FIXED: removed `quickEditInFlight = false` from `closeQuickEditPanel`; handlers own the guard and reset it on resolve.
