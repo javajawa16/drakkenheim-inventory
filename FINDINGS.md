@@ -25,9 +25,135 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 6. Code.js lines 3900+ (remaining server utilities, helpers)
+Next section: 7. Code.js lines 3501–end (sync, audit, utilities)
 
 ## Sessions
+
+### 2026-06-25 (run 58) — Sections audited: 6 (Code.js 3658–4045 quick-edit endpoints + tail helpers)
+
+**Stories traced:** *Quick-adjust currency/delerium* (full happy path, per-step
+failure, navigate-away, double-tap, collaborative-sync interference). The
+section under the cursor (Code.js 3900+) is the tail of `apiSetItemQuantity`
+plus the shared quick-edit helpers (`normalizeForClient_`,
+`ensureInventoryHeaders_`, `fillMissingInventoryRarity_`,
+`findInventoryRowById_`). Quick-adjust is the only catalog story that lands
+here, but it routes through three endpoints — `apiGetCurrencyQuickEdit` (3658,
+panel open/verify), `apiAdjustInventory` (3710, add/remove mode) and
+`apiSetItemQuantity` (3830, set mode) — and the client `confirmQuickEdit` /
+`openQuickEditPanel` (Index.html 7420–7630), so the trace reads across all of
+them.
+
+#### RISK · Code.js:3761 · `apiAdjustInventory` writes a phantom ledger entry and bumps sync on a zero-delta adjust
+
+**Story: Quick-adjust currency/delerium → choose Add/Remove → amount 0 →
+Confirm.** The client guard in `confirmQuickEdit` (Index.html:7564) only rejects
+`amount < 0`; **`amount === 0` passes validation**. In Add/Remove mode that
+sends `apiAdjustInventory` with `delta: 0` (or `-0`). On the server, the ledger
+write is gated only on item *type* (`if (quickType === 'currency' ||
+quickType === 'delerium crystal')`, line 3761) — **not on whether the quantity
+actually changed**. So a 0-delta confirm:
+- rewrites the row to identical values (`writeInventoryRow_`, 3758),
+- appends a noise ledger row `ADJUST gold/delerium qty 0` (3776) that surfaces
+  in the gold/delerium ledger history, and
+- calls `bumpSync_('inventory', …)` (3792), forcing **every other client's**
+  20 s poll to run a full `loadInventory(true)` for a write that changed
+  nothing.
+
+The sibling `set`-mode endpoint `apiSetItemQuantity` already guards this
+correctly: its ledger block is `if ((quickType === 'currency' ||
+quickType === 'delerium crystal') && qty !== oldQty)` (3872). The two
+quick-edit endpoints should behave the same. Fix: gate the `apiAdjustInventory`
+ledger append (and ideally the `writeInventoryRow_`/`bumpSync_`) on
+`delta !== 0`, mirroring 3872. Cheapest belt-and-suspenders fix is also to
+reject `amount === 0` (require `amount > 0`) in `confirmQuickEdit` so a no-op
+confirm never reaches the server. Note `apiSetItemQuantity` still rewrites the
+row and bumps sync on a no-op `set` (3869/3904 are unconditional) — only its
+ledger is guarded — so a "set to current value" confirm there is also a wasted
+sync bump, but it produces no phantom ledger row.
+
+#### RISK · Code.js:3742,3859 · Delerium quick-edit "resize" renames the row in place — ledger delta is attributed to the wrong size and an existing same-size row is not merged
+
+**Story: Quick-adjust delerium → change the Size dropdown → Confirm (either
+Add/Remove or Set mode).** `openQuickEditPanel` populates the Size dropdown with
+all seven delerium sizes and pre-selects the row's current size
+(Index.html:7456–7459), but the user can change it. When they do, both quick
+endpoints rename the row to the chosen size while applying the quantity to the
+*old* row:
+- `apiAdjustInventory` (3749-3752): `rowObj['Item'] = 'Delerium ' + size`, qty =
+  `oldQty + delta`.
+- `apiSetItemQuantity` (3859-3864): `rowObj['Item'] = 'Delerium ' + size`, qty =
+  `payload.quantity`.
+
+Two consequences:
+1. **Ledger mis-attribution.** Example: a "Delerium Shard" row at qty 5, Set
+   mode, amount 3, size→crystal. The row becomes "Delerium Crystal" qty 3 and
+   the ledger records `subtype: crystal, qty: -2` (delta = 3−5, with `subtype`
+   read from the *renamed* `rowObj['Item']`, 3768/3880). Reality is "−5 shards,
+   +3 crystals", but the ledger shows only "−2 crystals". Crystal/shard counts
+   in the ledger no longer reconcile against inventory.
+2. **No merge with an existing target-size row.** If a separate "Delerium
+   Crystal" row already exists, the rename produces a **second** "Delerium
+   Crystal" row. The quick-edit endpoints write in place via
+   `writeInventoryRow_` and never call `findMatchingInventoryRow_` /
+   `mergeIntoExistingRow_`, so the two same-size rows silently coexist until
+   someone notices and combines them.
+
+This is reachable today (the dropdown is freely editable in both modes) and is
+not the dedicated delerium receive/sell flow, where size is fixed per counter.
+If in-place resize is intended, the ledger should emit two entries (remove old
+size, add new size) and the write should merge into an existing target-size row;
+if it is *not* intended, the Size dropdown should be read-only when the row
+already has a concrete size (resize handled only through the delerium tab).
+
+#### RISK · Index.html:7482 · `apiGetCurrencyQuickEdit` failure handler has no panel-identity guard — stale error can land in a reopened panel
+
+**Story: Quick-adjust, navigate-away/reopen during the verify round-trip.**
+`openQuickEditPanel` opens the sheet optimistically and fires
+`apiGetCurrencyQuickEdit` to verify/refresh (Index.html:7462). Its **success**
+handler correctly guards staleness — `if (!selectedQuickEdit ||
+selectedQuickEdit.itemId !== row['Inventory ID']) return;` (7464) — but the
+**failure** handler (7482-7485) writes `'Could not verify quick edit…'` into
+`getQuickStatusElement()` unconditionally. If the user closes the panel and
+reopens a quick-edit on a *different* item before the first verify call rejects,
+the late failure overwrites the new panel's status with an error about the old
+item. Likelihood is low because `apiGetCurrencyQuickEdit` catches internally and
+returns `{ok:false}` through the *success* path (the failure handler fires only
+on transport/exec errors), but the guard is free: capture the item id at call
+time and bail in the failure handler if `selectedQuickEdit` no longer matches,
+matching the success handler.
+
+#### Note · Code.js:3830 · Quick-adjust *set* path — clean execution-trace and resilient navigate-away handling
+
+**Story: Quick-adjust currency/delerium, set mode (happy + failure +
+navigate-away + double-tap).** Traced end-to-end and found sound:
+- **Ordering is correct/atomic-safe.** `apiSetItemQuantity` writes the
+  source-of-truth inventory row first (3869) and appends the ledger after
+  (3888). A ledger-append failure (which `appendResourceLedger_` swallows — see
+  the standing TODO) loses only the ledger trace, never the inventory truth.
+  Lock is released on every path via `finally` (3932-3938), including the
+  auth-failure and "server busy" early returns.
+- **Double-tap is blocked** twice: `confirmQuickEdit` guards
+  `if (quickEditInFlight) return;` and disables the Confirm button
+  (Index.html:7551,7570).
+- **Navigate-away survives.** `confirmQuickEdit` captures `capturedItemId`,
+  applies `updateInventoryRowFromServer` + re-render *before* the identity guard
+  (Index.html:7585-7598), so the data update lands even if the user closed or
+  switched the panel mid-flight; the success status/`closeQuickEditPanel` are
+  gated behind the `selectedQuickEdit.itemId === capturedItemId` guard, so a
+  reopened panel for another item is not force-closed. The error branch (7578)
+  is likewise identity-guarded.
+- **Failure leaves no stuck state.** Both `finishSuccess(res.ok===false)` and
+  `fail` reset `quickEditInFlight=false` and re-enable the button, so the user
+  can retry without reload.
+- **Collaborative-sync interference is benign.** A poll-triggered
+  `loadInventory(true)` mid-flight rebuilds `inventoryRows`, but the in-flight
+  handler reconciles by Inventory ID via `updateInventoryRowFromServer`, and the
+  writer's own poll is suppressed because `bumpSync_` stamps
+  `SYNC_INVENTORY_BY` with the writer's `_syncClientId` (3904).
+- **Tail helpers are correct.** `findInventoryRowById_` (4033) searches column 1,
+  which is `Inventory ID` (INVENTORY_HEADERS[0]); `writeInventoryRow_` writes the
+  full re-read header width; `ensureInventoryHeaders_`/`fillMissingInventoryRarity_`
+  read/patch defensively with `getLastRow()`/`getLastColumn()` guards.
 
 ### 2026-06-23 (run 57) — Sections audited: 5 (Code.js 2301–3900, Index.html 4200–4800)
 
