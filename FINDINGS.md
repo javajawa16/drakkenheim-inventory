@@ -25,9 +25,61 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML/CSS) + cross-references to give/sell-batch/delerium button flows
+
+Section 1–1500 is the `<style>` block — entirely CSS plus design tokens. Per the
+audit charter, pure styling/naming issues are out of scope; only CSS that produces
+a **behavioral** defect in a user story is reportable. One such defect found.
+
+Stories traced through this section's CSS into their JS handlers: **Give item to
+character**, **Sell Items batch**, **Receive/Sell crystals (delerium)**,
+**Quick-adjust currency/delerium** (button-state CSS), and the swipe/sheet display
+classes used by **Edit/Delete inventory item** and **Item description sheet**.
+
+#### RISK · Index.html:513 · Disabled `.primary` "Give to…" Confirm button shows a fake loading spinner while idle
+
+**Story: Give item to character — step "pick a character".** The global CSS rule
+`button.primary:disabled::after, button.success:disabled::after` (Index.html:513–519)
+appends an infinitely-spinning loader to *any* `.primary`/`.success` button while it
+is `disabled`. That rule is meant to signal an in-flight server call. But
+`openDescActionSheet('give')` (Index.html:6945) opens the description action sheet
+with the Confirm button **disabled for validation reasons** — "enabled once character
+selected" — while leaving its class as `.primary` (declared at Index.html:2774). The
+result: from the moment the user taps "Give to…" until they tap a character card
+(`selectDescGiveTarget` → `confirmBtn.disabled = false`, Index.html:7033), the Confirm
+button animates a spinner as though the app is already processing the give. This is
+misleading feedback at exactly the step where the user must take an action — a user
+may wait for the apparent "loading" to finish instead of realizing they need to pick
+a recipient first.
+
+The fix is the pattern the codebase already uses everywhere else: swap the class to
+`.secondary` while the button is in a validation-disabled (not in-flight) state.
+- **Sell Items batch** does this correctly: `updateSellBatchCount` (Index.html:5636–5637)
+  toggles `success` on / `secondary` off by `totalUnits > 0`, so the idle "Set
+  quantities to sell" button is `.secondary` and never spins.
+- **Delerium Received/Sell** does this correctly: Index.html:4889–4896 sets
+  `className = on ? 'danger'/'success' : 'secondary'` alongside `disabled = !on`.
+
+The give-to Confirm button is the lone validation-disabled primary/success button
+that omits the swap. Suggested fix: in `openDescActionSheet`, when `mode === 'give'`,
+also do `confirmBtn.classList.replace('primary','secondary')` while disabling, and in
+`selectDescGiveTarget` restore `confirmBtn.classList.replace('secondary','primary')`
+when re-enabling. (Sell/Remove modes leave the button enabled and are unaffected.)
+
+#### Note · Index.html:5636 · Disabled-button-spinner pattern is otherwise applied consistently
+
+Traced every validation-disabled and in-flight-disabled primary/success button in the
+app against the `:disabled::after` spinner rule. All in-flight disables (sell batch
+confirm 5774, gold pay 6083 uses `.danger`, give/sell/remove confirm 7574, note save
+7733, swipe-delete 7825/7860 uses `.danger`) correctly show the spinner only during a
+real round-trip, and all *idle/validation* disables except give-to (sell-batch 5637,
+delerium 4890/4896) deliberately swap to `.secondary`. The spinner rule itself is
+sound; only the single give-to call site diverges. Stories confirmed clean here:
+Sell Items batch, Receive/Sell crystals, Receive/Pay gold.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
