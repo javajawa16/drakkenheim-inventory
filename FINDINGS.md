@@ -25,9 +25,23 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, the `<style>` block; CSS-rooted behavior traced against Give/Sell/Remove/View-detail/Quick-adjust/Add-library stories)
+
+#### RISK · Index.html:513 · Disabled `.primary`/`.success` spinner fires on validation-gated buttons, not just in-flight ones
+
+**Story: Give item to character — description sheet → "Give to…" (sheet open, before character selection).** The CSS rules `button.primary:disabled::after` / `button.success:disabled::after` (513–519) attach an animated spinner (`btn-spin`) to **every** disabled primary/success button, on the assumption that "disabled primary == work in progress." But `descActionConfirmBtn` (the `.primary` Confirm in `#descActionSheet`, HTML:2774) is opened **disabled by design** for give mode — `openDescActionSheet` sets `confirmBtn.disabled = mode === 'give'` (Index.html:6945) and only re-enables it when the user taps a character card (`selectDescActionHolder`, Index.html:7029–7033). Result: for the entire time the user is reading the character list and deciding, a loading spinner spins on the bottom Confirm button, falsely signalling "the app is working / a request is in flight" when nothing is happening — it is simply gated on the user's own input. This is misleading feedback in the happy path of the Give flow (and would affect any future primary/success button that uses `disabled` as a validation gate). Fix: drive the spinner from an explicit state class (e.g. `.is-loading` / `aria-busy="true"`) applied only around the `google.script.run` call, rather than keying it off `:disabled`. The real in-flight submits in this app already toggle `disabled` during the round-trip, so scoping to an explicit class preserves correct loading feedback while removing the idle-spinner false signal.
+
+#### IDEA · Index.html:936 · Search results capped at `max-height: 40vh` create a nested-scroll trap on phones
+
+**Story: Add library item — search → scroll results.** `.results-list { max-height: 40vh; overflow-y: auto }` lives inside the Add `<section>` (a normal page section, not a sheet), so it is an inner scroll region nested inside the page's own scroll. With the default search returning up to 20 results on mobile (per README) and the GAS webview rendering at ~980px scaled, 40vh shows only a few cards and forces the user into a small nested scrollbar inside the larger page scroll — a classic touch scroll-trap where a flick either moves the inner list or the page depending on where the finger lands, and the keyboard being open shrinks 40vh further. Friction, not a correctness bug. Consider letting results flow in the page (no inner `max-height`) on phone, or raising the cap substantially so the inner scroll is rarely engaged.
+
+#### Note · Index.html:1352 · Sheet z-index stacking and modal-scroll-lock discipline are clean across the traced flows
+
+Traced: Give item to character, Sell item, Remove item, View item details, Quick-adjust currency/delerium. No reachable sheet pair inverts: base `.mobile-sheet` is z70 (1352); `#descActionSheet` (z81) layers over `#descriptionSheet` (z70); `#giveItemSheet` (z80) layers over the inventory edit / quick-edit sheets (z70) it is launched from (Index.html:2308/2526/2606); `#payReasonSheet` (z80, set at 231) layers over `#goldSheet` (z70); `#sellBatchSheet` (z82) and `#identitySheet` (z90) sit on top. The legacy standalone `#sellItemSheet`/`#giveItemSheet` (z80) are never co-opened with `#descActionSheet` (z81), so the numeric inversion between them is latent, not live. `body.app-modal-open { overflow: hidden }` (110) is driven centrally by `syncModalOpenState()` (3483) off `document.querySelector('.mobile-sheet.active')`, so the scroll lock correctly survives sheet-over-sheet stacking and clears only when the last sheet closes; `closeDiceCalc` (3583) also routes through it. One latent inconsistency worth watching (not filed as a bug): `openDiceCalc` (3578) and the identity-confirm path add/remove `app-modal-open` directly, and the dice overlay is **not** a `.mobile-sheet`, so any `syncModalOpenState()` call made while the dice overlay is open would prematurely clear the lock — currently unreachable because no sheet can be opened from the dice overlay.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
