@@ -25,9 +25,30 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500 — `<head>` / CSS; traced give/sell/remove description-sheet, quick-adjust, delerium, notes, add-item, and boot-reveal flows)
+
+#### RISK · Index.html:513 · Disabled-button spinner fires on *idle* primary buttons → "Give to…" shows a perpetual fake loader
+
+**Story: Give item to character — happy path, before a recipient is picked.** The CSS rule
+
+```
+button.primary:disabled::after,
+button.success:disabled::after { …animation: btn-spin .7s linear infinite; }
+```
+
+(lines 513–519) appends an infinitely spinning loader to **any** disabled `.primary`/`.success` button — it cannot distinguish "disabled because a `google.script.run` is in flight" from "disabled because we're waiting on user input." The description-sheet Confirm button `#descActionConfirmBtn` is `class="primary"` (line 2774). When the user opens the give sheet, `openDescActionSheet('give')` sets `confirmBtn.disabled = true` (line 6945) and leaves it disabled until a character card is tapped (`selectDescGiveTarget` → `confirmBtn.disabled = false`, line 7033). For the entire window between opening the give sheet and selecting a recipient, the Confirm button renders a spinning loader — falsely signalling that a server operation is in progress when the app is simply idle, waiting for the user to choose. Users may sit and wait for a "load" that never completes, or assume the action already fired. Suggested fix: gate the spinner on an explicit in-flight class (e.g. `button.primary.is-loading::after`) added by the JS handlers, rather than on the `:disabled` pseudo-class, so validation/idle disables don't animate. Any other primary/success button that is disabled as a resting state (none found beyond this one today, but the rule is global) would have the same problem.
+
+#### Note · Index.html:3486 · Boot-reveal state machine is failure-safe — traced
+
+`<html>` ships with `class="app-booting"` (line 2), which holds `.app-header`, `main`, and `.bottom-nav` at `opacity:0; translateY(10px)` (lines 118–123) until JS swaps in `inventory-ready` (lines 125–130). `markInventoryReady()` (3486) is idempotent (`inventoryReadyTransitioned` guard) and — critically — is called on **every** terminal path of `loadInventory`: cache paint, success, success-but-`!res.ok`, the in-flight-defer branch, and `withFailureHandler` (3730/3741/3767/3771/3784/3790). So a failed cold-start server call still reveals the shell with an error message in `#inventoryStatus` rather than leaving the whole UI stuck invisible. The identity splash (`#identitySheet`, a `.mobile-sheet` at z-index 70) sits outside the booting-faded containers, so it is visible even before reveal. No stuck-invisible state found.
+
+#### Note · Index.html:1351 · Mobile-sheet show/hide overrides are consistent — traced
+
+`.mobile-sheet { display:none }` / `.mobile-sheet.active { display:block }` is the single visibility contract for every overlay (description, descAction, combine, quick-edit, sell, notes form, identity). `#descActionSheet` correctly re-overrides to `display:flex` in both base-active (`#descActionSheet.active { display:flex }`, 1385) and panel layout, so the bottom-sheet anchoring is not clobbered by the generic `block` rule. Traced sell/remove/give sheets (`#descActionSheet`), combine (`#combineSheet`), and the notes form — all rely on this class toggle plus `syncModalOpenState()` to drive `body.app-modal-open { overflow:hidden }`; no overlay was found that sets `.active` without a matching display rule.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
