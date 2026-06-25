@@ -25,9 +25,73 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500: HTML structure + CSS)
+
+Traced every user story whose UI components are styled in this range — Edit
+inventory item, Quick-adjust currency/delerium, View item details / Give /
+Sell / Remove, Pay gold, Identity selection, swipe-delete, and Party Notes
+create/swipe. The range is pure `<head>` CSS; I read the matching `<body>`
+markup (2204–2790) and the JS toggles (3178, 7508–7677, 8733–8742) to ground
+each trace. One real defect, two clean-trace confirmations.
+
+#### BUG · Index.html:1650 · Desktop inventory editor card renders on phones at app load
+
+**Story: Edit inventory item (initial-state / pre-edit).** `#desktopInventoryEditor`
+(2255) carries class `.desktop-editor`. Its visibility is governed entirely by
+CSS: base `.desktop-editor { display: none }` (1539) overridden by
+`@media (min-width: 700px) { .desktop-editor { display: block } }` (1650). The
+iOS GAS webview renders at ~980 CSS px, so **that media query always matches on
+phones** — the codebase documents this itself ("media queries are dead in the AS
+webview", 1676; phone detection uses `is-phone` / `(pointer: coarse)`, 3178).
+There is **no `html.is-phone .desktop-editor { display: none }` override**, and
+the element has no inline style at load.
+
+Result: on a phone the editor only stops showing once JS sets an inline
+`display:none`, which happens exclusively inside `setInventoryEditorOpen()`
+(7669) / `setQuickEditorOpen()` (7520) and the keyboard-resize handler (8713).
+None of those run during boot (8734–8742). So from app load until the user
+opens *and* closes their first inventory edit (or triggers a >150px keyboard
+resize), a stray "Item Details" form card — empty fields plus Save/Delete
+buttons wired to an empty `editInventoryId` — renders in the active inventory
+section directly below the live inventory list. Tapping its Save there fires a
+write with a blank inventory ID. The sibling `#desktopQuickEditor` (2211) avoids
+this by using the `.quick-editor` (default-hidden, `.active`-toggled) pattern
+rather than `.desktop-editor`.
+
+Fix (any one): add `html.is-phone .desktop-editor { display: none !important }`;
+or call `setInventoryEditorOpen(false)` in the boot block (8734); or convert
+`#desktopInventoryEditor` to the `.quick-editor`-style `.active`-toggle pattern
+used by its sibling. The first is the smallest and matches the app's
+"`is-phone` is the source of truth, not width media queries" architecture.
+
+#### Note · Index.html:1652 · Desktop media-query re-enable list covers all 13 mobile-sheets
+
+Because `@media (min-width: 700px)` always matches in the AS webview, the
+`.mobile-sheet { display: none !important }` rule (1651) is effectively always
+active on phones, and each sheet must be explicitly re-enabled by ID. Verified
+the re-enable list (1652–1664) against every `class="mobile-sheet"` element in
+the body: inventorySheet, descriptionSheet, quickEditSheet, noteFormSheet,
+combineSheet, goldSheet, deleriumSheet, sellItemSheet, sellBatchSheet,
+giveItemSheet, payReasonSheet, descActionSheet, identitySheet — all 13 present.
+No sheet is orphaned (which would make it open-but-invisible on phones). The
+pattern is fragile for future additions but currently complete. Stories cleared:
+Quick-adjust currency, View item details, Give/Sell/Remove, Pay gold, Combine,
+Sell batch, Create/Edit note, Identity selection.
+
+#### Note · Index.html:2765 · Sheet z-index stacking is correct for every nested flow
+
+Enumerated z-index across all action sheets: base mobile-sheets z70
+(description, gold, delerium, combine, inventory, quickEdit, noteForm,
+payReason via CSS 231); sellItemSheet/giveItemSheet z80; descActionSheet z81;
+sellBatchSheet z82; identitySheet z90. Checked every flow that stacks one sheet
+over another: Pay gold (goldSheet 70 → payReasonSheet 80 ✓), description → Give
+(70 → giveItemSheet 80 ✓), description → Sell/Remove (70 → descActionSheet 81
+✓), identity overlay (90) sits above everything until a character is chosen ✓.
+No inversion where a child confirm sheet renders behind its parent.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
