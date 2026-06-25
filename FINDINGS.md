@@ -25,9 +25,71 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, all CSS; traced against swipe/overlay/modal JS outside range)
+
+> **Summary:** This range is entirely CSS (the `<style>` block runs to 2174; DOM
+> starts at 2177). Traced every story whose interaction/visual layer is defined
+> here. No behavioral bugs found — the swipe geometry, overlay z-index stacking,
+> and modal scroll-lock are all correctly engineered. One low-severity feedback
+> asymmetry (IDEA) and two clean-trace Notes.
+
+#### IDEA · Index.html:513 · In-flight spinner only on `.primary`/`.success` disabled buttons; `.danger`/`.secondary` get opacity only
+
+**Stories: Delete inventory item, Edit inventory item, Give item.** The CSS
+busy-spinner (`button.primary:disabled::after` / `button.success:disabled::after`,
+lines 513–519) renders an animated spinner while a primary/success button is
+disabled mid-roundtrip. `.danger` (e.g. `#mobileInventoryDeleteButton`, line 2528)
+and `.secondary` buttons get only the global `button:disabled { opacity:.5 }`
+(line 510) — no spinner. In the current code this is mostly masked: the delete and
+give flows disable their button and then immediately close the sheet
+optimistically (`deleteSelectedInventory` → `closeInventoryPanels(false)` at
+Index.html:7889), so the disabled-but-no-spinner state is never on screen long.
+The asymmetry only bites if a future `.danger`/`.secondary` confirm keeps its sheet
+open during the roundtrip (e.g. a non-optimistic destructive confirm) — it would
+show a dimmed button with no progress cue. Suggestion: extend the `::after`
+spinner rule to `button.danger:disabled` / `button.secondary:disabled` (or a shared
+`button:disabled.is-busy` class) so the in-flight indicator is class-independent.
+
+#### Note · Index.html:587 · Swipe-to-delete reveal geometry is sound (width ↔ transform never desync)
+
+**Stories traced: Delete inventory item (swipe), swipe gestures.** `.inventory-delete-action`
+declares `width:30%; min-width:168px; max-width:240px` (line 590), but the render
+path overrides it with an inline `style="width:${swipeOpenPx}px"` (Index.html:3950)
+where `swipeOpenPx = getSwipeOpenPx()` = `max(168, min(240, round(innerWidth*0.3)))`
+(Index.html:3187). The very same `swipeOpenPx` drives the card's
+`translateX(-${swipeOpenPx}px)` (line 3934) and the live-drag rest position
+(`resting()` at 3204). So the revealed button width and the card slide distance are
+always equal across every viewport width (incl. the ~980px GAS webview → clamped to
+240px) — no gap behind the card, no button hidden under it. The CSS `30%` is
+effectively inert. Clean.
+
+#### Note · Index.html:110 · Overlay stacking + `app-modal-open` scroll-lock are clean across all sheet flows
+
+**Stories traced: View item details, Give item, Sell item, Remove item, Combine
+duplicate, Quick-adjust, Create/Edit note — all `.mobile-sheet` flows.** The body
+scroll-lock (`body.app-modal-open { overflow:hidden }`, line 110) is driven by
+`syncModalOpenState()` (Index.html:3483), which toggles the class on the *presence
+of any* `.mobile-sheet.active`. Every sheet close path calls it, so closing one
+sheet while another is still open keeps the lock (verified across combine, gold,
+delerium, payReason, give, sell, sellBatch, description, descAction, noteForm).
+The only paths that add/remove the class directly are the identity picker
+(Index.html:4575/4603) — safe because the identity sheet is the sole sheet open at
+boot. Stacked sheets layer correctly via inline z-index: base `.mobile-sheet` 70
+(line 1352), `descriptionSheet` 70 → `descActionSheet` 81 (line 2765) →
+`sellItemSheet`/`giveItemSheet` 80, `sellBatchSheet` 82, `payReasonSheet` 80. The
+description sheet stays active under its action sub-sheet and is correctly covered.
+No stuck-overlay or scroll-bleed state found.
+
+> **Dead-CSS note (not a finding, per audit rules):** `.notes-note-row`,
+> `.notes-note-card`, `.notes-edit-action`, `.notes-delete-action` (lines 1236–1286)
+> are a legacy swipe-on-notes block never rendered by JS — the live Party Notes UI
+> uses `.note-card` (line 2116+). Their default `opacity:0` reveal state has no
+> matching `opacity:1` rule, but since nothing renders them it is not a behavioral
+> bug. Flagging only so a future reader doesn't assume notes have swipe actions.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
