@@ -25,9 +25,35 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, design tokens + all component CSS)
+
+> Lines 1–1500 are entirely `<style>` (design tokens + every component's CSS);
+> the section title says "HTML structure" but no body markup lives in this range
+> — the `<body>` starts after line 1500. Stories were traced at the **CSS
+> state-machine level**: every `.active`/`.open`/`.app-modal-open`/z-index toggle
+> that governs whether a flow's UI is visible, stacked, and dismissable was
+> followed into its JS handlers (read well outside the range) to confirm the CSS
+> supports the state machine without a stuck or invisible state.
+
+#### RISK · Index.html:1937 · Dice-calc overlay scroll-lock lives outside the `syncModalOpenState` invariant
+
+**Story: cross-cutting navigate-away / modal-lock.** The app maintains one invariant — "background scroll is locked (`body.app-modal-open`) iff something is covering the app." Every sheet enforces it through `syncModalOpenState()` (3482), which recomputes the lock from `document.querySelector('.mobile-sheet.active')`. The dice calculator overlay (`.dice-overlay`, line 1937) is **not** a `.mobile-sheet` — it toggles `.open` and manages the lock by hand: `openDiceCalc` (3580) adds `app-modal-open` directly, `closeDiceCalc` (3585) delegates to `syncModalOpenState`, which is blind to the overlay. So the helper that is the single source of truth for the lock cannot see the dice overlay at all.
+
+Today this is not reachable: the overlay (z-index 50) covers the header dice button and the bottom-nav, so no `.mobile-sheet` can be opened while dice is up, and nothing calls `syncModalOpenState` automatically (the 20s poll / visibilitychange handlers don't). But the invariant is held by two divergent mechanisms, and the authoritative helper ignores one of them. Any future change that (a) opens a mobile-sheet from within/over the dice overlay, or (b) calls `syncModalOpenState` while dice is open, will silently **unlock background scroll while the dice overlay is still showing** (or, conversely, leave it locked). Suggested fix: make `syncModalOpenState` the only writer — have it check `.mobile-sheet.active OR .dice-overlay.open`, and have `openDiceCalc`/`closeDiceCalc` call it instead of touching `app-modal-open` directly. Same applies to the two other direct `app-modal-open` writes (4575 identity-open, 4603 identity-confirm), which happen to be safe only because identity is the first/only sheet at boot.
+
+#### Note · Index.html:587 · CSS state machinery for swipe / sheets / modal-lock traces clean
+
+Stories traced through the section's component CSS, each followed into its JS handler:
+- **Delete inventory item (swipe):** `.inventory-delete-action` (587) is `width:30%; min-width:168px; max-width:240px`, but the rendered button width and the card's translate distance are both set inline from `getSwipeOpenPx()` (3186) = `max(168, min(240, round(innerWidth*0.3)))` — identical bounds, so the revealed action and the slide distance always match (including on the ~980px GAS webview). No clip/dead-space mismatch.
+- **View item details → Sell / Give / Remove:** z-index layering is correct — description sheet (default `.mobile-sheet` 70) < descAction 81, sellItem 80, giveItem 80, sellBatch 82, identity 90. Secondary sheets always stack above their parent; no occlusion.
+- **Combine duplicate:** `#combineSheet.active` toggle (3518/3524) pairs with `syncModalOpenState` on both confirm and keep paths — lock released on success, on "keep", and on server failure (status re-shown, sheet stays open for retry).
+- **Sell (single & batch) feedback:** the disabled-button spinner (513–519) is scoped to `.primary`/`.success` only, so the amber `.sell-confirm-armed` and `.danger` confirm buttons show no spinner mid-flight; single-sell closes the sheet instantly (optimistic row update is the feedback) and batch-sell keeps the sheet open but writes a "Selling…" status — feedback is present in both, just not via the spinner.
+- **Quick-adjust / identity picker:** `app-modal-open` add/remove pairs verified against their open/close handlers.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
