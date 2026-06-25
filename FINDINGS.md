@@ -25,9 +25,32 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, the `<style>` block: design tokens, reset, header, cards, sheets, identity, delerium/sell-batch/notes component CSS)
+
+This section is pure CSS. Per audit rules, style/layout issues are out of scope — I traced only CSS rules that produce a **behavioral** defect (a misleading, stuck, blank, or untappable state) inside a user story.
+
+#### BUG · Index.html:513 · Disabled `.primary` Confirm shows a fake loading spinner during "Give to…" character pick
+
+**Story: Give item to character (description sheet → Give to… → pick character → confirm).** `showDescAction('give')` opens the action sheet and sets `descActionConfirmBtn.disabled = true` (Index.html:6945, comment "enabled once character selected") so the user must tap a recipient before confirming. That button carries class `.primary` (Index.html:2774). The global CSS at Index.html:513–519:
+```
+button.primary:disabled::after,
+button.success:disabled::after { ...; animation: btn-spin .7s linear infinite; }
+```
+renders an animated spinning circle on **every** disabled `.primary`/`.success` button. The spinner is the app's universal "operation in flight" indicator (paired elsewhere with "Recording…"/"Saving…"). So during the idle "choose a character" phase — before any server call exists — the Confirm button spins, falsely signalling that work is already happening and that the user should wait. The user may hesitate or assume the app is stuck. Once a recipient is tapped, `confirmBtn.disabled = false` (Index.html:7033) and the spinner vanishes, confirming the spinner was meaningless. **Fix:** scope the spinner to an explicit in-flight class (e.g. `button.is-busy::after`) toggled by the handlers, rather than keying it off `:disabled`; or remove `.primary` from the give-mode Confirm while it is selection-gated. State-machine note: this collapses the distinct states `needs-input(disabled)` and `in-flight(disabled)` into one visual, which is exactly the ambiguity the spinner is meant to resolve.
+
+#### Note · Index.html:486 · Other validation-disabled buttons correctly avoid the spinner; boot-reveal gate is safe
+
+**Stories traced through this CSS section:** Give to character (bug above), Sell item / batch sell, Delerium receive/sell, Quick-adjust currency, Add item, Combine, Identity selection / first-open boot, Collaborative sync (modal-lock).
+
+- **Spinner false-positive is isolated to the give path.** Audited every button that is `disabled` in an *idle/validation* (non-in-flight) state: `sellBatchConfirmBtn` ("Select items to sell", Index.html:5742) and the delerium `Received`/`Sell` buttons (Index.html:4699–4700) are all `.secondary`, so the 513–519 rule does not touch them. The `.primary`/`.success` confirm buttons (`addSubmitBtn`, `quickSheetConfirmBtn`, `saveInventoryButton`, combine, `sellItemConfirmBtn`) are disabled only transiently by their handlers during a live `google.script.run`, where the spinner is correct. `descActionConfirmBtn` in give-mode is the sole sustained idle-disabled `.primary`.
+- **Boot visibility gate cannot strand the user.** `html.app-booting` sets `opacity:0`/`translateY` on `.app-header`, `main`, `.bottom-nav` (Index.html:118–123); these are only revealed when `inventory-ready` is added by `markInventoryReady()` (Index.html:3486). That function is called on the success **and** failure handlers of `loadInventory` (Index.html:3767/3784/3790), so a failed cold load still reveals the shell with an inline error and a working reload button — no permanent blank screen. Before a character is chosen, the shell legitimately stays hidden, but the identity splash (`#identitySheet`, a `.mobile-sheet` at `z-index:70`, `position:fixed inset:0`) is **not** subject to `app-booting` (it is not in the 118–120 selector list), so it paints over the hidden shell and the user always sees the picker.
+- **Modal scroll-lock is self-correcting.** `body.app-modal-open { overflow:hidden }` (Index.html:110) is driven by `syncModalOpenState()` which recomputes from `document.querySelector('.mobile-sheet.active')` on every sheet open/close, so a closed sheet cannot leave the body permanently scroll-locked.
+- **Sheet z-index layering is consistent:** `#payReasonSheet` (80) sits above the generic `.mobile-sheet` (70) so the pay-routing prompt is never occluded by the gold sheet beneath it.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
