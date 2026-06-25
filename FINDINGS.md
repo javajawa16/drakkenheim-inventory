@@ -25,9 +25,23 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML/CSS) — traced View item details, Give/Sell/Remove, Quick-adjust, Identity picker, Dice calc for modal-overlay state
+
+#### RISK · Index.html:1370 · `#descActionSheet` base rule forces `display:flex` → Give/Sell/Remove overlay permanently covers the screen at viewport <700px
+
+**Stories: Give item to character / Sell item / Remove item.** The base rule `#descActionSheet { ...; display: flex; align-items: flex-end; }` (1367–1371) sets `display:flex` unconditionally. By selector specificity an ID rule (1,0,0) beats the base hide rule `.mobile-sheet { display: none }` (0,1,0, line 1353). So the descActionSheet overlay — the bottom-sheet that openDescActionSheet() raises for the give/sell/remove confirmation (6938, `.active` added at 6949) — is shown even without `.active`. Since `.mobile-sheet { position:fixed; inset:0; z-index:70 }` and the element carries inline `z-index:81` (2765), this renders as a full-screen blurred backdrop pinned on top of everything, making the app unusable.
+
+Why it's masked, and where it bites: the only rule that re-hides sheets, `.mobile-sheet { display: none !important }` (line 1651), lives **inside `@media (min-width: 700px)`**. The primary GAS webview renders at ~980px CSS width (per README CSS notes), so that media query is always active and `!important` wins → descActionSheet correctly hidden until `.active`. But a player who opens the deployed `/exec` URL directly in a phone browser gets the real device width (~390px); the desktop media query never fires, nothing restores the hide, and the ID rule leaks `display:flex`. The DPR-based `html.is-phone` block does not re-declare a `.mobile-sheet` hide, so it does not save this case. Result: those phone users see a permanent overlay and cannot use give/sell/remove (or anything beneath it).
+
+Fix: drop `display:flex` from the base `#descActionSheet` rule (keep only `align-items: flex-end` there, or move both onto `#descActionSheet.active`). The active state is already covered by `#descActionSheet.active { display: flex }` (1385) and the desktop `!important` variant (1653), so removing the base `display` does not affect the shown state — it only restores the default-hidden behavior at <700px. No other `#…Sheet` base rule carries an unconditional `display` (verified: only `#identitySheetBody`, a panel child, does — harmless).
+
+#### Note · Index.html:3482 · Modal scroll-lock (`body.app-modal-open`) management is robust across all sheet flows
+
+Traced the overlay state machine for View item details (descriptionSheet open 6814 → close 6921), Give/Sell/Remove (descActionSheet 6949/6953), Identity picker (4574/4602), and Dice calc (3580/3585). `body.app-modal-open { overflow: hidden }` (110) is the scroll lock. Three sites `add()` it directly (dice 3580, identity 4575, description 6815); every close path routes through `syncModalOpenState()` (3482), which **recomputes** the class from `document.querySelector('.mobile-sheet.active')` rather than blindly removing it. This means closing one sheet while another is still active correctly keeps the lock, and closing the last one releases it — no stuck scroll-lock state survives a navigate-away. Identity's confirmIdentity (4603) uses a direct `remove()`, but that path only runs at first boot when no other sheet can be open, so it's safe. Clean.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
