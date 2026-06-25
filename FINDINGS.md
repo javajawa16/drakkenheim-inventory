@@ -25,9 +25,24 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML/CSS; traced description-sheet, give/sell/remove, identity, and boot stories into the JS that consumes these styles)
+
+#### RISK · Index.html:1372 · Bottom-sheet `#descActionSheet` can clip Confirm/Cancel off-screen — no full-panel scroll fallback
+
+**Stories: View item details → Give to… / Sell for Gold / Remove (description action sheet).** The action sheet is a bottom sheet: `#descActionSheet { align-items: flex-end }` (1367) with `.mobile-sheet-panel` capped at `max-height: 80vh` (1376) but the panel itself is **not scrollable** — `.mobile-sheet-panel` only sets `overflow-x: hidden` (1364), never `overflow-y`. Inside it only the body scrolls: `#descActionSheet .mobile-sheet-body { flex: 0 0 auto; max-height: 45vh; overflow-y: auto }` (1380). The actions area (`.mobile-sheet-actions`, `flex-shrink: 0`, 1529) holds the stepper row + status + Confirm + Cancel and cannot shrink. So panel height = header + min(content, 45vh) + actions, which can exceed `80vh`. Because overflow is visible and the panel is bottom-anchored, the excess renders **below the viewport bottom**, putting Confirm/Cancel out of reach with no scroll recourse (body scroll doesn't move the actions). Portrait on a tall phone is borderline (~18px clip once safe-area insets are added); landscape / the scaled GAS webview short-height case clips badly — e.g. at ~360px effective height, 45vh body + ~210px actions far exceeds 80vh. The user reaches the Give/Sell/Remove flow but cannot tap Confirm to complete it, and Cancel may also be unreachable, leaving them stuck. Fix: make `#descActionSheet .mobile-sheet-panel` `overflow-y: auto`, or let the whole panel scroll instead of capping the body, so the actions are always reachable.
+
+#### Note · Index.html:2765 · Sheet z-index ladder is clean — action sheet correctly layers above the description sheet, identity above all
+
+**Stories traced: View item details, Give to…, Sell for Gold, Remove, first-run identity.** Stacking order is consistent and correct: header `z-index: 22` (179) < `.dice-overlay` 50 (1941) < `.mobile-sheet` 70 (1352, used by `#descriptionSheet`) < `#payReasonSheet` 80 (231) < `#descActionSheet` inline 81 (2765) < `#identitySheet` inline 90 (2781). Tapping Sell/Give/Remove raises the action sheet (81) above the full-screen description sheet (70), and the first-run identity picker (90) sits above everything. No transparent tap-blocking overlays found — `html::before/::after` and `.scope-slider-indicator` all set `pointer-events: none`.
+
+#### Note · Index.html:118 · `app-booting` opacity gate has no blank-screen stuck state; identity picker exempt
+
+**Stories traced: cold start / first-run, collaborative-sync load failure.** `html.app-booting` zeroes opacity on `.app-header, main, .bottom-nav` (118–123); it is only cleared by `markInventoryReady()` (3490). That helper is invoked on **every** `loadInventory` outcome — in-memory paint (3730), localStorage cache paint (3741), server success (3784), `res.ok === false` (3767), in-flight-write deferral (3771), and `withFailureHandler` (3790) — so a failed initial load still reveals the UI (with an error in `#mainStatus`) rather than leaving a permanently invisible app. First-run is also safe: the boot-opacity rule does not target `.mobile-sheet`, so `#identitySheet` shows over the hidden shell before any load runs. Minor latent note (not user-reachable): `syncModalOpenState()` (3483) only counts `.mobile-sheet.active` and ignores `#diceOverlay` (class `dice-overlay`); `openDiceCalc` adds `app-modal-open` directly. A mobile-sheet close firing `syncModalOpenState()` while the dice calc is open would drop the body scroll-lock behind it — but the dice button lives in the header (z-index 22), which every sheet covers, so the two cannot be open at once in practice.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
