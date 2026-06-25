@@ -25,9 +25,29 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500 HTML structure + CSS; cross-referenced sheet markup 2466–2790 and handlers openInventoryDescription 6740, openDescActionSheet 6928, openQuickEditPanel 7422)
+
+**Stories traced through this section's CSS/structure:**
+- *Quick-adjust currency/delerium* (quick-edit sheet `#quickEditSheet`, z-index 70, lines 2564–2614) — happy path, occlusion failure (BUG below).
+- *View item details / Give item / Sell item / Remove item* (description sheet `#descriptionSheet` + sub-sheet `#descActionSheet`, lines 2536–2778) — z-index stacking (descAction 81 > description 70, correct); give-mode confirm feedback (RISK below).
+- *Identity pick* (`#identitySheet` z-index 90 — correctly the topmost layer, lines 2781–2789).
+- All mobile-sheet overlays (inventory/gold/delerium/sell/combine/note-form) reviewed for z-index layering and modal-lock behavior.
+
+#### BUG · Index.html:1352 · "Open Description" from the quick-edit sheet opens the description sheet *behind* the still-open quick-edit panel — button appears dead
+
+**Story: Quick-adjust → Open Description.** `#quickEditSheet` (line 2564) has an "Open Description" button (line 2608, `onclick="openSelectedInventoryDescription()"`). That handler (6728) → `openInventoryDescription` (6740) ends by doing `document.getElementById('descriptionSheet').classList.add('active')` and `document.body.classList.add('app-modal-open')` (lines 6814–6815) — it **never closes the quick-edit sheet**. Both `#descriptionSheet` and `#quickEditSheet` inherit the base `.mobile-sheet { z-index: 70 }` (line 1352); neither has an inline/CSS z-index override. With equal z-index, paint order is DOM source order, and `#quickEditSheet` (line 2564) is **after** `#descriptionSheet` (line 2536), so the quick-edit panel — whose `.mobile-sheet-panel` background is effectively opaque (`rgba(12,18,32,.99)→rgba(11,16,28,1)`, line 1362) — paints on top and fully covers the description sheet. Result: tapping "Open Description" visibly does nothing; the description content is rendered but occluded. Only after the user taps the quick-edit "Cancel" does the description sheet (still `.active`) surprise-appear underneath. Reachable for health potions (which carry real descriptions) since `openQuickEditPanel` (7422) handles `currency` / `health potion` / `delerium crystal`. Contrast the sibling button "Change Item": `openFullEditorFromQuick` (7543) correctly calls `closeQuickEditPanel()` **before** `setInventoryEditorOpen(true)` — establishing that closing quick-edit first is the intended pattern, which the Open-Description path forgot. Fix: call `closeQuickEditPanel()` (or `setQuickEditorOpen(false)`) at the top of `openSelectedInventoryDescription`, mirroring `openFullEditorFromQuick`. (The "Give to…" button in the same sheet is unaffected because `#giveItemSheet` has inline `z-index:80` > 70, so it correctly stacks above quick-edit.)
+
+#### RISK · Index.html:513 · `button.primary:disabled::after` spinner fires for *validation*-disabled buttons, not just in-flight — Give-to Confirm shows a perpetual "loading" spinner while idle
+
+**Story: Give item to character (description sheet → Give to…).** The rule `button.primary:disabled::after, button.success:disabled::after { … animation: btn-spin .7s linear infinite; }` (lines 513–519) attaches a spinning loader to *every* disabled primary/success button. It is intended to signal an in-flight `gasCall`, but it also renders whenever such a button is disabled for input-validation reasons. Concrete reachable case: `openDescActionSheet('give')` sets `descActionConfirmBtn.disabled = true` (line 6945) until the user taps a character (`selectDescGiveTarget` clears it at 7033). `descActionConfirmBtn` is `class="primary"` (line 2774), so the moment the Give-to sheet opens, its Confirm button shows a spinning loader as if a server call were already running — misleading feedback that contradicts the actual idle/awaiting-selection state. Same hazard applies to any primary/success button held disabled pre-submit. Fix: gate the spinner on an explicit in-flight class (e.g. `button.primary.is-loading::after`) toggled by the handlers, rather than on `:disabled` alone.
+
+#### Note · Index.html:2466–2790 · Sheet z-index layering is otherwise internally consistent
+
+Verified the overlay stack for the description-sheet action flows and identity gate. Base `.mobile-sheet` = 70 (line 1352); inline overrides: `#sellItemSheet`/`#giveItemSheet` 80, `#descActionSheet` 81, `#sellBatchSheet` 82, `#identitySheet` 90; CSS `#payReasonSheet` 80 (line 231). The description-sheet sub-sheet (`#descActionSheet`, 81) correctly paints above the parent description sheet (70); give/sell/remove are handled inline inside descActionSheet (no nested giveItem/sellItem sub-sheet from this path, so no 80-over-81 inversion). Identity picker (90) is the topmost layer, correct. The single defect in the family is the equal-z-index occlusion logged above (quick-edit ↔ description), which stems from a missing close-call, not from the z-index scale itself.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
