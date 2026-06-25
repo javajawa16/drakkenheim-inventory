@@ -25,9 +25,74 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, `<head>`/`<style>` block)
+
+This range is entirely the design-token + component CSS (no JS, no write paths).
+Per audit rules, only CSS that causes a behavioral bug is reported. Traced the
+**visibility state machine** of every `.mobile-sheet` overlay (idle → active →
+idle) since these sheets host the write-bearing stories: **Sell item**, **Give
+item to character**, **Remove item** (descActionSheet), **Edit/Delete inventory
+item** (inventorySheet), **View item details** (descriptionSheet),
+**Quick-adjust currency/delerium** (quickEditSheet), **Receive/Pay gold**
+(goldSheet/payReasonSheet), **Receive/Sell crystals** (deleriumSheet),
+**Create/Edit note** (noteFormSheet), **Combine duplicate** (combineSheet),
+identity pick (identitySheet). All sheets toggle via `classList.add/remove('active')`
+only — no inline `display` — so visibility is purely CSS-driven.
+
+#### RISK · Index.html:1367 · `#descActionSheet` base rule sets `display:flex`, defeating `.mobile-sheet{display:none}` below 700px → sub-sheet permanently covers the app
+
+**Stories: Sell item / Give item to character / Remove item (the description
+action sub-sheet).** The base rule
+
+```
+#descActionSheet { background: rgba(6,10,20,.55); backdrop-filter: blur(4px);
+                   display: flex; align-items: flex-end; }   /* line 1367 */
+```
+
+sets `display: flex` at **ID specificity (1,0,0)**, which outranks the shared
+hide rule `.mobile-sheet { display: none }` (0,1,0) at line 1351. So when the
+sheet is **not** `.active`, it still computes `display: flex`. `#descActionSheet`
+is `class="mobile-sheet"` with `z-index:81`, `position:fixed; inset:0` (full
+screen) and a dark blurred backdrop — when shown it intercepts pointer events
+across the entire viewport, so the whole app becomes untappable.
+
+This is masked **only** by the `@media (min-width: 700px)` block, where line 1651
+`.mobile-sheet { display: none !important }` forces all idle sheets hidden and
+each `#…Sheet.active` is re-shown with its own `!important` (line 1653 for this
+sheet). The iOS GAS webview renders at ~980px CSS width and desktop is wider, so
+both satisfy `min-width:700px` and never hit the bug — which is why it ships
+unnoticed. But **any viewport below 700px CSS width** (a narrowed desktop window,
+a non-iOS webview reporting true device width, responsive dev tools) drops out of
+the media query, the base cascade governs, and the Sell/Give/Remove sub-sheet is
+permanently displayed over everything, blocking all interaction.
+
+`#descActionSheet` is the **only** mobile-sheet whose *base* rule sets a `display`
+value — every other sheet (`#descriptionSheet`, `#goldSheet`, `#quickEditSheet`,
+`#noteFormSheet`, …) leaves the base as the inherited `.mobile-sheet{display:none}`
+and only overrides `display` on `.active`. So this is an accidental inconsistency,
+not an intentional pattern.
+
+Fix: remove `display: flex` from the line-1367 base rule (keep `align-items:
+flex-end`). The active state is already covered by `#descActionSheet.active {
+display: flex }` at line 1385 (specificity 1,1,0, beats `.mobile-sheet`), so idle
+falls back to `.mobile-sheet{display:none}` like every other sheet, on all
+viewport widths.
+
+#### Note · Index.html:1351 · Mobile-sheet visibility state machine is otherwise clean
+
+Traced every other `.mobile-sheet` overlay listed above: base `display:none`,
+`.active` shows it, and the `@media(min-width:700px)` block re-asserts both states
+with `!important` for the GAS/desktop viewport. Sub-sheet z-index stacking is
+coherent — descriptionSheet/others at 70 (`.mobile-sheet`), descActionSheet 81,
+payReasonSheet 80, identitySheet 90 — so a sub-sheet always layers above its
+parent. No stuck-visible or trapped-pointer state found in any sheet except
+`#descActionSheet` above. Disabled-button affordance (`button:disabled{opacity:.5}`
++ `.primary:disabled::after` spinner) and swipe-action reveal (`opacity:0` →
+JS-driven) are presentational only, no behavioral defect.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
