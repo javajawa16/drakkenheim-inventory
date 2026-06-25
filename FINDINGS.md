@@ -25,9 +25,60 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS) — Code.js is now fully audited
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML/CSS — re-audit of run 47's section)
+
+Section is the `<head>` design-token + CSS block (no `<body>` markup or
+`google.script.run` calls in range). Re-audited the CSS rules that drive
+behavioral state, tracing each into the JS that toggles it. Run 47 already
+covered the scroll-lock state machine (Note `Index.html:110`), the unused notes
+swipe CSS (Note `Index.html:1151`), and the disabled-spinner trap on
+`sellBatchConfirmBtn` (RISK `Index.html:5546`). The dice-overlay scroll-lock gap
+was found and FIXED in a later run. This run found one **additional, distinct
+instance** of the disabled-spinner root cause that run 47 did not enumerate.
+
+Stories traced (happy → failure-at-step → navigate-away → friction, plus
+execution-trace + state-machine on every CSS-driven UI state):
+- **Give item to character** — `openDescActionSheet('give')` → confirm-button
+  disabled state vs the spinner CSS (504–519). One bug below.
+- **Quick-adjust currency/delerium** — `confirmQuickEdit` confirm button
+  (`*ConfirmBtn`) is disabled only during the in-flight write (7574, reset at
+  7581/7610) and is `enabled` at rest, so the spinner CSS is correct usage there
+  — no phantom spinner. Clean.
+- **Receive/Sell crystals** — re-confirmed `updateDeleriumButtonStates`
+  (4880–4899) swaps the buttons to `class="secondary"` while validation-disabled
+  (4890, 4896), so the spinner CSS never applies. Clean (matches run 47).
+- **All mobile-sheet flows** — re-confirmed `syncModalOpenState()` (3482)
+  recomputes `app-modal-open` from "is any `.mobile-sheet.active`", so stacked
+  sheets (descriptionSheet → descActionSheet, pay → payReason) keep scroll locked
+  until the last closes. The direct add/remove calls (identity 4575/4603,
+  description 6815) are harmless. No stuck `overflow:hidden`. Clean (matches run 47).
+
+#### BUG · Index.html:6945 · "Give to…" Confirm button shows a phantom loading spinner while idle (uncovered instance of run-47 RISK Index.html:5546)
+
+**Story: Give item to character — description sheet → "Give to…".** Same root
+cause as run 47's RISK `Index.html:5546` (the disabled-spinner CSS at 513–519:
+`button.primary:disabled::after` / `button.success:disabled::after` render an
+infinite `btn-spin` loader on *any* disabled `.primary`/`.success` button), but a
+different, un-enumerated button. `descActionConfirmBtn` is declared
+`class="primary"` (2774) and `openDescActionSheet('give')` sets
+`confirmBtn.disabled = mode === 'give'` (6945) — i.e. it opens **disabled at rest**
+while keeping the `primary` class. Net effect: the moment the user taps "Give
+to…", the Confirm button sits disabled (waiting for a character pick) with a
+spinner whirring next to "Confirm", falsely signalling a server round-trip is in
+progress before the user has done anything. The spinner only stops once a
+character is selected (`confirmBtn.disabled = false`, 7033). Feedback is inverted:
+spins when idle/blocked, solid when actionable. The sell-batch and delerium
+buttons were both fixed/guarded by swapping to `class="secondary"` while
+validation-disabled; this button was not. Fix (mirror the delerium pattern):
+set `confirmBtn.className = 'secondary'` while in give-and-unselected state and
+restore `'primary'` when a holder is chosen — or, preferably, gate the spinner
+pseudo-element on an explicit `.is-loading` class set only during the in-flight
+write rather than on `:disabled` (this fixes every current and future instance at
+the root, including RISK `Index.html:5546`).
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
