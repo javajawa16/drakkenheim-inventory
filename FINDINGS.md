@@ -25,9 +25,23 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-25 (run 59) — Sections audited: 7 (Index.html 1–1500, the `<style>` block) + Give/Sell/Delerium confirm-button states
+
+#### BUG · Index.html:513 · Disabled "Give to…" Confirm button shows a false loading spinner
+
+**Story: Give item to character — idle / selection step.** The rule `button.primary:disabled::after` / `button.success:disabled::after` (513–519) injects an animated spinner into *any* disabled primary/success button. It uses `:disabled` as its only selector, so it cannot distinguish an in-flight server write from a validation-gated idle state. In the give flow, `openDescActionSheet('give')` sets `descActionConfirmBtn` (a `.primary` button, line 2774) `disabled = true` at idle (Index.html:6945), waiting for the user to tap a character card. Result: the Confirm button shows a perpetually spinning loader before the user has done anything — it reads as "stuck / already processing" when the app is in fact idle and simply waiting for input. Selecting a target via `selectDescGiveTarget` (7033) clears `disabled` and the spinner stops. The sell-batch path sidesteps this exact problem by toggling its confirm button to `.secondary` while validation-disabled (`updateSellBatchCount`, 5636–5637); the give path does not. **Fix:** toggle `descActionConfirmBtn` to `.secondary` (or remove `primary`) while awaiting a selection — mirroring sell-batch — or scope the spinner to an explicit `.is-loading` class set only by in-flight handlers instead of `:disabled`.
+
+#### Note · Index.html:5635 · Sell-batch confirm correctly avoids the false-spinner trap
+
+**Story: Sell item (batch).** `updateSellBatchCount` disables the confirm button at 0 units but simultaneously toggles it `.secondary` (no spinner pseudo-element) and only restores `.success` (spinner-bearing) when units > 0; during the actual in-flight sell it is `.success` + disabled, so the spinner correctly signals loading. The single-item sell/remove confirm (`descActionConfirmBtn` in sell/remove modes) is never disabled at idle — it uses the arm-to-confirm pattern (`_requireSellConfirm`) instead. Delerium **Received**/**Sell** buttons (4699–4709) are `.secondary`, so they are immune to the spinner rule regardless of their disabled state. The spinner pattern is sound everywhere except the give path above.
+
+#### Note · Index.html:1–1500 · CSS section traced; interactive-flow visual state machines are sound
+
+Section is the entire `<style>` block (no body markup or JS in range). Traced the visual/interaction state for every story that renders through these rules: Give item to character, Sell item (batch + single), Quick-adjust currency/delerium, swipe edit/delete (inventory + notes cards), item description sheet, identity splash, gold/delerium ledger rows. Findings: z-index stacking is internally consistent (`#payReasonSheet` 80 > `.mobile-sheet`/`#descActionSheet`/`#identitySheet` 70 > `.app-header` 22), so no sheet is hidden behind another; swipe-reveal layering is correct (`.inventory-card` z-index 2 sits above `.inventory-delete-action` z-index 1, and notes mirror this); `body.app-modal-open { overflow:hidden }` is a pure CSS scroll-lock whose add/remove correctness lives in JS (`syncModalOpenState`, out of this range). No CSS rule was found that blocks pointer-events on, hides, or otherwise gates an interactive control in any traced flow.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
