@@ -25,9 +25,72 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500, the full `<style>` block — HTML structure begins after 1500)
+
+Stories traced through this section's CSS (display/visibility toggles, swipe styling,
+loading-state pseudo-elements, sheet z-index/overlay styling): **Give item to
+character**, **Sell item / Remove item** (description action sheet steppers + confirm),
+**Receive/Sell crystals** (delerium counter buttons), **Delete inventory item**
+(swipe-delete styling), **Quick-adjust currency** (quick-edit confirm button).
+
+#### BUG · Index.html:513 · Disabled `.primary`/`.success` buttons show a spinning loader even when idle (validation-disabled), misreading as "in flight"
+
+**Story: Give item to character — description sheet → "Give to…" → pick character.**
+The CSS rule
+
+```
+button.primary:disabled::after,
+button.success:disabled::after { … animation: btn-spin .7s linear infinite; }
+```
+
+(lines 513–519) attaches a spinning loader to *any* disabled `.primary`/`.success`
+button, keyed purely on `:disabled` with no separate in-flight class. That is correct
+for buttons disabled *because a `google.script.run` is pending*, but wrong for buttons
+disabled as a *validation gate*.
+
+Concrete manifestation: `openDescActionSheet('give')` (Index.html:6928) sets
+`descActionConfirmBtn` — `class="primary"` (Index.html:2774) — to
+`disabled = true` at rest (line 6945, `confirmBtn.disabled = mode === 'give'`) and
+leaves it visible (`style.display = ''`). So the instant the Give picker opens, the
+Confirm button is already painting a spinning loader, before the user has picked a
+character and before any server call exists. The spinner implies a request is in
+flight; the user may wait for it to "finish" instead of realizing they must tap a
+character first. Confirm only un-disables (and the spinner only stops) once a character
+is selected (line 7033 / 6945 path). This violates "is feedback clear at every step?"
+for the give flow's selection step.
+
+Suggested fix: gate the spinner on an explicit in-flight marker rather than `:disabled`
+— e.g. add a `.is-loading` class in the in-flight handlers and change the selector to
+`button.primary.is-loading::after, button.success.is-loading::after`. (Quick-adjust and
+Add already toggle `disabled` only around the actual round-trip, so they keep their
+spinner; only validation-gated disables like the Give confirm lose the spurious one.)
+Any future `.primary`/`.success` button disabled for validation inherits the same bug,
+so the fix is systemic, not give-specific.
+
+#### Note · Index.html:4885 · Delerium Received/Sell buttons avoid the disabled-spinner bug by design — traced clean
+
+**Story: Receive/Sell crystals.** `deleriumReceivedBtn` / `deleriumSellBtn` are
+`class="secondary"` (Index.html:4699–4700), so the `.primary`/`.success` spinner rule
+never applies. The mixed/zero-counter "inactive" state is conveyed via
+`btn.disabled` *plus* `style.opacity = '0.35'` (lines 4889–4897), i.e. dimming, not a
+loader — the correct affordance for a validation gate. This is the pattern the Give
+confirm should follow. No behavioral defect in this section's delerium styling.
+
+#### Note · Index.html:560 · Swipe-delete and description-sheet stepper styling traced clean
+
+**Stories: Delete inventory item (swipe), Sell/Remove item (description sheet
+steppers).** `.inventory-card` (z-index 2) over `.inventory-delete-action` (z-index 1)
+with the card translated by JS transform is sound; the delete action is only reachable
+once the card is dragged aside. The Sell/Remove confirm buttons in the description
+action sheet are not disabled at rest (only the stepper +/- buttons are bounded via
+`descActionQty` limits, lines 7024–7025), so no spurious spinner there. The
+`.notes-note*` / `.notes-edit-action` / `.notes-delete-action` swipe styles (1226–1307)
+are defined here but unreferenced in markup/JS (legacy v1 chat-notes UI) — dead CSS, no
+runtime path, not reported per audit scope.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
