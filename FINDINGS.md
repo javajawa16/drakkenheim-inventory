@@ -25,9 +25,91 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html lines 1–1500, HTML structure + CSS `<style>` block)
+
+This range is entirely the `<style>` block (design tokens, reset, header, cards,
+forms, sell-batch, ledger, notes, mobile-sheet, identity). Per the audit rules,
+no style/naming findings — only CSS that produces a *behavioral* bug in a user
+story, plus clean-trace confirmation of the visibility/interaction layer the
+sheet-based stories depend on.
+
+**Stories traced (visibility/body-lock layer only — logic lives in later
+sections):** View item details → Give/Sell/Remove (description + descAction
+sheets), Quick-adjust currency/delerium (quickEdit sheet), Receive/Pay gold
+(gold + payReason sheets), Receive/Sell delerium (delerium sheet), Create/Edit
+note (noteForm sheet), Combine duplicate (combine sheet), Sell batch
+(sellBatch sheet), Identity pick (identity sheet), plus the cross-cutting
+"navigate-away / sheet stacking" concern as it touches the `app-modal-open`
+body-scroll lock.
+
+#### RISK · Index.html:1651 · `@media (min-width:700px)` blanket-hides every `.mobile-sheet` and depends on a 13-entry whitelist to restore each — invisible-sheet trap on real phones
+
+The desktop media query (`@media (min-width: 700px)`, line 1623) contains
+`.mobile-sheet { display: none !important; }` (1651), then re-enables visibility
+sheet-by-sheet with thirteen `#id.active { display: block/flex !important }`
+rules (1652–1664). Because the README documents that the **iOS GAS webview
+renders at ~980px CSS width**, *every actual phone* matches `min-width: 700px` —
+so this whitelist is the live code path on real devices, not a desktop-only
+nicety.
+
+The danger is the inverted contract. The base layer says
+`.mobile-sheet.active { display: block }` (1358), so a developer adding a new
+sheet would reasonably expect `.active` to show it. But at ≥700px the
+`!important` blanket hide (1651) overrides that base rule, and *only* the
+explicitly whitelisted IDs are restored. I enumerated all `.mobile-sheet`
+elements in the HTML — inventorySheet (2466), descriptionSheet (2536),
+quickEditSheet (2564), noteFormSheet (2617), combineSheet (2646), goldSheet
+(2666), deleriumSheet (2691), sellItemSheet (2703), sellBatchSheet (2727),
+giveItemSheet (2739), payReasonSheet (2752), descActionSheet (2765),
+identitySheet (2781) — all 13 are present in the whitelist, so **nothing is
+broken today**. The risk is latent: any future sheet added without updating
+lines 1652–1664 will be `display:none !important` even when `.active`, i.e.
+completely invisible and non-interactive on every phone, with no console error
+and no visible failure — the open() call "succeeds," the sheet just never
+appears. That would silently break whichever new story it belongs to.
+
+Suggested fix: replace the blanket hide + whitelist with a single negative
+rule, `.mobile-sheet:not(.active) { display: none !important; }`, which keeps
+the desktop intent (hide inactive sheets, let `.desktop-editor` take over) while
+making every active sheet visible by default — no per-id maintenance, no trap.
+
+#### IDEA · Index.html:934 · Search-results box capped at `max-height: 40vh` is cramped with the keyboard open
+
+**Story: Add library item — search → scan results.** `.results-list` is
+`max-height: 40vh; overflow-y: auto` (934–938). On a phone with the soft
+keyboard raised, the visual viewport collapses; 40vh of an already-reduced
+height shows roughly two result cards, so the user scrolls a tiny inner box to
+get through the ~20 mobile results (README: "20 results on mobile"). The nested
+scroll inside a short window is the friction. Suggest a larger cap (e.g.
+`min(60vh, 480px)`) or sizing the list to the available space below the input
+rather than a fixed `vh` fraction, so more candidates are visible per scroll.
+
+#### Note · Index.html:3482 · `app-modal-open` body-scroll-lock machinery is robust across stacked sheets
+
+Cross-cutting "navigate-away / sheet stacking" trace (body-lock layer). The
+helper `syncModalOpenState()` (3482) sets `app-modal-open` from
+`Boolean(document.querySelector('.mobile-sheet.active'))`, so the body scroll
+lock reflects whether *any* sheet remains open — the correct pattern for stacked
+sheets. The stacked flow (tap card → descriptionSheet z70 → "Give to…" →
+descActionSheet z81) closes correctly: `closeDescActionSheet` (6953) removes
+only the sub-sheet then calls `syncModalOpenState`, which keeps the lock because
+the description sheet is still active; `closeDescriptionSheet` (6921) then clears
+it. Nearly all open/close paths route through the helper (28 call sites). The
+few direct `add('app-modal-open')` on *open* (diceOverlay 3580, identity 4575,
+descriptionSheet 6815) are harmless since they only set the flag true while
+something is opening. z-index ladder is consistent and intentional: base sheet
+70, sellItem/giveItem 80, descAction 81, sellBatch 82, identity 90, so every
+sub-sheet stacks above its parent. One harmless gap: `syncModalOpenState` keys
+off `.mobile-sheet.active` only, and `#diceOverlay` is a `.dice-overlay` (2792),
+not a `.mobile-sheet`; if a sheet-close ran while the dice calc was open the
+lock could drop underneath it — but no flow triggers this (the d20 lives in the
+header at z22, below all sheets, so dice can never coexist with an open sheet,
+and no timer/poll calls the helper). Noted for the record, not a live bug.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
