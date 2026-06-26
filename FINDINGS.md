@@ -25,9 +25,80 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure + CSS; sheet visibility/z-index state machine across all sheet-based stories)
+
+This section is predominantly design tokens and CSS. Per audit rules, pure
+style/naming/dead-code issues are skipped; only CSS that drives a *behavioral*
+bug in a traced user story is reported. The section's substance is the
+sheet/modal visibility state machine, which backs every sheet-based story.
+
+#### RISK · Index.html:1651 · Sheet visibility on the GAS webview rides on a hand-maintained ID allow-list
+
+The iOS GAS webview renders at ~980px CSS width (README, line 192), so the
+`@media (min-width: 700px)` block (Index.html:1622) is **always active on the
+real phone target** — the author confirms this at line 1676 ("media queries are
+dead in the AS webview"). Inside that block, line 1651 sets
+`.mobile-sheet { display: none !important; }`, hiding **every** sheet, and each
+sheet is re-enabled only by an explicit per-ID line
+(`#descriptionSheet.active { display: block !important }`, etc., lines
+1652–1664). I cross-checked all 13 `.mobile-sheet` elements (inventorySheet,
+descriptionSheet, quickEditSheet, noteFormSheet, combineSheet, goldSheet,
+deleriumSheet, sellItemSheet, sellBatchSheet, giveItemSheet, payReasonSheet,
+descActionSheet, identitySheet) against the allow-list — all 13 are present, so
+the app is correct **today**. The risk is structural: the base rule
+`.mobile-sheet.active { display: block }` (line 1358) only governs below 700px,
+i.e. in a narrow desktop browser. So any sheet added in a future session will
+display correctly in a narrow-window dev test yet be **100% invisible on the
+actual phone**, because its `.active` rule never overrides the
+`display:none !important` in the live media block. This is a latent landmine for
+every sheet-based story (quick-adjust, description, give, sell, combine, gold
+pay, delerium, note form, identity). Suggested fix: replace the per-ID allow-list
+with a single `@media(min-width:700px){ .mobile-sheet.active{display:block !important} }`
+(plus the one `#descActionSheet.active{display:flex !important}` exception for the
+bottom-anchored layout) so new sheets are visible by default.
+
+#### RISK · Index.html:1370 · `#descActionSheet` base rule sets `display:flex` unconditionally — sheet is permanently visible below 700px
+
+`#descActionSheet { … display: flex; align-items: flex-end; }` (lines 1367–1371)
+sets `display` on the ID selector with no `.active` qualifier. ID specificity
+(1,0,0) beats the base `.mobile-sheet { display: none }` class rule (line 1353,
+0,1,0), so on any viewport **below 700px** the description-action sheet renders
+its full-screen blurred backdrop (`rgba(6,10,20,.55)` + `blur(4px)`)
+**permanently**, not just when `.active` — blocking the whole UI. It is masked on
+the deployed target only because the GAS webview always renders ≥700px, where
+`.mobile-sheet { display: none !important }` (line 1651) governs and the sheet
+correctly hides until `#descActionSheet.active` (line 1653). The correctness of
+the unified description-action sheet (View item details → Sell for Gold / Give
+to… / Remove) therefore hinges entirely on the `!important` media block; the base
+rule is wrong. Fix: move the `display:flex; align-items:flex-end` onto
+`#descActionSheet.active` and leave the base rule to inherit `display:none` from
+`.mobile-sheet`.
+
+#### Note · Index.html:1352 · Sheet z-index/modal state machine is internally consistent — navigate-away cross-cutting is structurally prevented
+
+Traced the modal/z-index state machine for every sheet-based story. Stacking is
+consistent: base `.mobile-sheet` z70 < giveItemSheet/sellItemSheet/payReasonSheet
+z80 < descActionSheet z81 < sellBatchSheet z82 < identitySheet z90. Every
+sub-sheet opened from a parent exceeds its parent's z-index — `openGiveItemSheet`
+/`openSellItemSheet` (z80) are invoked only from inventorySheet/quickEditSheet
+(base z70), and the description sheet (z70) opens the unified descActionSheet
+(z81), so no sub-sheet ever renders behind its parent. Bottom-nav is z30 (line
+1585), below all sheets, and `syncModalOpenState` (line 3483) adds
+`body.app-modal-open { overflow:hidden }` (line 110) whenever any
+`.mobile-sheet.active` exists. Consequence: while any sheet (or its in-flight op)
+is open, the bottom-nav tabs are physically covered and untappable, so the
+**"navigate-away via tab switch while in-flight" cross-cutting scenario cannot
+occur** for sheet-based flows. Delete (deleteSelectedInventory, line 7831) is
+optimistic and closes the panel immediately, so its `.danger` confirm button
+never lingers in a disabled-no-spinner state, and the unified action confirm
+button is `.primary` (line 2774), which does get the in-flight spinner
+(lines 513–519). Stories traced: Quick-adjust currency/delerium, View item
+details, Give item, Sell item, Delete inventory item, Create/Edit note, and the
+"Tab switch during in-flight" cross-cutting story.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
