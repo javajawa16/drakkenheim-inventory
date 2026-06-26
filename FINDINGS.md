@@ -25,9 +25,25 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure / CSS)
+
+This slice is entirely the `<style>` block (CSS runs to ~line 2174; `<body>` begins at 2177). Per the audit charter I ignored pure styling and looked only for CSS that produces *behavioral* bugs in the catalog flows. I traced the visual/state layer of every story whose components are styled here: **Edit/Delete inventory item** (`.inventory-card`, swipe `.inventory-delete-action` + `.delete-armed`/`.deleting`), **View item details** (`.description-stat-block`, `.description-text`, `#descriptionSheet`), **Give / Sell / Remove item** (`#descActionSheet`, `.result-card.give-option`, stepper actions), **Quick-adjust currency/delerium** (`.dashboard-stat` → `#quickEditSheet` → `.quick-editor`/`.quick-actions`), **Combine duplicate** (`#combineSheet`), **Gold/Delerium ledger note edit** (`.resource-ledger-row` + `.expanded`/`.selected-for-edit`), **Receive/Sell delerium** (`.delerium-row`, counters), **Party Notes create/edit/pin/archive** (`.note-card.note-pending`, `.notes-*`), **Identity selection** (`#identitySheet`, `.identity-card`), and the shared **mobile-sheet** overlay machinery + `body.app-modal-open` scroll lock.
+
+#### RISK · Index.html:1370 · `#descActionSheet` is permanently visible on any sub-700px viewport (Give / Sell / Remove blocked)
+
+**Stories: Give item to character, Sell item, Remove item.** The give/sell/remove action sheet is shown/hidden purely by toggling `.active` (JS at 6949/6954). But the base rule `#descActionSheet { display: flex; align-items: flex-end; }` (line 1370) carries **ID specificity (0,1,0,0)**, which overrides the hide rule `.mobile-sheet { display: none; }` (line 1356, class specificity 0,0,1,0). The only place the sheet is actually hidden when inactive is inside the **`@media (min-width: 700px)`** block (line 1623): `.mobile-sheet { display: none !important; }` (1651) + `#descActionSheet.active { display: flex !important; }` (1653). 
+
+So the hide/show logic only works when the desktop media query matches. It matches on the iOS GAS webview because that webview reports ~980px CSS width (README "CSS / Layout Architecture Notes"), which masks the bug on the primary platform. On any client that reports its **true** narrow width — an Android phone/webview (`pointer: coarse` sets `html.is-phone` but width ≈ 360–412px, so `min-width:700px` does **not** match), or a narrow desktop window — the `!important` overrides never apply, the bare `display: flex` wins, and `#descActionSheet` (a `z-index:81` full-viewport dark overlay with the action panel pinned to the bottom) is rendered **on top of the entire app from page load**, before any item is even selected. Result: the app is unusable (overlay covers everything) and Give/Sell/Remove can never be reached, for those users.
+
+`#descActionSheet` is the only sheet with this defect — every other `.mobile-sheet` (inventory/description/quickEdit/combine/gold/delerium/sellItem/identity) relies on the class-level `.mobile-sheet { display:none }` + `.mobile-sheet.active { display:block }` pair (both class specificity, `.active` wins by source order), so they hide correctly on all viewports. Fix: move `display: flex; align-items: flex-end;` out of the bare `#descActionSheet { … }` rule and into a global `#descActionSheet.active { display: flex; align-items: flex-end; }` rule, leaving only `background`/`backdrop-filter` on the base selector — matching the pattern every other sheet uses.
+
+#### Note · Index.html:2151 · Pending-note click guard is correctly CSS-enforced; mobile-sheet hide pattern otherwise clean
+
+**Stories traced: Create note (optimistic), Party Notes interactions.** The actively-rendered note card is `.note-card.note-pending` (render at 4141, badge `Saving…` at 4146), and its rule at line 2151 sets both `opacity: .6` **and** `pointer-events: none`, so an in-flight optimistic note genuinely cannot be tapped (matches the README claim). Note: the older `.notes-note*` swipe-card CSS block (1226–1307) sets `.notes-note.pending { opacity: .72 }` with **no** `pointer-events: none`, but that class set is not what the current Party Notes list renders, so there is no live clickability hole. The `descActionConfirmBtn` (Give/Sell/Remove confirm) is `class="primary"` (2774), so it inherits the `button.primary:disabled::after` spinner (513–519) and gives correct in-flight feedback. All sheets except `#descActionSheet` (above) use a clean class-specificity hide/show pair; `body.app-modal-open { overflow:hidden }` (110) is driven by `syncModalOpenState()` on every open/close, so the scroll lock is balanced.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
