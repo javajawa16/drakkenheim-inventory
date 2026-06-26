@@ -25,9 +25,31 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html lines 1–1500, HTML structure + CSS)
+
+Stories traced through this section's CSS/structure: **View item details → Sell / Give to… / Remove** (all routed through `#descActionSheet`), **First-open identity picker** (`#identitySheet`), and the **Party Notes** bottom-nav tab (3-column wrap). The CSS-only sheet-visibility machinery (`.mobile-sheet` default `display:none` → `.active` shows) is the load-bearing mechanism for every mobile sheet flow, so it got the focus.
+
+#### RISK · Index.html:1370 · `#descActionSheet` forces `display:flex` unconditionally — Sell/Give/Remove sheet is permanently open on any viewport < 700px
+
+**Stories: Sell item / Give item to character / Remove item** (description sheet → action sheet). Every other mobile sheet is hidden by default via `.mobile-sheet { display: none }` (line 1353, specificity 0,1,0) and revealed by `.mobile-sheet.active { display: block }`. But `#descActionSheet { … display: flex; align-items: flex-end; }` (line 1370) sets `display:flex` on an **ID selector** (specificity 1,0,0), which beats the class rule. So in the **non-`.active`** state the computed display is `flex`, not `none` — the action sheet (`position:fixed; inset:0; z-index:81`, from `.mobile-sheet`) is a full-screen overlay that is *always rendered*, covering the whole app and blocking all interaction.
+
+The only thing hiding it today is the desktop media query: `@media (min-width: 700px) { .mobile-sheet { display: none !important } … #descActionSheet.active { display: flex !important } }` (lines 1651–1653). The `!important` on the class rule wins back over the ID rule. Because the iOS GAS webview reports `innerWidth ≈ 980px` (per README CSS notes), phones *also* satisfy `min-width:700px`, so the bug is masked on the primary platform and on desktop — which is why it survived to @311.
+
+It is **not** masked on any viewport whose CSS width is genuinely < 700px: an Android phone/WebView rendering at true device width (≈360–412px), a desktop window narrowed below 700px, or a small embed. There, after the identity picker (z-index 90, still above) the user is left staring at the dark `#descActionSheet` overlay with no way past it — the app is unusable. The `#descActionSheet.active { display: flex; }` rule at line 1385 is redundant given line 1370 already forces flex, which is itself the tell that line 1370 was meant to be the *active* declaration.
+
+Fix: remove `display: flex` from the base `#descActionSheet` rule (line 1370), keeping only `background` / `backdrop-filter` / `align-items: flex-end`. The default `.mobile-sheet { display:none }` then hides it, and `#descActionSheet.active { display: flex }` (line 1385, specificity 1,1,0) reveals it as flex when opened — removing the fragile dependency on the desktop media query's `!important`.
+
+#### IDEA · Index.html:2765 · `#descActionSheet` backdrop is not tap-to-dismiss
+
+**Story friction: Sell / Give / Remove — bail out.** `#descActionSheet` docks its panel at the bottom (`align-items: flex-end`, `max-height: 80vh`), leaving a visible blurred backdrop above the panel. Unlike a standard iOS bottom sheet, tapping that backdrop does nothing — the `<div id="descActionSheet">` has no close handler, so the only exit is the Cancel button at the bottom of the panel. Most other sheets here are full-screen panels (no backdrop to tap), so this is the one place the convention is visible-but-dead. Suggest `onclick="closeDescActionSheet()"` on the overlay with `event.stopPropagation()` on `.mobile-sheet-panel`, matching the dice overlay pattern (line 2792) which already does exactly this.
+
+#### Note · Index.html:1353 · Sheet-visibility CSS is otherwise clean; nav 3-col wrap handled in JS
+
+Audited the default-hidden machinery for all mobile sheets. Only `#descActionSheet` (above) breaks the pattern with an unconditional ID `display`; `#payReasonSheet` (line 231) sets z-index only, and every other sheet (`#descriptionSheet`, `#noteFormSheet`, `#goldSheet`, `#giveItemSheet`, `#deleriumSheet`, `#sellItemSheet`, `#sellBatchSheet`, `#combineSheet`, `#identitySheet`, `#inventorySheet`, `#quickEditSheet`) relies purely on `.mobile-sheet`/`.mobile-sheet.active` and defaults correctly to hidden. Sheet z-index stacking is sane (base 70 < descAction 81 < identity 90), so the identity picker always wins. Separately verified the bottom-nav `grid-template-columns: 1fr 1fr` (line 1586): the third "Party Notes" tab starts `display:none` and, when enabled, JS sets the grid to `1fr 1fr 1fr` (line 4518), so the third button never wraps to a second row that would overflow `--nav-height` and hide bottom content. No finding.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
