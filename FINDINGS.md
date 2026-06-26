@@ -25,9 +25,29 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML/CSS — entirely the `<style>` block)
+
+Lines 1–1500 are 100% CSS (the `<style>` opened at line 8 does not close until well past 1500). No HTML structure or JS lives in range. Per the audit rules I did not log pure styling/naming issues — only CSS rules that could produce a *behavioral* bug in a user-story flow. I traced every interactive component whose state is governed by CSS classes in this range, reading the JS render/handler code outside the range as needed. Net result: the styling correctly supports the documented flows; the candidate bugs I chased all resolved to correct behavior. Findings below are two clean-trace confirmations and one friction IDEA.
+
+#### Note · Index.html:316 · Scope-slider indicator `width: 50%` is a pre-paint default, not a layout assumption — clean
+
+**Stories traced: Per-player scope slider (Inventory) and Gold scope toggle (Party Pool / character).** `.scope-slider-indicator` is hardcoded `width: 50%` (line 320), which would be wrong for anything other than 2 pills. Verified this is harmless: `updateInventoryScopeRow` (3809) always builds **exactly 2** options (Party + own character; line 3817-3821), and `updateScopeIndicator` (3829) overrides `left`/`width` from the active pill's `getBoundingClientRect` on the next animation frame. The gold row (5157-5160) follows the same 2-pill pattern. So the CSS value is only the first-paint placeholder before JS positions it — no stuck/misaligned state in normal use. (Minor latent: the indicator is repositioned on scope tap and on rebuild but not on orientation change/resize, so a rotate leaves the px-based indicator briefly misaligned until the next rebuild — visual only, not logged as a bug.)
+
+#### Note · Index.html:512 · Disabled-button spinner is correctly scoped to in-flight only; modal z-index layering blocks navigate-away
+
+**Stories traced: View item details → Sell for Gold / Give to… / Remove; Quick-adjust currency/delerium; Combine duplicate; Pay gold (reason sheet); Receive/Sell crystals; Identity selection.** Two cross-cutting CSS behaviors verified clean:
+
+1. **Spinner feedback (`button.primary:disabled::after` / `button.success:disabled::after`, 513-519).** The animated spinner only renders on disabled `.primary`/`.success` buttons. I checked every `.primary`/`.success` confirm button (`descActionConfirmBtn`, `sellItemConfirmBtn`, `addSubmitBtn`, `quickSheetConfirmBtn`, `quickDesktopConfirmBtn`, Got Paid, Save Note, Combine) and every `.disabled = true/false` toggle (5774, 6231, 7574, 7733, 7825, 7860, 7866): no primary/success button is disabled at rest for validation — `disabled` is set only during the in-flight `gasCall`, so the spinner never shows as a false "loading" signal on an idle button. The delerium/gold Received/Sell/Pay buttons are `.secondary` (4699-4709), which deliberately get no spinner; their feedback comes from optimistic UI + a `Saving…` status line (verified in `receiveDelerium` 4901, which inserts the optimistic row/ledger entry and never disables the button — and is double-tap-safe because `refreshDeleriumStateFromInventory_` folds the optimistic qty into `deleriumOriginalQtys`, collapsing the counter variance to 0 so a second tap finds no items).
+
+2. **Navigate-away via bottom nav is structurally prevented for sheet flows.** Every modal sheet is `position:fixed; inset:0` at z-index 70 (`.mobile-sheet`, 1352), 80 (`#payReasonSheet`, 231), or 81 (`#descActionSheet`, 2765). The bottom-nav is z-index 30 (1585) and the header 22 (179). Because the sheet (and its full-viewport backdrop, even for the flex-end bottom sheets) covers the nav, the user cannot tap an Inventory/Gold/Notes tab while any sheet-based flow (Sell/Give/Remove, quick-edit sheet, combine, pay-reason, note form, identity) has a round-trip in flight. The navigate-away-mid-flight scenario therefore only applies to the *inline* (non-sheet) flows, which are guarded in JS — not a CSS gap.
+
+#### IDEA · Index.html:1789 · Search results capped at 44vh competes with the on-screen keyboard
+
+**Story: Add library item — search → select result.** `.results-list` is `max-height: 40vh` desktop / `44vh` on phone (934, 1789), and the README states 20 results are returned on mobile. With the soft keyboard raised during search, plus the search bar, step indicator, and (once an item is picked) the library preview/stepper all sharing the Add tab, the 44vh scroll box typically surfaces only a few results before the user must scroll within it to reach the rest — friction for picking anything past the first screenful. Consider letting the results list grow to fill available space (flex column with the list as the scroll region) instead of a fixed vh cap, so more matches are visible before the keyboard steals room.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
