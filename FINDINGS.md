@@ -25,9 +25,25 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html lines 1–1500, HTML structure + CSS; traced into render/handler JS at 2151, 4141, 6156, 7785–7924)
+
+Lines 1–1500 are **pure CSS / design tokens** — the live `<body>` DOM does not start until ~line 2400 (`#notesList` at 2460), and the first JS is far below. So this range defines the *state-class machinery* that the write flows toggle, rather than any logic itself. I traced every story that toggles a class defined here, following the toggles into the render/handler JS to confirm each state class is actually wired and survives failure + navigate-away. No behavioral defect found in this range. Findings below are one baseline Note and one verification Note.
+
+#### Note · Index.html:560–607 · Swipe-delete state machine (`.inventory-card` / `.delete-armed` / `.deleting`) is sound
+
+**Stories traced: Delete inventory item (swipe), Edit inventory item (swipe).** The CSS state classes in this range drive the swipe flow: `.inventory-card` (560) takes a JS-set inline transform with no CSS transition during drag (`.snap` at 573 adds the snap-back transition); `.inventory-delete-action` (587) is revealed behind the card (z-index 1 vs card z-index 2, row `overflow:hidden` at 543 clips it). I traced the toggles into `handleInventoryDeleteActionById` (7796) and `deleteSelectedInventory` (7831):
+- **Two-step arm** (`.delete-armed`, 601): first tap sets `dataset.armed` + "Confirm?" + class, with a 2500 ms auto-disarm timer (7808) that cleanly removes the class/dataset. Second tap clears the timer (7820), fires the delete. No stuck-armed state — the timer is the safety net if the user walks away after one tap.
+- **Failure recovery is complete:** both `onDeleteSuccess(!res.ok)` (7897) and `onDeleteFail` (7911) restore `previousRows`, re-render, and surface the error in `inventoryStatus`. `swipedInventoryId` is cleared (7888) before the optimistic render, so on failure the card returns *closed* and is immediately retryable — no reload needed. ✅ matches audit step (b).
+- **Navigate-away (step c):** the optimistic `inventoryRows` mutation + `renderInventory()` (7890) happen synchronously before the round-trip; on success `cacheInventoryRows` persists. If the user tab-switches mid-flight, the in-memory rows are already consistent and the handler's later success/fail still mutates the shared array correctly (no captured-DOM-node dependency for the data path). ✅
+- Minor, non-behavioral: the `.deleting` class + `disabled` (7824–7825) are set on the swipe button *immediately before* the optimistic `renderInventory()` destroys and recreates that very button, so the red "Deleting…" flash never actually paints in the swipe path — but feedback is fully covered by the `inventoryStatus` "Deleting… / Deleting <item>…" text (7868, 7891). Not worth a fix; noted only to confirm the trace.
+
+#### Note · Index.html:1184–1348 vs 2151 · Live pending-note card is correctly non-interactive; the matching CSS in *this* range is dead
+
+**Stories traced: Create note (optimistic), Pin note.** README (line 82) promises in-flight note cards are "dimmed + non-clickable with Saving… badge." This range contains a `.notes-note.pending` rule (1288) that **only** sets `opacity:.72` (no `pointer-events:none`) — which would leave a saving card tappable. I verified this is **dead CSS**: the entire `.notes-note*` / `.notes-list` / `.notes-composer` block (1184–1348) is the retired v1 (CAMPAIGN_NOTES_FEED) styling and is referenced by **no** DOM node or `createElement` anywhere in the file. The **live** Party Notes list renders `note-card` elements (4141) into `#notesList.notes-list-body` (2460), and the live pending rule at `.note-card.note-pending` (2151) correctly sets `opacity:.6; pointer-events:none`, with the `Saving…` badge emitted at 4146 (`.note-saving-badge`, 2152). So the documented behavior holds on the live path; the in-range rule is moot (dead-code, not reported as a defect per audit scope). Also spot-checked the ledger-row edit path (`.resource-ledger-row`, 692) for the **Edit ledger note** story: pending entries render without the `editable`/`onclick` hooks (6156, 6162) so a not-yet-confirmed ledger row can't be opened for edit, and phone tap-target size is enlarged at 1915/1919 — clean.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
