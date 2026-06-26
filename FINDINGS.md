@@ -25,9 +25,87 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500 + #descActionSheet markup/JS, sheet-display cascade)
+
+Section 1–1500 is entirely CSS (the `<style>` block runs to line 2174). Per the
+audit rules, pure visual/style issues are out of scope; this run traces the
+*behavioral* consequences of the display/visibility rules that gate the mobile
+sheets, for the stories whose UI is styled here: **View item details · Give item ·
+Sell item · Remove item** (all four route through `#descActionSheet`),
+**Quick-adjust currency/delerium** (`#quickEditSheet`), and a verification pass on
+the in-flight disabled-button spinner across **Add item / Sell** flows.
+
+#### BUG · Index.html:1370 · `#descActionSheet` is permanently visible on any viewport < 700px (Sell / Give / Remove flows blocked)
+
+**Stories: View item details → Sell for Gold / Give to… / Remove.** The base rule
+(no media query) sets `display: flex` on the **ID** selector:
+
+```
+#descActionSheet { background: rgba(6,10,20,.55); backdrop-filter: blur(4px); display: flex; align-items: flex-end; }   /* line 1367–1371 */
+```
+
+`.mobile-sheet { display: none }` (line 1353) is a **class** selector (specificity
+0,1,0). `#descActionSheet` is an **ID** (specificity 1,0,0), so its `display:flex`
+wins the cascade and the overlay renders **even when `.active` is absent**. The
+element is `.mobile-sheet` → `position:fixed; inset:0`, `z-index:81` (the highest
+sheet), with its own translucent background + blur, so on page load — before any
+interaction — it covers the entire app with a dim, blurred backdrop and an empty
+bottom panel. It also has **no backdrop-tap close handler** (contrast `#diceOverlay`
+at 2792 which has `onclick="closeDiceCalc()"`), so there is no escape: the app is
+unusable.
+
+Why it hasn't been caught: the corrective `.mobile-sheet { display:none !important }`
+that actually overrides the ID rule lives **inside** the `@media (min-width:700px)`
+block (line 1651), with `#descActionSheet.active { display:flex !important }` at
+1653. The iOS GAS webview renders at ~980px CSS width (README CSS notes), so the
+dev/test platform always hits the ≥700px path where the `!important` rescues it —
+the bug is invisible there. But the `<meta viewport>` is `width=device-width`
+(line 5), so **Android Chrome (~360–412px), small phones reporting true width, and
+any desktop window narrower than 700px** fall into the base path and get the stuck
+overlay. `#descActionSheet` is the **only** sheet with an ID-level `display` rule
+outside the media query; every other sheet relies on class-specificity
+`.mobile-sheet` / `.mobile-sheet.active` and behaves correctly in the base path.
+
+Fix: drop `display:flex` from the base `#descActionSheet {…}` rule and move it onto
+`#descActionSheet.active { display:flex; }` (line 1385 already exists for the active
+state — the base rule only needs the background/blur/align-items). That restores the
+inactive→`display:none` inheritance from `.mobile-sheet` on all viewports.
+
+#### RISK · Index.html:1651 · Desktop sheet-whitelist is the *live* path on iOS — adding a `.mobile-sheet` without listing it makes it open invisibly
+
+**Cross-cutting (all sheet-driven stories).** Because the ~980px webview always
+matches `@media (min-width:700px)`, the desktop block is the active styling path on
+the primary platform. That block hides every sheet with
+`.mobile-sheet { display:none !important }` (1651) and then re-enables exactly 13
+sheets by hardcoded ID (`#descriptionSheet.active … #quickEditSheet.active`,
+1652–1664). All 13 current `.mobile-sheet` IDs are present, so nothing is broken
+today. But the whitelist is a silent landmine: any future sheet added to the markup
+without a matching `#newSheet.active { display:block !important }` line will toggle
+`.active` in JS yet remain `display:none` on iOS — opening to nothing, with no error.
+Recommend a single non-`!important`-defeating rule
+(`.mobile-sheet.active { display:block }` already exists but is out-specificity'd by
+the `!important`); a maintainable fix is `.mobile-sheet.active { display:block !important }`
+covering all sheets generically, with per-ID overrides only where a sheet needs
+`flex`/`block` differences (e.g. `#descActionSheet`).
+
+#### Note · Index.html:513 · In-flight spinner and description-action layout trace clean
+
+Verified the disabled-button spinner (`button.primary:disabled::after` /
+`button.success:disabled::after`, 513–519) is **not** a false-loading hazard: every
+`.primary`/`.success` button that toggles `disabled` does so only in-flight (set
+`true` immediately before `gasCall`, reset to `false` in both success and error
+handlers — sellBatchConfirmBtn 5774/5802/5818, sellItemConfirmBtn, descActionConfirmBtn,
+Add button 7733). The delerium `[Received]`/`[Sell]` buttons that get disabled for the
+*validation* "mixed counters" state are `.secondary` (4699–4709), so they correctly
+show no spinner. Also confirmed the description detail sheet's four action buttons
+(Add/Sell/Give/Remove + Done) and the `#descActionSheet` Confirm/Cancel live in
+`.mobile-sheet-actions` (flex-shrink:0, outside the scrollable `45vh`-capped body), so
+they stay reachable on small phones during the Give/Sell/Remove steppers.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
