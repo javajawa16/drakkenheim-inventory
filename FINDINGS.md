@@ -25,9 +25,25 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure + CSS; boot-visibility gate, modal scroll-lock, pending-note clickability)
+
+Section is the `<style>` block plus the boot/visibility token CSS. Traced every story whose **visual state machine** is defined here: app-open/first-load (boot reveal), Create note → tap-before-confirm (pending-card clickability), and the dice-calc overlay (uncovered interactive component). Read JS outside the range (`markInventoryReady`, `loadInventory`, `applyIdentity`, `syncModalOpenState`, dice calc) to confirm the CSS states are driven correctly.
+
+#### RISK · Index.html:110 · Dice-calc scroll-lock can be silently released by `syncModalOpenState()`
+
+**Uncovered component: dice calculator overlay.** Body scroll-lock is `body.app-modal-open { overflow: hidden; }` (line 110). The single source of truth for that class is `syncModalOpenState()` (3482), which sets it to `Boolean(document.querySelector('.mobile-sheet.active'))` — i.e. it derives the lock *solely* from open mobile-sheets. But the dice overlay is `<div id="diceOverlay" class="dice-overlay">` (2792), **not** a `.mobile-sheet`, and `openDiceCalc()` (3578) adds `app-modal-open` out-of-band. Consequence: while the dice calc is open, any call to `syncModalOpenState()` finds no `.mobile-sheet.active` and **removes** `app-modal-open`, lifting the scroll-lock with the overlay still up. The `resize` handler (8718) calls `syncModalOpenState()` on every resize, so an orientation change (or any viewport resize) while the calc is open lets the background scroll behind it. `closeDiceCalc()` (3583) happens to work only because it also calls `syncModalOpenState()` after removing `.open`. Fix: make `syncModalOpenState` consider the dice overlay too, e.g. `toggle('app-modal-open', Boolean(document.querySelector('.mobile-sheet.active, #diceOverlay.open')))`, so the lock state is derived from *all* overlays rather than re-set out-of-band.
+
+#### Note · Index.html:118 · Boot reveal gate is robust on every load outcome
+
+**Stories traced: app-open / first-load, identity-fail.** The header/main/nav start invisible via `html.app-booting { opacity:0; translateY(10px) }` (118–123) and are revealed by `html.inventory-ready` (125–130). The only thing that flips the classes is `markInventoryReady()` (3486), guarded by `inventoryReadyTransitioned`. Verified every `loadInventory` (3716) exit calls it: in-memory paint (3730), cache paint (3741), `res.ok===false` (3767), in-flight-write defer (3771), success re-render (3784), and the failure handler (3790). Critically, `setCommandMode('inventory')` runs at boot (8737) **before** `loadMyIdentity()` (8741), so `loadInventory()` fires independent of identity — a failing `apiGetMyCharacter` cannot strand the app invisible. Identity failure instead shows `#identitySheet`, a `.mobile-sheet` that `app-booting` does **not** hide. No stuck-invisible state found.
+
+#### Note · Index.html:1288 · Pending-note "non-clickable" guarantee holds (correct class in active UI)
+
+**Story traced: Create note → optimistic card appears → tap (edit/pin) before server confirms.** README promises pending note cards are "dimmed + non-clickable." The active Party Notes renderer emits `<div class="note-card … note-pending">` (4141), and `.note-card.note-pending { opacity:.6; pointer-events:none; }` (2151) enforces both. The visually-similar rule **in this section**, `.notes-note.pending { opacity:.72; }` (1288), sets opacity only with no `pointer-events:none`, but it styles the **legacy v1** notes UI (`.notes-note` / `.notes-note-card`), not the bottom-nav Party Notes — so the missing guard there is harmless dead-path styling, not a clickable-temp-ID bug in the live flow.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
