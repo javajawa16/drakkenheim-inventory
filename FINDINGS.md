@@ -25,9 +25,72 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML head / design tokens / CSS)
+
+This range is ~entirely the `<style>` block (design tokens, header, scope sliders,
+delerium counters, cards, forms, buttons, swipe actions, ledger rows, notes CSS,
+mobile sheets, identity sheet). Behavioral surface is thin; the value here is
+confirming that CSS state machines for live flows don't trap or mislead. Traced:
+Delete inventory item (swipe), Quick-adjust currency, Create/Edit note (optimistic),
+Sell Items batch, item description sheet, Identity selection, Dice calculator.
+No BUG/RISK found — the live components are clean. Details below.
+
+#### Note · Index.html:513 · Disabled-spinner rule is scoped correctly (primary/success only) — not a bug
+
+The `button.primary:disabled::after` / `button.success:disabled::after` spinner
+(513–519) fires on ANY disabled state, which would be a fake "loading" indicator
+if such a button were disabled for *validation* rather than in-flight. Verified it
+is safe by design: validation-gated confirms use `.secondary`/`.danger`
+(e.g. `sellBatchConfirmBtn` ships `class="secondary" ... disabled` reading "Select
+items to sell" at 5742–5743; quick-edit confirm at 7568–7575 returns early on bad
+input *without* disabling, then disables only at submit). Action buttons that
+disable *only* during a round-trip are `.primary`/`.success`, so their spinner
+always means genuine in-flight work. Logging the rationale so a future run doesn't
+"fix" this by extending the spinner to secondary/danger — that would introduce the
+fake-spinner bug. Stories traced: Sell Items batch, Quick-adjust currency.
+
+#### Note · Index.html:2151 vs 1288 · Live pending-note class correctly blocks taps; `.notes-note*` block is dead legacy CSS
+
+README claims pending (optimistic, unsaved) note cards are "dimmed + non-clickable."
+The LIVE render (4141) emits `class="note-card ... note-pending"`, and the live rule
+`.note-card.note-pending { opacity:.6; pointer-events:none }` (2151) enforces both —
+so tapping a still-saving card cannot open the editor against a temp `NOTE_TEMP_*`
+id (4331). The `.notes-note` / `.notes-note-card` / `.notes-edit-action` /
+`.notes-delete-action` / `.notes-note.pending` block (1226–1308) is from a retired
+swipe-based notes UI: none of those class names appear in any JS render. Dead CSS,
+out of audit scope — noted only to confirm the `.notes-note.pending { opacity:.72 }`
+rule (which lacks `pointer-events`) is NOT the one in effect. Story traced: Create note
+(navigate/tap-during-in-flight).
+
+#### Note · Index.html:110,3482 · Modal scroll-lock recompute is robust; dice/sheet exclusion is harmless
+
+`body.app-modal-open { overflow:hidden }` (110) is the global scroll lock. Open paths
+add it directly (openDiceCalc 3580, openIdentitySheet 4575, description sheet 6815);
+nearly all CLOSE paths route through `syncModalOpenState()` (3482), which RECOMPUTES
+the lock from `Boolean(document.querySelector('.mobile-sheet.active'))`. Because the
+lock is always re-derived on close (never blindly removed), it cannot get stuck ON.
+The dice overlay (`#diceOverlay.open`) is not a `.mobile-sheet`, so it is excluded
+from that query — but this is harmless: the dice d20 lives in the header (z-index 22),
+which a `.mobile-sheet` (z-index 70) fully covers, so dice and any sheet are mutually
+exclusive in practice (cannot open one over the other). `closeDiceCalc` (3583) still
+correctly clears the lock via the recompute since no sheet is active. The lone direct
+`.remove` (confirmIdentity 4603) runs only when the full-screen identity sheet — the
+sole modal at first launch — is dismissed, so no other modal can be stranded.
+Stories traced: Dice calculator, Identity selection, item description sheet.
+
+#### Note · Index.html:539,587 · Swipe-delete reveal layering is sound
+
+`.inventory-row { overflow:hidden }` clips the action; `.inventory-delete-action`
+(z-index 1, 587) sits behind `.inventory-card` (z-index 2, 560) and is revealed by the
+card's JS-driven `translateX`. `.delete-armed` / `.deleting` give distinct arm/commit
+visuals (601–607) without a spinner — the card's own slide is the feedback. No CSS
+state here can strand the row open (snap-back transition at 573 returns it). Story
+traced: Delete inventory item (swipe → confirm).
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
