@@ -25,9 +25,33 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure + CSS; traced descActionSheet show/hide cascade, give/sell/remove confirm states, swipe/sheet z-index layering)
+
+#### BUG · Index.html:1370 · `#descActionSheet` base rule forces `display:flex` → sheet is permanently visible on any viewport < 700px CSS width
+
+**Stories: View item details / Give item / Sell item / Remove item.** All three description-sheet actions (Sell for Gold, Give to…, Remove) and the `add` mode run through the single `#descActionSheet` overlay. Its show/hide is driven purely by toggling the `.active` class (`openDescActionSheet` adds it at Index.html:6949, `closeDescActionSheet` removes it at 6954). Hiding relies on the base rule `.mobile-sheet { display: none }` (1352) applying when `.active` is absent.
+
+But the element-specific rule at **1367–1371** declares `display: flex; align-items: flex-end;` unconditionally:
+```
+#descActionSheet { background:…; backdrop-filter:…; display: flex; align-items: flex-end; }
+```
+An ID selector (specificity 1,0,0) outranks `.mobile-sheet` (0,1,0) **and** `.mobile-sheet.active` (0,2,0). So `display:flex` wins on every state — the sheet never hides. The author clearly intended display to be `.active`-gated: the dedicated rule `#descActionSheet.active { display: flex }` already exists at **1385** (and is duplicated with `!important` in the desktop block at 1653), which would be redundant if the base were correct. The defect is the stray `display: flex` on line 1370; it belongs only on the `.active` variants. `align-items: flex-end` can stay on the base rule.
+
+**Why it's currently masked, and where it bites:** the desktop media query `@media (min-width:700px)` (1623) contains `.mobile-sheet { display: none !important }` (1651), whose `!important` beats the ID rule and restores correct hiding. The iOS GAS webview renders at ~980px CSS width (per README), so the media query matches there and the bug is invisible in the primary deployment. **However**, the deployed `/exec` URL opened directly in a phone browser (a common share path for GAS web apps) uses `width=device-width` → innerWidth ≈ 390px → the 700px query does **not** match → the `!important` hide is gone → `#descActionSheet` (z-index 81, full-screen backdrop with `backdrop-filter`) renders on top of everything from first paint and intercepts all taps, bricking the app. `is-phone` (pointer:coarse) does not fix this — none of the `html.is-phone` rules touch `.mobile-sheet` display.
+
+**Fix:** delete `display: flex;` from line 1370, leaving `align-items: flex-end;`. Hiding then falls to `.mobile-sheet { display:none }` and showing to `#descActionSheet.active { display:flex }` — correct on every viewport.
+
+#### RISK · Index.html:513 · Disabled-`.primary`/`.success` spinner CSS shows a perpetual "loading" spinner on input-gated buttons (give-mode Confirm)
+
+**Story: Give item to character.** `button.primary:disabled::after` / `button.success:disabled::after` (513–519) attach an infinitely-animating spinner (`btn-spin`) to *any* disabled primary/success button. The pattern assumes "disabled === a server call is in flight." But `openDescActionSheet('give')` sets `descActionConfirmBtn.disabled = true` (6945) purely to gate input — the Confirm button (`class="primary"`, HTML 2774) stays disabled until the user taps a recipient card (`selectDescGiveTarget` re-enables it at 7033). During that window — i.e. the moment the Give sheet opens, before any network activity — the Confirm button is spinning, signalling "processing…" when nothing is happening. A user may wait for a spinner that will never resolve on its own, or assume the give already fired. Same root rule would affect any other primary/success button disabled for input-gating; the delerium Received/Sell and gold Got Paid/Pay buttons dodge it only because they are `.secondary`. **Fix options:** gate the spinner behind an explicit in-flight class (e.g. `button.is-loading::after`) rather than `:disabled`, or use a `.secondary`/neutral style for input-gated buttons.
+
+#### Note · Index.html:1351 · Mobile-sheet show/hide, swipe, and ledger CSS otherwise trace cleanly
+
+Traced (CSS-level state machine) for the section's interactive components: **Edit/Delete inventory item** (`.inventory-card` swipe transforms + `.inventory-delete-action.delete-armed/.deleting`), **Combine duplicate** (`#combineSheet`), **Quick-adjust currency/delerium** (`.dashboard-stat`, `#quickEditSheet`), **Gold receive/pay/edit-note** (`.resource-pay`, `.resource-ledger-row.expanded/.selected-for-edit`, `#goldSheet`, `#payReasonSheet` z-80), **Delerium** (`.delerium-row` counters, `#deleriumSheet`), **Party Notes create/edit/pin/archive** (`.notes-note.pending/.editing`, `.notes-edit-action`/`.notes-delete-action` swipe reveal). Every other sheet (`#descriptionSheet`, `#goldSheet`, `#payReasonSheet`, `#giveItemSheet`, `#sellItemSheet`, `#sellBatchSheet`, `#combineSheet`, `#identitySheet`, `#quickEditSheet`, `#noteFormSheet`) correctly leaves base `display` to `.mobile-sheet` and shows via `.active` — only `#descActionSheet` carries the stray base `display:flex` flagged above. Sheet z-index ladder (descriptionSheet 70 < pay/sell/give 80 < descAction 81 < sellBatch 82 < identity 90) is internally consistent: descAction's actions are in-sheet modes (no lower-z child sheet opens behind it), so no layering inversion was found in the give/sell/remove flow.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
