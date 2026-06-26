@@ -25,9 +25,33 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML/CSS; traced Give-to-character, Sell/Remove item, Combine, swipe-delete, Identity select, Delerium counters, Party Notes render)
+
+Lines 1–1500 are entirely inside `<style>` (CSS runs to 2174; `<body>` at 2177, `<script>` at 2847). No JS or server calls live here, so the trace looked for CSS rules that change behavior in the stories that render through these classes.
+
+#### RISK · Index.html:513 · Disabled-button spinner CSS fires a fake "loading" spinner on idle, input-gated Confirm buttons
+
+**Story: Give item to character — "pick a character" step.** The rule
+
+```
+button.primary:disabled::after,
+button.success:disabled::after { … animation: btn-spin .7s linear infinite; }
+```
+
+attaches an animated spinner to **every** disabled `.primary`/`.success` button. It conflates two unrelated states: *disabled because a `google.script.run` is in flight* (spinner correct) and *disabled because the app is waiting for user input* (spinner wrong). Concrete victim: `openDescActionSheet('give')` sets `descActionConfirmBtn.disabled = true` at line 6945 purely as an idle gate — "enabled once character selected" — and `selectDescGiveTarget` clears it at line 7033 when the user taps a recipient. In between, the `.primary` Confirm button (markup line 2774) shows a spinning loader, signalling "working…" when nothing is running and the app actually needs the user to act. A user can sit waiting for a non-existent operation instead of selecting a recipient. Fix: gate the spinner on an explicit class (e.g. `button.is-loading::after`) toggled only while a real round-trip is pending, not on `:disabled`. (Sell/Remove modes of the same sheet do not idle-disable the Confirm button, so they are unaffected; the bug is specific to give-mode.)
+
+#### Note · Index.html:1288,2151 · Party Notes pending-card guard is correctly double-protected; `.notes-note*` block is legacy/dead CSS
+
+Traced **Create note (optimistic)**. The README claims optimistic (un-saved) note cards are "dimmed + non-clickable." The CSS at line 1288 (`.notes-note.pending { opacity:.72 }`) has no `pointer-events:none`, which looked suspect — but it belongs to an unused legacy chat-style notes UI (`.notes-note`, `.notes-note-card`, `.notes-edit-action`, `.notes-delete-action`, lines 1184–1348) that no markup or JS references. The live Party Notes UI renders `.note-card` and uses the rule at line 2151 (`.note-card.note-pending { opacity:.6; pointer-events:none }`) AND omits the `onclick` entirely when pending (render at 4141–4142: `${isPending ? '' : onclick…}`). Double-guarded — no way to open an edit against a temp note ID. Clean.
+
+#### Note · Index.html:248,4889 · Delerium Sell/Received idle-disable does NOT trigger the spinner — clean
+
+Traced **Receive crystals** and **Sell crystals**. The Sell/Received buttons (markup 4699/4700/4709) are `class="secondary"`, and the idle-state `disabled` toggles at 4889/4895 (treasurer, direction-gated) and 5635 (non-treasurer, `totalUnits === 0`) therefore never hit the `:disabled::after` spinner rule (which targets only `.primary`/`.success`). No misleading feedback on the delerium counters. This is also why the RISK above is contained: most idle-gated buttons in the app happen to be `.secondary`; the give-mode Confirm is the one `.primary` button that is idle-disabled.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
