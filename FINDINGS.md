@@ -25,9 +25,25 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure / CSS) — 2nd pass
+
+**Stories traced through Index.html 1–1500 (entire `<style>` block):** Re-traced every story whose UI component is *defined* by CSS here, reading the driving JS as needed — Quick-adjust currency/delerium (`#quickEditSheet` 2564, `openGiveItemSheet`/`confirmQuickEdit`), Edit/Delete inventory (`#inventorySheet` 2466), View item details + Give/Sell/Remove (`#descriptionSheet` 2536 → `#descActionSheet` 2765, `openDescActionSheet` 6928), Combine duplicate (`#combineSheet` 2646), Receive/Pay/Split gold (`#goldSheet` 2666, `#payReasonSheet` 2752), Delerium receive/sell (`#deleriumSheet` 2691), Sell batch (`#sellBatchSheet` 2727), Create/Edit/Archive note (`#noteFormSheet` 2617), Identity first-open (`#identitySheet` 2781). Each checked happy-path → failure-at-step → navigate-away → friction, with execution-trace + state-machine analysis on the overlay layer (z-index stacking, scroll-lock, sheet visibility). **Verified both run-21 fixes are in place** (see below).
+
+#### RISK · Index.html:1651 · Sheet-visibility allowlist remains a manual whitelist — the run-21 BUG was patched, the root cause was not
+
+Run 21's `BUG · Index.html:1522` (now FIXED) showed that `@media (min-width:700px)` sets `.mobile-sheet { display:none !important }` (now line 1651) and re-enables only a hand-curated allowlist of sheet IDs (1652–1664). Because the iOS GAS webview renders at ~980px CSS width, this "desktop" query is effectively the **default** path for real phones (the in-file comment at 1676 even states "media queries are dead in the AS webview") — so the allowlist is the *only* thing that makes any sheet visible, and a `.mobile-sheet.active` rule (1358, no `!important`) cannot override the `!important` hide. I re-enumerated all 13 `.mobile-sheet` elements (inventory, description, quickEdit, noteForm, combine, gold, delerium, sellItem, sellBatch, giveItem, payReason, descAction, identity) against the allowlist — **all 13 are currently present, so there is no live bug.** The fix from run 21, however, only added the two missing entries; the recommended root-cause fix (single-source the visibility decision on `html.is-phone`, the same condition `isMobileLayout()` uses at runtime, so CSS and JS can never disagree) was not applied. The trap is therefore still armed: any future sheet that JS opens by adding `.active` but whose ID is forgotten from the allowlist will be `display:none !important` and silently dead in the GAS webview — exactly the failure mode that already broke Quick-adjust and Edit-item once. Note the allowlist also has a per-sheet display-value coupling: `#descActionSheet` must be re-enabled as `display:flex !important` (1653, bottom-sheet layout) while the rest use `display:block` — a copy/paste of a `block` line for a future bottom sheet would also break it.
+
+#### Note · Index.html:1351 · Overlay z-index stacking, navigate-away blocking, and scroll-lock are sound
+
+Traced for View-details/Give/Sell/Remove, Gold (Pay→reason), and Quick-adjust→Give stories. Z-index ladder is internally consistent and matches the sub-sheet nesting each flow actually uses: identity 90 (1662 inline) > sellBatch 82 > descAction 81 > sellItem/giveItem/payReason 80 > base `.mobile-sheet` 70 > bottom-nav 30 > app-header 22. Every sheet that opens over another opens over a *lower* one (descAction 81 over description 70; payReason 80 over gold 70; giveItem 80 over quickEdit 70) — no path opens a z80 sheet over the z81 descAction sheet, so nothing renders behind its parent. Because every `.mobile-sheet` is `position:fixed; inset:0` with a full-screen backdrop, the bottom-nav (z30) is covered while any sheet is open, so the "navigate-away via tab switch mid-flight" scenario is structurally prevented for all sheet-based writes — the user cannot reach a nav button without first closing the sheet. Scroll-lock (`body.app-modal-open`, 110) is managed by `syncModalOpenState()` (3482), which recomputes the class from a live `document.querySelector('.mobile-sheet.active')` on every open/close, so it self-heals and cannot get stuck locked. Also confirmed: `.note-card.note-pending` (2151) carries `pointer-events:none` (matches README "non-clickable while saving"); the legacy `.notes-note.pending` (1288, opacity only) belongs to the retired v1 notes UI and drives no live flow.
+
+#### Note · Index.html:1532 · run-21 keyboard-offset RISK is fixed
+
+run 21's `RISK · Index.html:1397` (iOS keyboard covers the pinned action bar) is resolved: `.mobile-sheet-actions` (1529) now includes `var(--keyboard-offset)` in its `padding-bottom` (1532), generalizing the offset beyond the campaign-notes sheet to every sheet's action bar (Save/Confirm/Sell). Re-checked against Create/Edit note, Edit inventory, and Quick-adjust — the action bar now lifts with the keyboard on all three.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
