@@ -25,9 +25,33 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500, design tokens + CSS; cross-read descriptionSheet/descActionSheet give-sell-remove handlers ~6940–7110, 7560–7600)
+
+Stories traced through this section's CSS: **Give item to character**, **Sell item**, **Remove item** (description sheet → action → stepper → confirm), **Quick-adjust currency/delerium** (confirm-button spinner state), and the mobile-sheet stacking used by every sheet-based flow.
+
+#### BUG · Index.html:513 · Validation-disabled `.primary` Confirm shows an infinite "loading" spinner before any server call — "Give to…" flow
+
+**Story: Give item to character.** The button-spinner CSS keys the spinner purely off `:disabled`:
+
+```css
+button.primary:disabled::after,
+button.success:disabled::after { /* btn-spin .7s linear infinite */ }
+```
+
+It conflates two distinct states — "in-flight (genuinely loading)" and "disabled for validation (waiting on the user)" — and animates a spinner for both.
+
+Concrete manifestation: `openDescActionSheet('give')` sets `descActionConfirmBtn.disabled = (mode === 'give')` at line 6945, i.e. the `.primary` Confirm button (declared `class="primary"` at line 2774) is disabled the instant the give sheet opens, *before the user has picked a character*. Result: the Confirm button immediately renders a spinning loader at 0.5 opacity, falsely signalling that a server round-trip is already underway. The user can reasonably read this as "it's working, wait" and hesitate to tap a character, or be confused why a button they haven't pressed appears busy. It only stops once `selectDescGiveTarget` re-enables it (line 7033). So the spinner is visible for the entire "pick a character" step — exactly the step where the UI should look idle and waiting.
+
+This is the only idle-disabled `.primary`/`.success` button in the app today (`sellBatchConfirmBtn` is `.secondary`; the quick-edit and add/detail confirm buttons disable only during real in-flight at 7574/7733/7825, where the spinner is correct). But the root cause is the CSS selector, so any future primary/success button disabled for validation inherits the same phantom spinner. Fix: gate the spinner on an explicit loading marker rather than `:disabled` — e.g. add `.is-loading` to the button when the `gasCall` fires and target `button.primary.is-loading::after`, or in the give branch leave Confirm enabled and validate the holder inside `confirmDescAction` instead of pre-disabling.
+
+#### Note · Index.html:231,1352,1385 · Mobile-sheet z-index stacking for the description-action flow is internally consistent
+
+Traced the Sell/Give/Remove paths off the description sheet. The three actions do **not** stack a second lower sheet behind `descActionSheet` (z-index 81) — they morph `descActionSheet` in place via `_descActionMode` (`renderDescActionBody_`), so the legacy `sellItemSheet`/`giveItemSheet` (z-index 80, below 81) are never opened on top of it and there is no behind-the-backdrop render. `payReasonSheet` (in-section CSS sets z-index 80, line 231) is opened only from the Gold tab, not over `descActionSheet`. Base `.mobile-sheet { z-index: 70 }` (1352) with `.active { display:block }` plus the `#descActionSheet.active { display:flex }` override (1385) are coherent. No stuck-stacking bug found in this CSS.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
