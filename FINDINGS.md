@@ -25,9 +25,29 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500: HTML structure / CSS — `<style>` block: design tokens, reset, header, sheet/card/ledger/identity component styles, desktop media block)
+
+Section 1–1500 is entirely the `<style>` block (the first HTML element, `<div id="inventorySheet">`, starts at line 2466). Audited for CSS that drives behavior in user-story flows — sheet display toggles, scroll-lock state, z-index stacking, in-flight feedback — rather than visual styling (out of scope per protocol).
+
+Stories traced through this section's CSS: view item details, give item, sell item, remove item, combine duplicate, quick-adjust currency/delerium, receive/pay gold, receive/sell delerium, edit ledger note, create/edit/pin/archive note, identity selection, swipe edit/delete. Plus cross-cutting tab-switch-during-in-flight and navigate-away (via the scroll-lock / z-index analysis).
+
+#### RISK · Index.html:1651 · `@media (min-width:700px)` is always active in the GAS webview — sheet visibility hangs on a hand-maintained allowlist
+The "desktop" media block does `.mobile-sheet { display: none !important; }` (1651) and then re-shows an explicit allowlist of 13 sheet IDs, each with `!important` (1652–1664). Per the README CSS notes (and the layout reality of the iOS GAS webview rendering at ~980px CSS width), `(min-width:700px)` **matches in production on phones**, not just on real desktops. Two consequences:
+
+1. The base rule `.mobile-sheet.active { display: block; }` (line 1358) **never applies in the deployed app** — it is dead in every production viewport. Every sheet's on-screen visibility depends entirely on having a line in the 1652–1664 allowlist.
+2. The inline comment at line 1676 — *"media queries are dead in the AS webview"* — directly contradicts this. The `@media (min-width:700px)` block is very much live in the webview; it is what makes sheets visible at all.
+
+All 13 current `.mobile-sheet` elements ARE covered by the allowlist (verified: inventorySheet, descriptionSheet, quickEditSheet, noteFormSheet, combineSheet, goldSheet, deleriumSheet, sellItemSheet, sellBatchSheet, giveItemSheet, payReasonSheet, descActionSheet, identitySheet), so there is **no live bug today**. The finding is the latent trap: a future dev who trusts the line-1676 comment and adds a new sheet without an allowlist entry ships a sheet that is invisible in production. The failure mode is nasty — the open handler still runs (`.active` added, `app-modal-open` set → `body { overflow:hidden }`), so the background locks and scrolls nowhere while nothing renders; the app looks frozen with no error. Fix options: (a) make the media block use a single `.mobile-sheet.active { display:block !important }` (with the two flex-display exceptions kept), or (b) correct/delete the misleading line-1676 comment and document that the allowlist is load-bearing on phone.
+
+#### Note · Index.html:3482 · `app-modal-open` scroll-lock reconciles correctly across stacked sheets — no stuck-modal state
+`syncModalOpenState()` sets `body.app-modal-open` iff any `.mobile-sheet.active` still exists. Traced the deepest stacking flow — view item details (descriptionSheet z70) → "Sell/Give/Remove" → openDescActionSheet (descActionSheet z81): both open (6949/6950) and close (6953–6955) call `syncModalOpenState()`, so closing the top sheet while the lower one is still active keeps the body locked correctly, and closing the last sheet unlocks. The only unconditional `classList.remove('app-modal-open')` is in `confirmIdentity` (4603) — safe, because identitySheet (z90, the first-run top overlay) never has another sheet stacked beneath it. Navigate-away note: bottom-nav is z30 and every sheet is z70+, so an open sheet's full-screen backdrop covers the nav — the user cannot switch tabs out from under an open sheet, so no orphaned-sheet stuck state arises from a tab switch. Sheet z-index ladder is internally consistent (base 70; payReasonSheet/sellItemSheet/giveItemSheet 80; descActionSheet 81; sellBatchSheet 82; identitySheet 90) so every sub-sheet stacks above its parent.
+
+#### Note · Index.html:513 · In-flight confirm buttons are `.primary`, so the disabled-state spinner is present in the write flows
+The auto-spinner CSS (`button.primary:disabled::after`, `button.success:disabled::after`, 513–519) only covers primary/success buttons. Verified the buttons that actually go `disabled` mid-write are covered: the description-sheet action confirm `#descActionConfirmBtn` (2774) is `.primary`, and `#sellBatchConfirmBtn` (disabled at 5774) is primary. Swipe-delete's inline confirm is a `.danger` div-action that signals in-flight via the `.inventory-delete-action.deleting` background shift (604–607) instead of a spinner — acceptable feedback, not a gap. The `.sell-confirm-armed` state (504) is a 3s two-tap *pre*-confirm, not an in-flight state, so the absence of a spinner there is correct. No in-flight feedback gap found in the sell / give / remove / delete / combine flows.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
