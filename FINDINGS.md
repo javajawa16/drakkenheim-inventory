@@ -25,9 +25,44 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: Index.html 1–1500 (HTML head, design tokens, all component CSS)
+
+Stories traced through this section's CSS: **View item details**, **Give item to character**, **Sell item**, **Remove item** (all route through the description action sub-sheet `#descActionSheet`), plus the cross-cutting **app boot/reveal** and **modal-open** state machines.
+
+#### BUG · Index.html:1370 · `#descActionSheet` base `display:flex` (ID specificity) defeats the `.mobile-sheet` hide on viewports < 700px
+
+**Stories: View item details → Sell / Give / Remove.** All three description-sheet actions open the sub-sheet via `openDescActionSheet → classList.add('active')` (line 6949) and close it via `closeDescActionSheet → classList.remove('active')` (line 6954). Visibility is supposed to be governed entirely by the `.active` class, exactly like every other `.mobile-sheet`:
+
+```
+.mobile-sheet        { display: none; }     /* specificity 0,0,1,0 */
+.mobile-sheet.active { display: block; }    /* 0,0,2,0 */
+```
+
+But `#descActionSheet` (uniquely among the sheets — it needs `align-items: flex-end` for the bottom-sheet layout) declares an **unconditional** base rule:
+
+```
+#descActionSheet { … display: flex; align-items: flex-end; }   /* 0,1,0,0 — an ID */
+```
+
+An ID selector outranks any number of classes, so in the *inactive* state the cascade resolves to `#descActionSheet { display: flex }`, not `.mobile-sheet { display: none }`. The `.active` toggle therefore does nothing for this sheet's visibility — it is rendered (full-screen `inset:0` dark overlay + blur + bottom panel) **permanently**, from first paint, and `closeDescActionSheet()` cannot hide it.
+
+This is masked on the primary device only by luck: the iOS GAS webview renders at ~980px CSS width, so the `@media (min-width: 700px)` block applies, and *that* block contains `.mobile-sheet { display: none !important; }` (line 1651) — `!important` from a class beats the plain ID — with per-sheet `#descActionSheet.active { display: flex !important; }` (line 1653) re-showing it. So on ≥700px everything works.
+
+On any viewport **< 700px** the media block does not apply, the `!important` reset is absent, and the ID rule wins → the description action overlay covers the app at all times and the Sell/Give/Remove flow is unusable. This is reachable in practice: a player opening the web-app `/exec` link directly in mobile Safari/Chrome (not the 980px-scaling webview) renders at device width (~390px), as does an Android webview that reports true CSS px. `html.is-phone` is keyed off `(pointer: coarse)`, not width, so those devices get phone styling but miss the ≥700px `!important` reset.
+
+**Fix:** drop `display: flex` from the base `#descActionSheet` rule (keep `align-items: flex-end`, which is inert while hidden). Line 1385 already declares `#descActionSheet.active { display: flex; }`, so the inactive state then correctly falls through to `.mobile-sheet { display: none }` and the `.active` toggle drives visibility on every viewport.
+
+#### Note · Index.html:118 · App boot/reveal state machine is safe on every load path
+
+**Cross-cutting trace.** `html.app-booting` holds `.app-header / main / .bottom-nav` at `opacity:0; translateY(10px)`; the reveal happens only when `markInventoryReady()` swaps `app-booting → inventory-ready` (line 3490). Verified `markInventoryReady()` is invoked on all four `loadInventory` outcomes — in-memory/cache repaint (3730/3741), `!res.ok` server-rejection (3767), in-flight-write short-circuit (3771), success (3784), and the failure handler (3790) — and it is idempotent (`inventoryReadyTransitioned` guard). A failed first load still reveals the app with an error message rather than leaving it stuck invisible. The identity splash (`#identitySheet`, a `.mobile-sheet`) is not dimmed by `app-booting` (that rule targets only header/main/nav), so identity selection is reachable before reveal. No stuck-invisible state found.
+
+#### Note · Index.html:3482 · `app-modal-open` body-scroll-lock is derived, not latched
+
+**Cross-cutting trace (navigate-away / double-tap).** `body.app-modal-open { overflow: hidden }` is set by `syncModalOpenState()`, which recomputes `Boolean(document.querySelector('.mobile-sheet.active'))` on every open/close rather than incrementing a counter. This means the scroll lock cannot get stuck on after the last sheet closes, and it stays on correctly while any sheet remains open — robust against opening sheet B before closing sheet A. Clean.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
