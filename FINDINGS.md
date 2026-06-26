@@ -25,9 +25,91 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500, document `<head>` + master `<style>` block)
+
+Section 7 is entirely the `<head>` and one ~1490-line `<style>` block — there is no
+`<body>` markup in range. Per audit rules I ignored style/naming/dead-CSS and traced
+only behavioral interactions between these CSS rules and the JS state machines that
+drive the catalog stories (reading the JS outside range as needed). Stories traced
+through this section: app boot / first-load reveal; identity selection; View item
+details → Give / Sell / Remove (sheet stacking + scroll-lock); Combine; the gold and
+delerium sheets; Party-Notes create/edit; dice calculator; and navigate-away /
+visibilitychange during in-flight writes. Net result: the section is behaviorally
+sound — findings are mostly clean-trace confirmations plus one latent fragility and
+one friction idea.
+
+#### Note · Index.html:118 · Boot reveal (app-booting → inventory-ready) is decoupled from identity and survives load failure
+
+Header/main/bottom-nav are `opacity:0; translateY(10px)` under `html.app-booting`
+(118–123) and revealed only by `html.inventory-ready` (125–130), which is added once
+by `markInventoryReady()` (3486). Traced every reveal path: boot calls
+`setCommandMode('inventory')` (8737) → unconditional `loadInventory()` (3394)
+**before** identity resolves, and `markInventoryReady()` fires on the in-memory path
+(3730), cache path (3741), server-success path (3784), in-response-error path (3767),
+foreign-write-deferral path (3771), **and** the `withFailureHandler` (3790). So a
+first-open whose `apiGetInventory` fails still strips `app-booting` and shows the
+error — the app can never get stuck at opacity 0. The identity picker is a
+`position:fixed` mobile-sheet (z-index 90, outside `main`), so it renders on top even
+while `main` is still hidden. Stories: app boot, navigate-away during first load,
+identity selection.
+
+#### Note · Index.html:110 · Body scroll-lock (app-modal-open) state machine is robust across stacked sheets and navigate-away
+
+`body.app-modal-open { overflow:hidden }` (110) is the scroll lock. Three sites
+manually `add` it (dice 3580, identity 4575, description 6815) and one manually
+removes it (4603), but every sheet *close* routes through `syncModalOpenState()`
+(3482), which recomputes the lock from
+`Boolean(document.querySelector('.mobile-sheet.active'))`. Traced the View-details →
+Give/Sell/Remove stack (description z70 → descAction z81): closing the inner sheet
+keeps the lock because the outer is still `.active`, and closing the outer clears it —
+no premature unlock, no orphaned lock if the user navigates away mid-stack. Stories:
+View item details, Give, Sell, Remove, Combine, Pay-reason, identity, Party-Notes form.
+
+#### Note · Index.html:231 · Sheet z-index tiers are consistently layered — no stacking trap in the description action stack
+
+Enumerated every `.mobile-sheet` z-index: description/combine/noteForm = 70 (default
+`.mobile-sheet`), pay-reason = 80 (CSS 231), sell/give = 80 (inline 2703/2739),
+descAction = 81 (inline 2765), sellBatch = 82 (inline 2727), identity = 90 (inline
+2781); sticky header = 22. The description-sheet flow opens its action/stepper sheet
+at 81 over the 70 description sheet, and the Give/Sell pickers at 80 — every sub-sheet
+is strictly above the sheet that spawned it, so none can render behind its parent.
+Stories: Give item to character, Sell item, Remove item, Combine duplicate.
+
+#### Note · Index.html:1254 · Notes swipe-action CSS is inert; Edit-note works via tap, not swipe
+
+`.notes-edit-action` / `.notes-delete-action` (1254–1286) default to `opacity:0` and
+nothing (no class rule, no JS) ever sets opacity:1 — grep shows the class names appear
+only in CSS. The live Party-Notes cards render with
+`onclick="openNoteForm('edit', …)"` (4142), so the Edit-note story reaches the form by
+tap and is unaffected by the dormant swipe styling. (Noted only because the swipe
+affordance overlaps the Edit-note happy path; the dead CSS itself is out of scope.)
+Story: Edit note.
+
+#### RISK · Index.html:3585 · syncModalOpenState ignores #diceOverlay — scroll-lock asymmetry, latent today
+
+`openDiceCalc()` sets `app-modal-open` manually (3580) because `#diceOverlay` is
+**not** a `.mobile-sheet`; `closeDiceCalc()` clears it via `syncModalOpenState()`
+(3585), which only inspects `.mobile-sheet.active`. Today this is safe: the dice
+button lives in the z-22 header and is unclickable while any z-70+ sheet is open, so a
+sheet and the dice overlay can never be open simultaneously, and nothing calls
+`syncModalOpenState()` while the dice calc is up. The fragility: if a future flow lets
+the dice overlay open over an active sheet (or calls `syncModalOpenState` while dice
+is open), the body would unlock with the dice overlay still showing. Cheap guard: have
+`syncModalOpenState` also OR-in `document.getElementById('diceOverlay').classList.contains('open')`.
+Not a current user-visible bug — logged as latent.
+
+#### IDEA · Index.html:934 · Add-item results list capped at 40vh is cramped on phone with the keyboard up
+
+`.results-list { max-height:40vh; overflow-y:auto }` (934–938). In the Add-item story
+on a phone (DPR-scaled `--phone-font-*` body sizes plus the soft keyboard open), 40vh
+of the GAS webview shows only a couple of the documented 20 results before scrolling,
+adding friction to "search → select result". Consider a taller cap or a flex-grow
+region so the results fill the space above the selected-item card. Story: Add library
+item (search → select result).
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
