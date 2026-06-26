@@ -25,9 +25,27 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html lines 1–1500, HTML structure + CSS)
+
+Stories traced through this CSS/HTML section: **Give item to character**, **Sell item**, **Remove item** (description action sub-sheet, `#descActionSheet` + `descActionConfirmBtn`), **Receive/Sell crystals** (delerium button state machine, `updateDeleriumButtonStates`), **Delete inventory item** (swipe `.inventory-delete-action` armed/deleting states), and the cross-cutting **navigate-away / modal-lock** concern (`body.app-modal-open` lifecycle). All write paths reachable from this section's interactive components were execution- and state-machine-traced.
+
+#### RISK · Index.html:513 · `:disabled` loading-spinner pseudo-element fires on validation/selection-gated buttons, not just in-flight
+
+**Story: Give item to character — open give sheet, before picking a character.** The CSS at `button.primary:disabled::after` / `button.success:disabled::after` (lines 513–519) attaches the animated `btn-spin` spinner to *any* disabled `.primary`/`.success` button. The spinner is meant to signal an in-flight `google.script.run` call, but `:disabled` is also used to gate buttons on input/selection. Concrete instance: `openDescActionSheet('give')` sets `descActionConfirmBtn` (class `primary`, Index.html:2774) visible and `disabled = true` (Index.html:6945) "enabled once character selected." Result: the Confirm button shows a perpetually spinning loader the entire time the user is reading the give-to character list and choosing a recipient — implying a server operation is in progress when the app is actually idle, waiting for input. Misleading feedback that can make a user think the give already fired (and double-tap, or close the sheet) before selecting anyone.
+
+Suggested fix: don't drive the spinner off `:disabled`. Add an explicit `is-loading` (or reuse `aria-busy`) class only while a server call is pending, and target `button.is-loading::after` for the spinner. The give-mode disabled state then shows a plain dimmed button (matching the `:disabled { opacity:.5 }` rule) with no false motion. Sell/Remove modes open with the confirm enabled (mode !== 'give'), so only the give flow currently exhibits the persistent-spinner case, but the same trap applies to any future primary/success button disabled for validation.
+
+#### Note · Index.html:4886 · Delerium button state machine correctly avoids the `:disabled` spinner trap
+
+**Stories: Receive crystals / Sell crystals.** `updateDeleriumButtonStates` (Index.html:4880) sets `deleriumSellBtn`/`deleriumReceivedBtn` to `className = 'secondary'` (plus inline `opacity:0.35`) when disabled and only swaps to `'danger'`/`'success'` when active. Because the spinner pseudo-element only targets `.primary`/`.success`, the idle-disabled delerium buttons correctly render as plain dimmed secondary buttons with no spurious spinner — the inverse of the give-flow bug above. The two `id="deleriumReceivedBtn"` declarations (Index.html:4699 treasurer view, 4709 non-treasurer view) are emitted by a mutually-exclusive `isTreasurer ? … : …` ternary into the same container, so only one is ever in the DOM — no duplicate-ID resolution hazard for `getElementById`. Clean trace.
+
+#### Note · Index.html:110 · `body.app-modal-open` body-scroll-lock lifecycle is leak-free across navigate-away
+
+**Cross-cutting: navigate-away / close-panel during/after a flow.** The `overflow:hidden` lock (Index.html:110) is added directly in three places (dice calc 3580, an add-flow path 4575, description sheet 6815) but every close path re-derives the lock state from the live DOM via `syncModalOpenState()` (Index.html:3482 — `toggle('app-modal-open', Boolean(document.querySelector('.mobile-sheet.active')))`) rather than blindly removing it. `closeDescriptionSheet` (6921) and `closeDiceCalc` (3583) both call it; with no `.mobile-sheet.active` remaining the lock is cleared, and with one still open it is preserved. No path leaves the body scroll-locked after a sheet closes. Minor caveat (not a bug today): `#diceOverlay` is a `.dice-overlay`, not a `.mobile-sheet`, so `syncModalOpenState` does not count it — `closeDiceCalc` clears the lock through its own call, and the dice button (header search row) is unreachable while any full-screen sheet covers the header, so dice + sheet cannot co-open. If a future overlay is allowed to coexist with the dice calc, closing the sheet would prematurely unlock scroll; worth keeping `syncModalOpenState` aware of all lock sources.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
