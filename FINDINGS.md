@@ -25,9 +25,76 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure + CSS)
+
+This section is design tokens, reset, and component CSS — no JS behavior lives
+here. Per audit rules I skipped pure style/naming and hunted for CSS that
+produces *behavioral* bugs (stuck states, untappable elements, misleading
+feedback), tracing each rule out to the JS that toggles it.
+
+**Stories traced:** Give item to character (description sheet → Give to… → pick
+character → confirm); Sell Items batch (treasurer); Quick-adjust currency
+(modal-lock path); plus the app boot / first-load-failure flow that the
+`app-booting`→`inventory-ready` opacity gate (Index.html:118–130) govern.
+
+#### BUG · Index.html:513 · "Give to…" Confirm button shows a perpetual loading spinner while idle
+
+**Story: Give item to character — the moment the "Give to…" sub-sheet opens,
+before a character is picked.** The CSS at Index.html:513–519 attaches a spinning
+loader pseudo-element to *any* disabled primary/success button:
+
+```css
+button.primary:disabled::after,
+button.success:disabled::after { content:''; … animation: btn-spin .7s linear infinite; }
+```
+
+That rule is meant as an in-flight indicator, but `openDescActionSheet('give')`
+disables the Confirm button while it simply waits for input —
+`confirmBtn.disabled = mode === 'give'` (Index.html:6945) — and the button keeps
+its `class="primary"` (markup at Index.html:2774). It is only re-enabled in
+`selectDescGiveTarget` (Index.html:7033) once a character is tapped. So from the
+instant the give sheet opens until the user selects a recipient, the disabled
+"Confirm" button displays a dimmed, **continuously spinning** loader, implying a
+server operation is underway when the app is actually idle and waiting on the
+user. Misleading feedback at step 1 of the give flow.
+
+The fix already exists elsewhere in the file: `updateSellBatchCount`
+(Index.html:5636–5637) idle-disables its confirm button and **swaps it from
+`success` to `secondary`** so the spinner rule doesn't match — exactly to avoid
+this. The give-flow Confirm should do the same: while `mode === 'give'` and no
+holder is selected, render it `secondary` (and switch to `primary` in
+`selectDescGiveTarget`), or simply hide it until a character is chosen. The
+sell/remove/add modes are unaffected because their Confirm is never disabled in
+the idle state (it arms via `_requireSellConfirm`, not `disabled`).
+
+#### Note · Index.html:5636 · Sell-batch confirm uses the correct idle-disable pattern
+
+`updateSellBatchCount` toggles the confirm button to `secondary` (removing
+`success`) whenever `totalUnits === 0`, so the `.success:disabled` spinner rule
+never fires for the idle "Set quantities to sell" state. This is the pattern the
+give-flow Confirm (BUG above) should follow — confirming the divergence is an
+oversight, not intent. Sell Items batch flow traced clean for this concern.
+
+#### Note · Index.html:118 · Boot opacity gate and modal-scroll lock are failure-safe
+
+The whole UI (`.app-header`, `main`, `.bottom-nav`) is `opacity:0` under
+`html.app-booting` (Index.html:118–123) until `markInventoryReady()`
+(Index.html:3486) flips to `inventory-ready`. Traced every call site
+(3730/3741/3767/3771/3784/3790): `markInventoryReady()` runs in **both** the
+success and failure handlers of `apiGetInventory` (Index.html:3767, 3790), so a
+cold-start load failure still reveals the shell with an error in
+`#inventoryStatus` rather than leaving a permanently blank wallpaper screen — no
+stuck invisible-app state. The `body.app-modal-open { overflow:hidden }` lock
+(Index.html:110) is driven by `syncModalOpenState()` (Index.html:3483), which
+recomputes from `.mobile-sheet.active` on every sheet close, and the two direct
+`add`/`remove` pairs (identity picker 4575/4603, dice calc 3580→3585) are
+symmetric. No path leaves body scroll locked. Quick-adjust modal path traced
+clean for this concern.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
