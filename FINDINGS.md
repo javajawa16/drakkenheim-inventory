@@ -25,9 +25,29 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500: head + CSS; traced sheet-visibility, desktop-editor, and scroll-lock state machines across Code.js/Index.html as needed)
+
+Lines 1–1500 are entirely `<head>` + `<style>` (style block ends at 2174, `<body>` at 2177). Per protocol, pure styling/naming/dead-code is out of scope; only CSS that drives a *behavioral* state transition was traced. The behavioral surface here is: `.section`/`.section.active` (tab switch), `.mobile-sheet`/`.active` + the desktop allowlist (every sheet-based flow), `.desktop-editor`/`.quick-editor` (edit + quick-adjust flows), `body.app-modal-open` (scroll lock), and the swipe transforms. Stories traced through this CSS: Edit inventory item, View item details, Give/Sell/Remove (description sheet), Combine duplicate, Quick-adjust currency/delerium, Receive/Pay gold, Receive/Sell delerium, Create/Edit note, Identity pick, plus the cross-cutting tab-switch / navigate-away scroll-lock behavior.
+
+#### RISK · Index.html:1651 · `.mobile-sheet` desktop allowlist is a silent-break landmine for any new sheet
+
+The desktop media query (`@media (min-width:700px)`, lines 1623–1673) does `.mobile-sheet { display: none !important; }` and then re-enables visibility only for an **explicit allowlist** of 13 IDs (lines 1652–1664): descriptionSheet, descActionSheet, noteFormSheet, goldSheet, payReasonSheet, giveItemSheet, deleriumSheet, sellItemSheet, sellBatchSheet, combineSheet, identitySheet, inventorySheet, quickEditSheet. I enumerated every `.mobile-sheet` element in the DOM (13 of them, lines 2466–2787) and confirmed **all 13 are currently covered — no active bug today.** The risk is structural: because the override is per-ID with `!important`, any sheet added later (or renamed) without simultaneously editing this CSS list will be stuck at `display:none !important` even when JS adds `.active`. It would open fine in dev-on-a-phone (where the media query does not fire — see next finding) and then be invisible on every real desktop browser, with no console error. Recommend replacing the per-ID allowlist with a single `@media (min-width:700px){ .mobile-sheet.active{ display:block } }` (or scoping the hide to `html:not(.is-phone)`), so new sheets are covered automatically. Affects every sheet-based story above.
+
+#### RISK · Index.html:1650 · Phone layout correctness depends entirely on the unguarded "media queries are dead in the AS webview" assumption
+
+`.desktop-editor` is `display:none` by default (1539) and `display:block` under `@media (min-width:700px)` (1650); `#desktopInventoryEditor` (2255) lives directly inside the always-active `#inventorySection` and is governed **only** by that CSS — the boot sequence (8734–8742) never sets an inline `display` on it, and `setInventoryEditorOpen` only writes `display:none` inline when an edit is actually triggered (7669). On the iOS GAS webview, `isMobileLayout()` is `matchMedia('(pointer: coarse)')` (3143/3178) → true, while `window.innerWidth ≈ 980` (README line 192) would normally satisfy `(min-width:700px)`. The *only* thing preventing the entire desktop block — visible `#desktopInventoryEditor` card under the inventory list, two-column grids, and `.mobile-sheet{display:none !important}` knocking out non-allowlisted sheets — from rendering on phones is the developer's line-1676 assertion that "media queries are dead in the AS webview." That assertion is load-bearing for the whole responsive split yet is enforced nowhere in the CSS. If a future iOS/webview update ever evaluates `@media (min-width:700px)` at the 980px CSS viewport, the desktop editor appears on every phone and the sheet allowlist starts governing phone sheets. Recommend defense-in-depth: explicit `html.is-phone .desktop-editor { display:none !important }` and `html.is-phone .mobile-sheet.active { display:block }`, so phone layout is driven by the JS-set `is-phone` class rather than by a media query that may or may not fire. Story: Edit inventory item; Quick-adjust currency/delerium.
+
+#### Note · Index.html:110 · Modal scroll-lock (`body.app-modal-open`) state machine is clean across all overlays
+
+Traced the open/close transitions for the dice overlay (3578–3586), the description sheet (6814–6815), and the generic sheet toggles. Opens add `app-modal-open`; closes call `syncModalOpenState()` (3483), which **recomputes** the class from `Boolean(document.querySelector('.mobile-sheet.active'))` rather than blindly removing it. This survives the layered case (close the dice calc while a mobile sheet is still open → body stays locked) and the navigate-away case (no path leaves the body stuck-locked with all sheets closed, nor stuck-scrollable with a sheet open). The dice overlay uses its own `.dice-overlay.open` mechanism (1938–1944), independent of the `.mobile-sheet` allowlist, so it is unaffected by the two risks above. No stuck scroll-lock state found.
+
+#### Note · Index.html:1254 · `.notes-edit-action` / `.notes-delete-action` / `.notes-note-card` are unbuilt CSS, not a half-wired feature
+
+These swipe-reveal classes (1236–1286, `opacity:0` with offscreen transforms and no `.visible`/`.show` rule) appear **only** in the stylesheet — never in any render template or JS handler (confirmed: zero references outside lines 1236–1286). The live note cards use `.notes-note` (1226) with pin/archive buttons and tap-to-edit, matching the README. So there is no invisible-swipe-action bug; this is dead style, reported here only to close the loop (out of scope to "fix"). Story: Create/Edit note, Pin/Archive note — render path uses `.notes-note`, not the swipe classes.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
