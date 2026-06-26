@@ -25,9 +25,66 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500: HTML head / CSS — design tokens, reset, header, cards, forms, buttons, swipe states, ledger, sell-batch, notes, mobile sheets, identity splash)
+
+This section is entirely the `<head>` `<style>` block (no body markup or JS yet). Behavioral surface is the state-class CSS that gates visibility/interactivity. Stories traced through the CSS state machines: **Give item to character**, **Sell item**, **Remove item** (description-sheet `descActionSheet` flow), **Delete inventory item** (swipe), **Quick-adjust currency/delerium**, **Create/Pin note** (pending-card state), **Combine duplicate**, **first-open Identity pick**, and the **navigate-away / tab-switch-during-in-flight** cross-cutting scenarios (via sheet z-index + `app-modal-open` scroll lock).
+
+#### BUG · Index.html:513 · Disabled `.primary`/`.success` spinner fires on idle (non-loading) buttons → phantom "working" indicator in Give-to flow
+
+**Story: Give item to character (description-sheet path), step "open Give panel".** The CSS rule
+`button.primary:disabled::after` / `button.success:disabled::after` (lines 513–519) appends an
+infinitely-spinning loader `::after` any disabled primary/success button. It is keyed purely on the
+`:disabled` pseudo-class, so it cannot distinguish "disabled because a server call is in flight"
+(spinner is correct) from "disabled because we're waiting for user input" (spinner is wrong).
+
+`openDescActionSheet('give')` (Index.html:6945) sets `confirmBtn.disabled = mode === 'give'` on the
+`.primary` `#descActionConfirmBtn` (Index.html:2774) and shows it (`confirmBtn.style.display = ''`,
+6944) — the button is intentionally disabled until the user taps a character in the body, at which
+point `confirmBtn.disabled = false` (7032–7033). During that entire window — exactly while the user
+is reading the character list and deciding — the Confirm button renders greyed (`opacity:.5`) **with a
+spinning loader next to "Confirm,"** falsely signalling an in-flight server operation. A user may wait
+for the spinner to "finish" instead of tapping a character. This is the one idle-disabled
+primary/success button in the app (sell/quick-edit/sellBatch/add confirms are only disabled during
+real in-flight writes, where the spinner is correct), so the path is hit on **every** Give-to opened
+from the description sheet.
+
+Suggested fix: gate the spinner on an explicit loading class rather than `:disabled` —
+`button.primary.is-loading::after { … }` — and have the in-flight handlers toggle `.is-loading`
+instead of relying on `disabled`. That also future-proofs the rule against any new idle-disabled
+primary/success button silently acquiring a phantom spinner.
+
+#### Note · Index.html:118 · Boot-reveal state machine survives a failed initial load (clean trace)
+
+`html.app-booting` hides header/main/nav (opacity 0, translateY 10px); `html.inventory-ready` reveals
+them (lines 118–130). The transition is one-way via `markInventoryReady()` (3486), which is called on
+the success path **and** on both failure paths of `apiGetInventory` — the error-response branch
+(3767) and the `withFailureHandler` (3790). So a first-load failure still reveals the chrome and
+paints an error string in the status area instead of leaving the user staring at a blank wallpaper
+forever. The `inventoryReadyTransitioned` guard makes the reveal idempotent. No stuck-blank-screen bug.
+
+#### Note · Index.html:1351 · Sheet z-index stacking and swipe-reveal geometry are coherent (clean trace)
+
+Enumerated every overlay's stacking: descriptionSheet/quickEditSheet/combineSheet = base `.mobile-sheet`
+70; descActionSheet = 81 (opens above descriptionSheet 70 ✓); giveItemSheet/sellItemSheet/payReasonSheet
+= 80 (open above quickEditSheet/gold sheet 70 ✓); sellBatchSheet = 82; identitySheet = 90 (top — gates
+the app on first open, no Cancel/backdrop dismiss ✓); diceOverlay = 50; bottom-nav = 30 (below every
+sheet, and each sheet's `inset:0` backdrop covers it — so "tab-switch during in-flight" via the nav is
+physically blocked while any sheet is open). The earlier-suspected conflict (descActionSheet 81 launching
+sellItemSheet 80) does not occur: the description sheet's Sell/Give/Remove all route through
+`descActionSheet`'s own modes, never the standalone sell/give sheets. Swipe-delete reveal is in sync:
+`getSwipeOpenPx()` (3187) returns `clamp(168,240, innerWidth*0.3)` matching `.inventory-delete-action`'s
+`width:30%; min-width:168px; max-width:240px` (590), and the row is rendered with an inline
+`style="width:${swipeOpenPx}px"` (3950) so the JS slide distance and the action width are always equal —
+no gap or clipped action. Also confirmed: the active Party-Notes pending card uses `.note-card.note-pending`
+(2151) with `pointer-events:none`, so README's "non-clickable while saving" claim holds; the
+`.notes-note.pending` rule in this section (1288, opacity only) belongs to the legacy v1 notes UI and is
+not the live path. `body.app-modal-open` scroll-lock is driven by `syncModalOpenState()`, which toggles
+on the actual presence of `.mobile-sheet.active`, so it self-corrects rather than leaving the body
+permanently locked.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
