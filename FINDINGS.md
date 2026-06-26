@@ -25,9 +25,77 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: Index.html 1–1500 (design tokens, layout, component CSS)
+
+This section is pure CSS/design tokens. Per audit rules, only CSS that causes a
+behavioral bug in a user-story flow is reported. Stories traced through their CSS
+dependencies: **Give item to character**, **Delete inventory item (swipe)**,
+**Create note (navigate-away / pending card)**, **Edit ledger note**,
+**Quick-adjust (modal lock)**, and the cross-cutting **modal-open scroll lock**.
+
+#### RISK · Index.html:513 · Disabled-button spinner pseudo-element fires on an *idle* primary button → fake "loading" spinner on the Give-to Confirm
+
+`button.primary:disabled::after` / `button.success:disabled::after` (513–519)
+render an infinitely-spinning loader on **any** disabled primary/success button.
+The rule assumes `:disabled` always means "operation in flight," but the app also
+disables such buttons to mean "waiting for required input."
+
+Concrete instance — **Give item to character** story (description sheet → Give to…
+→ pick character → Confirm): `openDescActionSheet('give')` shows `descActionConfirmBtn`
+(class `primary`, Index.html:2774) and immediately sets `confirmBtn.disabled = mode === 'give'`
+(Index.html:6945). So the moment the Give sheet opens — before the user has done
+anything — the visible "Confirm" button displays a spinning loader, implying work
+is in progress when nothing is happening. The spinner only stops when the user taps
+a recipient (`selectDescGiveTarget` → `confirmBtn.disabled = false`, Index.html:7033).
+This reads as "the app is busy / frozen," discouraging the user from making the
+selection that would actually un-stick it.
+
+Suggested fix: drive the spinner off an explicit loading state
+(`button.is-loading::after`) toggled only around in-flight `gasCall`s, and stop
+keying it on `:disabled`, which is overloaded to also mean validation-blocked.
+(Other idle-disabled cases — sell-batch/stepper buttons — use `.secondary` or bare
+buttons and so dodge the spinner today; this is fragile but currently only *bites*
+the Give Confirm button.)
+
+#### Note · Index.html:3187 · Swipe-to-delete geometry is internally consistent
+
+**Delete inventory item** trace: CSS `.inventory-delete-action { width:30%;
+min-width:168px; max-width:240px }` (587) is overridden at render time —
+`getSwipeOpenPx()` returns `max(168, min(240, round(innerWidth*0.3)))` (3187) and
+the render inline-sets *both* the card transform `translateX(-${swipeOpenPx})` and
+the action `width:${swipeOpenPx}px` (3934/3950) to that same value, so the revealed
+delete button always exactly matches the card slide distance regardless of the CSS
+percentage. No reveal mismatch. (GAS webview ~980px → clamps to 240px max.)
+
+#### Note · Index.html:1288 · Pending-note dimming is safe in the live UI (legacy CSS is unused)
+
+**Create note (navigate-away while saving)** trace: the legacy v1 selector
+`.notes-note.pending` (1288) sets only `opacity:.72` with no `pointer-events:none`,
+which would leave a saving card tappable — but that class belongs to the retired
+CAMPAIGN_NOTES_FEED composer. The live Party Notes render uses
+`.note-card.note-pending` (2151), which sets `pointer-events:none` **and** the
+renderer additionally omits the `onclick` entirely while pending (Index.html:4142).
+So tapping a "Saving…" card after navigating back is a genuine no-op — no edit form
+opens on a `NOTE_TEMP_` id. Clean.
+
+#### Note · Index.html:110 · Modal scroll-lock cannot leak; ledger-edit button group spins only one button
+
+**Edit ledger note / Quick-adjust** traces: `body.app-modal-open { overflow:hidden }`
+(110) is managed centrally by `syncModalOpenState()` (3483), which recomputes the
+class from `document.querySelector('.mobile-sheet.active')` on every open/close —
+so stacked sheets (description → descAction) keep the lock until the *last* sheet
+closes, and no close path can prematurely unlock the body. The only two direct
+add/remove calls are the first-open identity splash (4575/4603), which is exclusive,
+so they're safe. Separately, `updateLedgerNoteFromBottom` (6231) disables every
+button in the actions container, but in ledger-edit mode that container is swapped
+to exactly two buttons — "Update Note" (`.success`) + "Cancel Edit" (`.danger`,
+no spinner) — so only one spinner shows and `querySelector('.success')` (6232)
+correctly targets the Update Note button. No mis-labeling, no multi-spinner.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
