@@ -25,9 +25,70 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-26 (run 59) — Sections audited: 7 (Index.html 1–1500: HTML structure / CSS design tokens, sheets, swipe, cards, ledger, notes, identity)
+
+This section is almost entirely CSS + design tokens. Per protocol, style/naming
+findings are excluded; only CSS rules that produce a *behavioral* bug in a user
+flow are reported. Traced (visual/structural layer) the stories that render
+through these rules: **Quick-adjust currency/delerium** (`.dashboard-stat`,
+delerium counters), **Edit/Delete inventory item** (`.inventory-row` swipe +
+`.inventory-delete-action`), **View item details → Give/Sell/Remove**
+(`#descriptionSheet` + `#descActionSheet`), **Receive/Pay gold + edit ledger
+note** (`.resource-ledger-row`, `.resource-ledger-expanded-body`,
+`.selected-for-edit`), **Notes create/edit/pin/archive** (`.notes-note*` swipe
+actions, `.pending` dimming), **Identity first-open** (`#identitySheet`,
+`.identity-card`), and **Sell Items batch** (`.sell-batch-*`). One latent RISK
+found; the sheet show/hide + scroll-lock machinery is otherwise sound.
+
+#### RISK · Index.html:1370 · `#descActionSheet` base `display:flex` is only masked by the ≥700px media query — below 700px the action backdrop is permanently shown
+
+**Story: View item details → Give to… / Sell for Gold / Remove.** `#descActionSheet`
+is the shared bottom-sheet that drives all three description-sheet actions
+(opened at `Index.html:6949`, body rendered by `renderDescActionBody_`). Its base
+rule sets `display: flex` *unconditionally* (`Index.html:1367-1371`), with ID
+specificity (1,0,0). That outranks both `.mobile-sheet { display:none }` (0,1,0)
+and `.mobile-sheet.active { display:block }` (0,2,0). So in the cascade *as
+authored*, `#descActionSheet` is `display:flex` whether or not it has `.active`
+— meaning its full-screen translucent backdrop (`rgba(6,10,20,.55)` + blur)
+would cover the whole UI and intercept every tap, with no way to dismiss it.
+
+The only thing hiding it is the desktop media block at `Index.html:1651-1653`:
+`.mobile-sheet { display:none !important }` plus `#descActionSheet.active {
+display:flex !important }`. Because the GAS webview renders at ~980px CSS width
+(README "CSS / Layout Architecture Notes"), `@media (min-width:700px)` *is*
+active in production, so the `!important` pair correctly hides the sheet when
+inactive and shows it when active. The bug is therefore latent — but it
+surfaces on any viewport that reports <700px: a phone whose webview reports its
+real device width rather than ~980px, a narrow desktop/PWA window, or a future
+layout change. In that regime `#descActionSheet` is stuck open from first paint,
+blocking the entire app (every other `.mobile-sheet` is fine because none of
+them set a base `display` — they rely solely on `.mobile-sheet.active`).
+
+Fix: don't set `display` unconditionally on the base selector. Move the flex
+layout into the active state, e.g. `#descActionSheet { display:none; ... }` and
+`#descActionSheet.active { display:flex; align-items:flex-end; }` (keep the
+existing `align-items` / panel rules), so the element is hidden when inactive at
+every viewport width — matching how every other sheet behaves.
+
+#### Note · Index.html:110 · Sheet visibility + body scroll-lock cascade is otherwise clean
+
+`.mobile-sheet`/`.mobile-sheet.active` (1351,1358) toggle via `display` only and
+every sheet except `#descActionSheet` derives visibility purely from `.active`,
+so they hide correctly at all widths. `body.app-modal-open { overflow:hidden }`
+(110) is the single scroll-lock; `syncModalOpenState()` (3483) recomputes it
+from `document.querySelector('.mobile-sheet.active')`, so closing any one sheet
+while another stays open keeps the lock correct. Swipe actions
+(`.inventory-delete-action` 587, `.notes-edit/delete-action` 1254) sit behind
+cards inside `overflow:hidden` rows with `pointer-events:none` decorative layers
+(`html::before/after`, `.scope-slider-indicator`) — no tap-target occlusion.
+Sheet z-index ladder is consistent: header 22 < `.mobile-sheet` 70 <
+`#payReasonSheet` 80 < `#descActionSheet` 81 (inline), so the action sheet
+correctly stacks above the description sheet that launches it. No stuck-state or
+double-tap defect attributable to CSS in this range.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
