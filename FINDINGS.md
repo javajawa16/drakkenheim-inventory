@@ -25,9 +25,21 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML head + CSS) + traced give/sell/remove/delerium/quick-adjust button-state flows
+
+Stories traced through this section's styling: **Give item to character**, **Sell item**, **Remove item** (description action sheet + sell-batch CSS), **Quick-adjust currency/delerium** (dashboard-stat cards, quick-editor), **Receive/Sell crystals** (delerium counters + button states), **Add library/custom item** (add-stepper, selected-item-card, quick-add/custom mode visibility classes), **Edit/Delete inventory item** (inventory-card / delete-action swipe layering), **Notes create/edit/pin/archive** (notes-note + swipe-action styling), and the mobile-sheet overlay stack used by every sheet flow.
+
+#### BUG · Index.html:513 · Disabled-button spinner fires on the Give-to Confirm button while it's only waiting for input
+
+**Story: Give item to character — description sheet → Give to….** The CSS rule `button.primary:disabled::after` / `button.success:disabled::after` (513–519) attaches an infinitely-spinning loader to *any* disabled `.primary`/`.success` button. It is meant to signal "request in flight," but it keys off `:disabled`, which the app also uses for plain validation gating. In `openDescActionSheet`, give-mode opens with `descActionConfirmBtn` (a `.primary` button, Index.html:2774) set `disabled = (mode === 'give')` (Index.html:6945) — i.e. disabled until the user picks a character. Result: the moment the Give-to sheet opens, the Confirm button shows a spinning "loading" indicator even though nothing has been submitted and no server call exists yet. The user reads it as "the app is working" when it is actually idle and waiting on them. If no eligible character exists, the spinner spins forever. (Sell/Remove modes are unaffected — they open with Confirm enabled.) Fix options: (a) gate the spinner on an explicit class (e.g. `button.primary.is-loading::after`) toggled only around `google.script.run`, not on `:disabled`; or (b) mirror the delerium pattern below — swap the give Confirm button to `.secondary` while disabled so the `.primary:disabled` spinner rule never matches.
+
+#### Note · Index.html:4890 · Delerium Received/Sell buttons correctly dodge the false spinner; sell-batch Confirm uses `.secondary`
+
+Positive baseline for the spinner rule above. `updateDeleriumButtonStates` (4880) flips `deleriumSellBtn`/`deleriumReceivedBtn` between `danger`/`success` (active) and `secondary` (disabled at rest) on every counter change, so the disabled buttons are `.secondary` and never trigger the `.success:disabled::after` spinner — the **Receive crystals** / **Sell crystals** idle states are clean. Likewise `sellBatchConfirmBtn` (5742) is declared `.secondary` with the `disabled` attribute and label "Select items to sell", so the **Sell Items batch** idle state shows no phantom spinner. The give-to Confirm button is the lone case that leaves a `.primary` class on a validation-disabled button. Inventory swipe/delete layering (`.inventory-card` z-index 2 over `.inventory-delete-action` z-index 1, indicator `pointer-events:none`) and the mobile-sheet z-index stack (`.mobile-sheet` 70 < `#payReasonSheet` 80) traced clean for the delete and pay flows.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
