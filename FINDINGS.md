@@ -25,9 +25,78 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500: design tokens, header/sheet/button/notes/identity CSS)
+
+Section 1–1500 of Index.html is entirely the `<style>` block (design tokens
+through identity-sheet CSS); the `<body>` markup does not begin until later.
+Per protocol, pure visual/style issues are out of scope — this trace targets
+only CSS rules that produce a **behavioral** defect in a catalog flow. Stories
+traced through the classes defined here: **Give item to character**, **Sell
+item**, **Remove item**, **View item details** (`.mobile-sheet`, `#descActionSheet`,
+spinner pseudo-element, `.result-card.give-option`); **Quick-adjust currency/
+delerium** (`.quick-editor`, `.quick-actions`, mobile-sheet, `app-modal-open`);
+**Delete inventory item / swipe** (`.inventory-delete-action`, `.inventory-card`
+transform states); **Edit ledger note** (`.resource-ledger-row.selected-for-edit`);
+**Create/Pin note** (`.note-card.note-pending`, `.notes-note.pending`); plus the
+cross-cutting tab-switch/navigate-away scenarios via `body.app-modal-open`.
+
+#### BUG · Index.html:513 · Disabled `.primary`/`.success` button renders a perpetual loading spinner even when it's idle-waiting on user input — misfires in the "Give to…" flow
+
+The spinner pseudo-element is attached to *any* disabled primary/success button:
+
+```
+button.primary:disabled::after,
+button.success:disabled::after { … animation: btn-spin .7s linear infinite; }
+```
+
+The intent is an in-flight indicator (button disabled during a
+`google.script.run`). But `openDescActionSheet('give')` (Index.html:6944–6945)
+makes `#descActionConfirmBtn` (a `class="primary"` button) **visible and
+`disabled = true` at rest** — "enabled once character selected." So in the
+**Give item to character** story (description sheet → *Give to…* → pick a
+character), the Confirm button sits there spinning a loading animation during
+exactly the window when the app is *idle*, waiting for the user to read the
+character list and tap a name. The spinner signals "working, please wait" when
+nothing is happening; only after a character is picked (Index.html:7032–7033
+clears `disabled`) does the spinner stop. This is a state-machine mislabel:
+the *idle/awaiting-selection* state is rendered identically to the *in-flight*
+state.
+
+Suggested fix: gate the spinner on an explicit in-flight marker rather than the
+generic `:disabled` (e.g. `button.primary.is-loading::after { … }` and toggle
+`is-loading` only around the `gasCall`), or, narrowly, render the give-mode
+Confirm with a non-spinner disabled style. No other `.primary`/`.success`
+button is disabled-at-rest: the gold *Got Paid* (`.success`, Index.html:5200)
+and *Pay* buttons validate inside their handlers rather than disabling, the
+delerium *Received*/*Sell* buttons are `.secondary` (Index.html:4699–4709, no
+spinner rule), and the add/sell/quick-edit Confirm buttons only flip `disabled`
+around their server calls — so the give-mode Confirm is the sole place this CSS
+rule fires against an idle button.
+
+#### Note · Index.html:110,3482,2765 · Modal-stack and pending-card CSS traced clean for the description/quick-edit/notes flows
+
+- `body.app-modal-open { overflow: hidden }` (110) is reconciled through
+  `syncModalOpenState()` (3482–3484), which sets the class from a live
+  `document.querySelector('.mobile-sheet.active')` probe and is called on every
+  sheet open/close (~28 call sites). Closing one stacked sheet while another is
+  still open therefore keeps the body locked correctly; there is no stuck
+  "unscrollable body" state from the description → give/sell/remove sub-sheet
+  nesting. (Two raw `add`/`remove` sites at 4575/4603 are the identity splash,
+  which is the first-open overlay with nothing beneath it.)
+- Sheet z-index stacking is intentional and non-trapping: `.mobile-sheet` = 70,
+  `#payReasonSheet` = 80 (231), `#descActionSheet` = 81 inline (2765). The
+  inventory action sub-sheet correctly paints above both the description sheet
+  and the pay-reason sheet.
+- README's "pending note cards are dimmed + non-clickable" is satisfied by the
+  **current** Party Notes class `.note-card.note-pending { opacity:.6;
+  pointer-events:none }` (2151) — the in-flight create card cannot be tapped
+  into an edit while it has no server ID. (The legacy chat-notes
+  `.notes-note.pending` at 1288 only dims, but that is the retired v1 UI, not a
+  catalog flow.)
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
