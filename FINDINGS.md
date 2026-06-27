@@ -25,9 +25,59 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure + CSS)
+
+This section is almost entirely design tokens and CSS. Per audit rules, only CSS
+that produces a behavioral / feedback bug is reported. Stories whose visual layer
+lives here were traced into their JS handlers to check for behavioral fallout:
+**Give item to character**, **Sell item**, **Quick-adjust currency/delerium**,
+**Edit/Delete inventory item (swipe)**, **Create/Edit/Pin note**, **Receive/Sell
+delerium**, **Edit ledger note**, and the identity-splash first-open flow.
+
+#### RISK · Index.html:513 · Disabled `.primary`/`.success` buttons always show a spinning loader — misleads on idle "Give to…" Confirm
+
+**Story: Give item to character — the step where the sub-sheet opens.** The rule
+`button.primary:disabled::after { … animation: btn-spin … }` (lines 513–519) paints
+a perpetually spinning loader on *any* disabled primary/success button, on the
+assumption that "disabled primary == work in flight." That assumption is violated
+by `openDescActionSheet('give')` (Index.html:6945), which opens the description
+action sub-sheet with `descActionConfirmBtn` (class `primary`, Index.html:2774)
+`disabled = true` until the user taps a character (`renderDescActionBody_` re-enables
+it at Index.html:7033 once `_descActionSelectedHolder` is set). So the moment the
+"Give to…" sheet appears, the Confirm button shows a spinner *before any server
+round-trip exists* — the UI signals "loading / working" while it is actually idle,
+waiting for the user to pick a recipient. Users may wait for a spinner that will
+never resolve on its own, or assume a give is already in progress.
+
+Note the delerium **Received**/**Sell** buttons dodge this only because they are
+`class="secondary"` (Index.html:4699–4700, 4709) and the spinner rule targets only
+`.primary`/`.success`; if they are ever restyled to primary they inherit the same
+bug, since they too are disabled at idle (`recBtn.disabled = !on` / `sellBtn.disabled
+= !on`, Index.html:4889/4895; non-treasurer Received `btn.disabled = totalUnits === 0`,
+Index.html:5635).
+
+Fix: gate the spinner on an explicit in-flight marker (e.g. a `.is-loading`/`.busy`
+class added by handlers) rather than the bare `:disabled` state, or remove `disabled`
+from the give-mode Confirm and instead validate-on-tap with an inline "pick someone
+first" message. The former is the smaller change and fixes every primary/success
+button at once.
+
+#### Note · Index.html:2151 · Party-notes pending cards correctly block taps; legacy `.notes-note` CSS is orphaned
+
+**Stories traced: Create note, Edit note, Pin note.** README claims in-flight
+("Saving…") note cards are "non-clickable." Verified: the *current* Party Notes UI
+renders `.note-card` and applies `.note-card.note-pending { opacity:.6; pointer-events:
+none; }` (Index.html:2151, markup at 4141) — taps are genuinely blocked while a create
+is in flight, so a user cannot open an edit form against a note that has no real server
+ID yet. The older `.notes-note*` rule family (Index.html:1226–1307), including
+`.notes-note.pending { opacity:.72 }` with **no** `pointer-events:none`, would be
+click-through-while-pending, but all 8 `notes-note` references in the file are CSS —
+nothing renders that markup. Treated as dead CSS, not a live bug. No behavioral issue
+in the traced note flows from this section.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
