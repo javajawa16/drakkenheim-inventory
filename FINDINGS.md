@@ -25,9 +25,25 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML head + CSS)
+
+Stories traced through this section's CSS/markup: **Give item to character**, **Sell item**, **Remove item**, **Sell Items batch**, **Receive/Sell crystals** (delerium) — focused on the button state machine (idle / disabled-for-input / in-flight) and the navigate-away-via-tab scenario for full-screen overlays.
+
+#### RISK · Index.html:513 · Disabled `.primary`/`.success` buttons always render an in-flight spinner — including the at-rest "Give to…" Confirm
+
+The CSS rule `button.primary:disabled::after, button.success:disabled::after` (513–519) appends an infinite `btn-spin` loader to **any** disabled primary/success button, keyed purely on `:disabled`. It makes no distinction between "disabled because a `google.script.run` is in flight" and "disabled because the form is waiting for user input."
+
+**Story: Give item to character.** `openDescActionSheet` opens the Give sheet with `descActionConfirmBtn.disabled = (mode === 'give')` (6945). That button is `class="primary"` (markup at 2774) and stays disabled at rest until the user taps a character card (`selectDescGiveTarget` → `confirmBtn.disabled = false`, 7033). During that idle window the user sees **"Confirm ⟳" spinning at 50% opacity** — the universal in-flight cue is being shown in an idle "pick a recipient" state, which reads as "the app is busy / already working" before the user has done anything. No data impact; misleading feedback only.
+
+Other idle-disabled buttons dodge this **only incidentally**: the delerium Received/Sell buttons swap their class to `.secondary` when disabled (`updateDeleriumButtonStates`, 4890/4896), and the sell-batch confirm is born `.secondary` (5742) — none match the `.primary`/`.success` selector. The edit-save and pay buttons are only ever disabled in-flight (7733/6083), where the spinner is intended. The give Confirm is the lone button today that is both `.primary` **and** idle-disabled, so it is the only visible instance — but the coupling is fragile: any future primary/success button disabled for validation will spin at rest. Suggested fix: gate the spinner on an explicit in-flight class (e.g. `.is-loading` set by the `gasCall` wrappers) rather than `:disabled`.
+
+#### Note · Index.html:1351 · Navigate-away while a desc/sell/identity sheet is open is safe — overlays cover the bottom-nav
+
+**Stories: Give / Sell / Remove item — navigate-away (step c).** `.mobile-sheet` overlays render at `z-index: 70` (`#descActionSheet`/`#payReasonSheet` at 80) with `position:fixed; inset:0`, while `.bottom-nav` sits at `z-index: 30` (1585). While any of these sheets is open it physically covers the bottom-nav, so the user **cannot** tap Inventory/Add/Notes to switch tabs mid-flow — the navigate-away-via-tab-switch scenario is unreachable for these full-screen overlays. `setCommandMode` (3341) only closes `noteFormSheet` on tab change (3367–3370) and leaves the desc/sell/quick sheets untouched, but that gap is masked by the z-index layering rather than handled explicitly. The in-flight write guards `descActionInFlight` / `quickEditInFlight` were verified clean in prior runs (56–58).
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
