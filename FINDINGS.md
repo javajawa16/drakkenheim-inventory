@@ -25,9 +25,72 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html lines 1–1500, HTML structure + CSS state machines)
+
+This range is entirely `<style>` (design tokens + component CSS); the `<body>` opens
+later. Rather than report style, I traced the CSS-driven **state machines** every
+catalog story passes through and verified them against their JS drivers. Result:
+the section is clean. One latent RISK and two confirming Notes below.
+
+Stories traced (CSS-interaction angle): Quick-adjust currency/delerium, View item
+details (description sheet), Sell item, Combine duplicate, Receive/Sell crystals,
+plus the cross-cutting "tab-switch during in-flight / navigate-away" and the dice
+calculator overlay.
+
+#### RISK · Index.html:3483 · `syncModalOpenState()` ignores `#diceOverlay.open` — fragile scroll-lock source of truth
+
+`body.app-modal-open { overflow: hidden }` (line 110) is the scroll-lock. The
+canonical recompute helper `syncModalOpenState()` (3482) sets the class from
+`Boolean(document.querySelector('.mobile-sheet.active'))` — but the dice calculator
+is `#diceOverlay.open` (a `.dice-overlay`, **not** a `.mobile-sheet`). `openDiceCalc`
+(3580) adds `app-modal-open` directly; `closeDiceCalc` (3585) calls
+`syncModalOpenState()`, which happens to remove it correctly *only because* the dice
+overlay isn't a mobile-sheet and no sheet is open underneath. Today this is not
+reachable as a bug — z-index ordering (dice 50, sheets 70+, bottom-nav 30) means the
+dice overlay covers the nav and nothing can open a `.mobile-sheet` on top of it, and
+no timer closes a sheet while dice is open. It is a latent trap: if a future change
+makes any `.mobile-sheet` openable over the dice calc (or the dice button reachable
+behind a sheet), the first sheet-close would run `syncModalOpenState()`, see no
+`.mobile-sheet.active`, and silently unlock body scroll while the dice overlay is
+still up. Fix: have `syncModalOpenState()` also test `#diceOverlay.open` (and
+`#payReasonSheet`-style non-`.mobile-sheet` overlays), so the recompute reflects every
+modal layer, not just `.mobile-sheet`.
+
+#### Note · Index.html:513 · In-flight spinner CSS is correctly scoped — no idle-button "stuck loading" false signal
+
+`button.primary:disabled::after` / `button.success:disabled::after` (513–519) render a
+spinning loader on ANY disabled `.primary`/`.success` button. The risk would be a
+button disabled for *validation* (idle) reasons showing a perpetual fake spinner. I
+checked every `.disabled =` assignment in the file (4889/4895 delerium, 5774/5802/5818
+sell-batch, 6231/6237 give, 7033/7574/7610 quick-edit, 7733–7752 add, 7825/7860/7866
+delete): every disable on a `.primary`/`.success` button is set immediately before a
+`gasCall`/`google.script.run` and reset to `false` in BOTH success and failure
+handlers — i.e. disabled ⇔ in-flight. The delerium `Received`/`Sell` buttons, which
+*are* disabled at idle (counters at 0), are `.secondary` (4699/4700/4709), so the
+spinner rule never touches them. The spinner therefore only ever signals a real
+round-trip. Clean. (Traced: Quick-adjust, Sell item, Add item, Delete item, Combine.)
+
+#### Note · Index.html:110 · Modal scroll-lock state machine is balanced — no stuck `app-modal-open`
+
+`app-modal-open` is added on every sheet open and, on every close, recomputed via
+`syncModalOpenState()` (used at 25 call sites). Stacked mobile-sheets are handled
+correctly: opening Sell/Give from the description sheet leaves two `.mobile-sheet.active`,
+and closing the inner one keeps the lock because the recompute still sees the outer
+sheet active; closing the last one releases it. The three direct mutations
+(`add` at 3580/4575/6815, `remove` at 4603 in `confirmIdentity`) are all safe — the
+adds are on open, and the identity-sheet remove runs only on first-launch when no
+other sheet exists. No path leaves body scroll permanently locked, and the bottom-nav
+(z-index 30) is fully covered by any open sheet (70+) or the dice overlay (50), so the
+"tab-switch while a sheet is open" navigate-away scenario from the catalog is not
+reachable — `setCommandMode` (3341) need only dismiss the note form (3369), which it
+does. Also confirmed the repeated `deleriumReceivedBtn`/`deleriumSheetNote` IDs
+(4699/4709) are mutually-exclusive ternary branches (treasurer vs non-treasurer), never
+both in the DOM, so `getElementById` is unambiguous. (Traced: View item details,
+Receive/Sell crystals, cross-cutting tab-switch/navigate-away.)
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
