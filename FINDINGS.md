@@ -25,9 +25,25 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500: HTML structure / CSS design tokens, reset, header, sheets, desktop & dice overlay CSS)
+
+Stories traced through this section (all are sheet/CSS-driven UI states): **View item details / Sell for Gold / Give to… / Remove** (description sheet + `descActionSheet` stacking and modal lock), **Quick-adjust currency/delerium** (`quickEditSheet` modal lock), **Combine duplicate** (`combineSheet` + `syncModalOpenState`), **Identity selection** (boot-gate + `identitySheet`), and the cross-cutting **boot reveal** path (every flow is invisible until `markInventoryReady()` fires). Section is predominantly CSS; no data-loss or stuck-write bugs found. Two latent risks and one clean baseline below.
+
+#### RISK · Index.html:1651 · Desktop sheet visibility is an allowlist-by-omission — a new sheet without its own override line is invisible on desktop
+
+The `@media (min-width:700px)` block does `.mobile-sheet { display: none !important; }` (1651) and then re-enables each sheet individually with a per-ID `#xxx.active { display: … !important }` rule (1652–1664). I diffed all 13 `.mobile-sheet` elements in the markup (`inventorySheet, descriptionSheet, quickEditSheet, noteFormSheet, combineSheet, goldSheet, deleriumSheet, sellItemSheet, sellBatchSheet, giveItemSheet, payReasonSheet, descActionSheet, identitySheet`) against the 13 override lines — **currently complete, no bug today.** The risk is structural: because the base rule uses `!important`, any sheet added later without a matching desktop override line will be `display:none` on every desktop/tablet ≥700px with no console error and no visual cue — it just silently never appears. The phone path (`html.is-phone`, driven by JS `(pointer:coarse)`) and the default `.mobile-sheet.active{display:block}` both still show it, so the bug would only reproduce on desktop, making it easy to miss in phone-first testing. Suggested fix: invert to an allowlist that targets only the always-hidden case, or drop `!important` so a sheet's own `.active` rule wins by specificity without needing a duplicate desktop line.
+
+#### RISK · Index.html:3580 · Dice calc sets `app-modal-open` directly, but `syncModalOpenState()` ignores the dice overlay — body scroll-lock can be dropped while the calc is open
+
+`openDiceCalc()` (3578) adds `app-modal-open` directly, but `syncModalOpenState()` (3482) derives the class solely from `Boolean(document.querySelector('.mobile-sheet.active'))`. The dice overlay is `.dice-overlay.open`, not a `.mobile-sheet`, so any call to `syncModalOpenState()` while the calc is open removes `app-modal-open` and re-enables body scrolling behind the overlay. This is reachable: the `resize` handler (8718) calls `syncModalOpenState()`, so an on-screen-keyboard resize or device rotation while the dice calc is open unlocks background scroll. Impact is limited (the `.dice-overlay` is `position:fixed; inset:0; z-index:50` and visually covers the screen + intercepts backdrop taps to close), so this is cosmetic — the page can scroll underneath rather than a functional break. Mutual exclusivity holds (you can't open a sheet while dice is up or vice-versa because the header that hosts `#diceTab` sits at z-index ~22, below all sheets), so there's no double-lock corruption. Suggested fix: make `syncModalOpenState()` also consider `#diceOverlay.open` (and have `closeDiceCalc()` already routes through it), so the lock state has a single source of truth.
+
+#### Note · Index.html:3486 · Boot-reveal gate and modal-lock discipline are clean across all traced flows
+
+`markInventoryReady()` (3486) is the sole switch from `html.app-booting` (UI `opacity:0; translateY(10px)`) to `html.inventory-ready`. Verified all 6 call sites (3730, 3741, 3767, 3771, 3784, 3790): it fires on the in-memory-cache paint, the localStorage-cache paint, the `!res.ok` early-out, the `_inFlightWrites>0` defer, and BOTH the success and failure handlers of `apiGetInventory`. Boot calls `setCommandMode('inventory')` unconditionally (8737), which runs `loadInventory()` regardless of identity state, so even a first-open user with no character and an empty cache still has the gate released on the first server round-trip — the identity sheet (z-index 90) covers the revealed-but-not-yet-usable UI until they pick. The one-shot `inventoryReadyTransitioned` guard prevents re-runs. Modal lock is equally disciplined: `syncModalOpenState()` is called on every sheet open/close I traced (combine 3519/3525, give 5354/5359, sell 5375/5381, descAction 6950/6955, gold 4642, identity confirm 4603), and `closeDescActionSheet()` correctly leaves `app-modal-open` on while the parent `descriptionSheet` is still active. z-index layering of the description→sub-sheet flow (descriptionSheet 70 → descActionSheet 81) and the edit/quick→give/sell flow (parent 70 → giveItemSheet/sellItemSheet 80) is internally consistent — sub-sheets always render above their launchers.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
