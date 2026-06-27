@@ -25,9 +25,27 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html lines 1–1500, HTML structure / CSS)
+
+Stories traced through this CSS-only section: **View item details** (description sheet open), **Sell item / Give item to character / Remove item** (all routed through `#descActionSheet`), **Pay gold** (`#payReasonSheet`), and the cross-cutting **mobile-sheet show/hide state machine** that every overlay flow depends on (`.mobile-sheet` ↔ `.active`). Focus was behavioral CSS only (per scope, no style/naming findings).
+
+#### RISK · Index.html:1367 · `#descActionSheet` un-gated `display:flex` overrides `.mobile-sheet{display:none}` → action sheet stuck visible below 700px
+
+**Stories: Sell item / Give item / Remove item — the description action sheet.** Every mobile overlay is hidden at rest by `.mobile-sheet { display: none }` (line 1351, specificity 0,1,0) and revealed by `.mobile-sheet.active { display: block }` (line 1358) when JS adds `.active`. `#descActionSheet` is the lone exception: its base rule (lines 1367–1371) sets `display: flex` **unconditionally** at ID specificity (1,0,0), which beats `.mobile-sheet { display: none }`. So the rule that actually keeps this sheet hidden when not active is `.mobile-sheet { display: none !important }` — which lives **inside** the `@media (min-width:700px)` block (line 1651).
+
+Consequence: at any viewport where that media query does **not** match — a real device/window width < 700px (Android Chrome reporting true width, a narrow desktop window) — `#descActionSheet`'s `display:flex` wins and the Sell/Give/Remove sheet renders **permanently** on top of the app: full-screen fixed backdrop (`rgba(6,10,20,.55)` + blur) with the action panel pinned to the bottom (`align-items:flex-end`), z-index 81 over header (22), nav (30) and content. The element is shown via `.active` only (lines 6949/6954), so when it's force-displayed without `.active`, `syncModalOpenState()` (checks `.mobile-sheet.active`, line 3483) never sets `body.app-modal-open` — the page keeps scrolling behind a stuck, tap-capturing overlay. The user cannot reach Sell/Give/Remove (or anything beneath it) and there is no Cancel path because the sheet was never "opened."
+
+Masked on the primary target (iOS GAS webview renders at ~980px CSS width, so the 700px query matches and the `!important` hide applies), which is why it survives in production. The base `.mobile-sheet { display:none }` already hides every *other* sheet at the class level regardless of media query — only this one leans on the media-query override.
+
+Fix: drop `display: flex` from the base `#descActionSheet` rule (keep `background`/`backdrop-filter`/`align-items`); the existing `#descActionSheet.active { display: flex }` (line 1385) already supplies flex when the sheet is opened, matching the pattern every other sheet uses.
+
+#### Note · Index.html:1351 · Mobile-sheet show/hide pattern is clean for all sheets except descActionSheet
+
+Traced the open/close state machine for `descriptionSheet`, `goldSheet`, `giveItemSheet`, `payReasonSheet`, `sellItemSheet`, `combineSheet`, `quickEditSheet`, `identitySheet`, etc.: each is hidden by the base `.mobile-sheet { display:none }` (class specificity), revealed by `.mobile-sheet.active`, given a `!important` desktop override in the `@media (min-width:700px)` block, and `body.app-modal-open` scroll-lock is driven off `.mobile-sheet.active` via `syncModalOpenState()`. z-index layering is coherent (sheets 70–90 sit above header 22 / nav 30; identity 90 tops the stack). The pattern is sound — only `#descActionSheet`'s base `display:flex` (logged above) deviates from it.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
