@@ -25,9 +25,58 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: Index.html lines 1–1500 (HTML structure, CSS)
+
+Section is entirely the `<style>` block (no markup yet — `<body>` starts later).
+Per audit rules, pure aesthetics are excluded; I traced every user story whose
+feedback passes through the shared button/sheet CSS and looked only for CSS that
+produces a wrong *behavioral/state* signal. **Stories traced:** Give item to
+character, Sell item, Remove item (description-sheet shared confirm); Edit
+inventory item, Delete inventory item (swipe); Quick-adjust currency/delerium;
+Receive gold, Pay gold; Receive/Sell delerium; Edit ledger note; Sell Items batch.
+
+#### BUG · Index.html:513 · Disabled-spinner CSS fires on the idle "Give to…" Confirm button → fake perpetual "loading" state
+
+**Story: Give item to character — description sheet → Give to… (before a recipient is picked).**
+The rule `button.primary:disabled::after` / `button.success:disabled::after`
+(lines 513–519) renders an infinitely-spinning loader (`animation: btn-spin .7s
+linear infinite`) on **any** disabled `.primary`/`.success` button. The intent is
+an in-flight indicator, and for every other primary/success button the disabled
+state coincides with a real `google.script.run` round-trip (saveInventoryEdits,
+confirmQuickEdit, confirmSellItem, descAction sell/remove, Update Note) — so the
+spinner reads correctly there. The exception is `openDescActionSheet('give')`
+(line 6945): `confirmBtn.disabled = mode === 'give'` opens the "Give to…" sheet
+with the `.primary` Confirm button (`#descActionConfirmBtn`, line 2774) **disabled
+at idle**, only enabled once `selectDescGiveTarget` runs (line 7033). Result: the
+moment the give sheet appears, the Confirm button shows "Confirm ⟳" spinning
+forever, signalling "submitting…" when the app is actually just waiting for the
+user to tap a character. Misleading state indicator + looks broken on a flow that
+has no network activity yet. Fix: gate the spinner on an explicit in-flight class
+(e.g. `button.is-loading::after`) toggled by the call sites, rather than on
+`:disabled`; or, cheaper, give the idle-disabled give-confirm a non-primary class
+until a target is selected. (The same latent trap applies to any future
+primary/success button that is disabled for a validation reason rather than an
+in-flight one.)
+
+#### Note · Index.html:472 · Shared button state CSS is otherwise behaviorally sound
+
+Traced the disabled/in-flight visual contract across all write flows. `:disabled`
+{opacity:.5} is applied uniformly; the spinner (`.primary`/`.success` only) lines
+up with a genuine in-flight call for Save (7733), Quick-adjust Confirm (7574),
+Update Note (6231–6233, paired with "Saving…" text), and the descAction
+sell/remove confirm. `.secondary`/`.danger` write buttons (sell-batch confirm
+5742, delerium Received/Sell 4699–4709, gold Pay 5201) intentionally have no
+spinner but pair their disabled/in-flight window with explicit status text
+("Selling…", "Saving…"), so feedback is present — not flagged. Optimistic gold
+Got-Paid/Pay (5200–5201) are never disabled; double-tap on Got Paid is harmless
+because the first tap clears the amount input, so the second tap aborts at the
+`amount <= 0` guard (5220). Swipe-delete failure path re-renders the whole list
+(7899/7914), discarding the "Deleting…"/`.deleting` button state cleanly. No
+stuck visual states found in these CSS-driven transitions.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
