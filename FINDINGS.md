@@ -25,9 +25,85 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure + CSS — behavioral CSS only)
+
+This section is almost entirely `<style>` (design tokens, component CSS) plus a
+few HTML shells. Per the audit charter, pure style/naming was ignored; only CSS
+rules that change *behavior or feedback* in a user-story flow were traced. The
+DOM/HTML structure proper begins after line 1500, so the traces here followed
+each CSS-defined interactive mechanism into the JS that toggles it.
+
+#### RISK · Index.html:513 · Disabled `.primary`/`.success` buttons show a fake loading spinner — fires on validation-disabled buttons, not just in-flight
+
+The rule
+
+```css
+button.primary:disabled::after,
+button.success:disabled::after { content:''; …; animation: btn-spin .7s linear infinite; }
+```
+
+renders a spinning loader on **any** disabled primary/success button. The implicit
+assumption is "primary button disabled ⇒ a `google.script.run` is in flight." That
+holds for most buttons (`saveInventoryButton`, `mobileInventorySaveButton`,
+`sellBatchConfirmBtn` [which is `.secondary` anyway], the add/quick-edit confirms)
+— all of them are disabled only inside a `gasCall` and re-enabled in both handlers.
+
+But it is **false** for `descActionConfirmBtn` (`class="primary"`, line 2774).
+**Story: Give item to character.** `openDescActionSheet('give')` (line 6928) sets
+`confirmBtn.disabled = (mode === 'give')` (line 6945) and shows the button
+(`display:''`). So the moment the Give-to sheet opens, the user sees the character
+list **and** a "Confirm ⟳" button visibly spinning — implying the app is busy when
+it is actually idle, waiting for the user to tap a character. The spinner only stops
+once `selectDescGiveTarget` (line 7033) clears `disabled`. This is misleading
+feedback at the exact step where the user is supposed to act. (The Sell/Remove modes
+of the same sheet open with the button *enabled*, so they don't trip it; only Give
+does.)
+
+Suggested fix: gate the spinner on an explicit busy state rather than `:disabled`,
+e.g. add a `.is-loading` class (or `[aria-busy="true"]`) in `gasCall` start/finish
+and change the selector to `button.primary.is-loading::after`. Then a button
+disabled purely for validation no longer animates. Minimal alternative: in
+`openDescActionSheet`, hide the Confirm button entirely in give-mode until a target
+is selected (`confirmBtn.style.display='none'`) instead of disabling it.
+
+#### Note · Index.html:118,3486 · Boot reveal can't get stuck invisible — `markInventoryReady` runs on every load outcome
+
+**Stories traced (visual layer): all — this is the app-reveal gate.** `<html>` ships
+with `app-booting`, which holds the header, `main`, and bottom-nav at `opacity:0;
+translateY(10px)` (lines 118–123). The class is removed (and `inventory-ready` added)
+only in `markInventoryReady` (3486). Traced `loadInventory` (3716): `markInventoryReady`
+is called on the cache-paint path (3730/3741), the success path (3784), the
+server-returned-error path (3767), the in-flight-deferred path (3771), **and** the
+`withFailureHandler` path (3790). So a failed or empty initial load still reveals the
+UI (with an error in the status row) rather than leaving the user on a permanently
+invisible/transparent shell. No stuck-invisible state. Clean.
+
+#### Note · Index.html:110,3482 · `app-modal-open` scroll-lock is self-correcting — no stuck body-scroll
+
+**Stories traced: every sheet-based flow (description, give, sell, sell-batch,
+combine, quick-edit, note form, pay-reason, identity, delerium).** `body.app-modal-open
+{ overflow:hidden }` (110) is driven solely by `syncModalOpenState` (3482), which
+recomputes `Boolean(document.querySelector('.mobile-sheet.active'))` from the live DOM
+on every call. Verified every `.mobile-sheet` `classList.remove('active')` is paired
+with a `syncModalOpenState()` call (3519/3525, 4227/4228, 4512/4513, 4602/4642,
+4727/4728, 5128/5131, 5328/5329, 5358/5359, 5380/5381, 5580/5581, 6922/6924,
+6954/6955, 7515–7521, 7670–7675). Even if one close path forgot, the next sheet
+open/close recomputes from scratch, so the lock cannot wedge the body permanently.
+The other `remove('active')` sites (8294/8332/8367/8417/8649) are non-sheet elements
+(quick-add size field, stepper arrows) and correctly don't touch the lock.
+
+#### Note · Index.html:231,2765 · Sub-sheet z-index stacking is correct
+
+**Story: View item details → Give/Sell/Remove (sub-sheet over the description sheet).**
+`.mobile-sheet` defaults to `z-index:70`; `#descActionSheet` is overridden to `81`
+(2765) and `#sellItemSheet`/`#giveItemSheet` to `80` (2703/2739), `#payReasonSheet`
+to `80` (231). All sub-sheets are both later in the DOM and at a higher z-index than
+the full-screen `#descriptionSheet` (z-index 70, line 2536) they launch over, so they
+paint on top as intended. No stacking inversion.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
