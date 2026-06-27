@@ -25,9 +25,94 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500: HTML head + master `<style>` block; traced the sheet-overlay stories cross-referencing the sheet HTML at 2466–2789 and the open/close JS)
+
+Section 7 is ~99% CSS (lines 8–1620 are one `<style>` block; only lines 1–7 are real
+HTML structure). Per audit rules, style/naming/dead-code is out of scope — this pass
+hunted only for CSS that produces a **behavioral** bug in a user story. Focus areas:
+the z-index/stacking ladder and `display` toggling that govern every mobile-sheet flow,
+the boot-gate that hides the whole UI, and the body-scroll lock. Stories traced through
+this section: View item details, Give item to character, Sell item, Remove item,
+Quick-adjust currency/delerium, Receive/Pay gold, Combine duplicate, Create/Edit note,
+Identity pick, plus the navigate-away technique on each sheet.
+
+#### BUG · Index.html:1352 · "Open Description" from the quick-edit sheet opens the description sheet *behind* it (invisible)
+
+**Story: View item details, reached from Quick-adjust currency/delerium.** Tapping a
+gold/delerium/potion card opens `#quickEditSheet` (the quick-edit sheet). Its actions row
+includes an **"Open Description"** button (`Index.html:2608`) wired to
+`openSelectedInventoryDescription()` → `openInventoryDescription()` (`Index.html:6814`).
+That function only **adds** `.active` to `#descriptionSheet` (line 6814) and sets
+`app-modal-open`; it never closes the quick-edit sheet.
+
+Both sheets inherit `z-index: 70` from `.mobile-sheet` (**Index.html:1352**) — neither has
+an inline override. With equal z-index, paint order is DOM order, and `#quickEditSheet`
+(DOM line 2564) comes **after** `#descriptionSheet` (DOM line 2536), so the quick-edit
+sheet keeps painting on top. The quick-edit panel is full-screen with a fully opaque
+background (`.mobile-sheet-panel`, line 1360–1365), so the description sheet is completely
+hidden. Net effect: the user taps "Open Description" and **nothing appears to happen.**
+
+Worse follow-on state: the only visible control is the quick-edit sheet's **Cancel**
+(`closeQuickEditPanel`), so the user taps it to "get out" — which removes quick-edit's
+`.active` and suddenly reveals the description sheet that was hidden underneath. A button
+that looked dead now surprises them on the *next* action. The same defect is present on
+desktop (`#descriptionSheet.active`/`#quickEditSheet.active` both `display:block !important`
+at the same z-index, lines 1652/1664).
+
+Contrast with the sibling button **"Change Item"** (`openFullEditorFromQuick`,
+`Index.html:7543`), which correctly calls `closeQuickEditPanel()` *before*
+`setInventoryEditorOpen(true)` — establishing the right pattern. The "Open Description"
+path simply doesn't follow it.
+
+The other "Open Description" entry point — from the inventory **edit panel** (`#inventorySheet`,
+button at line 2527) — happens to work only by accident: `#inventorySheet` (DOM line 2466)
+precedes `#descriptionSheet`, so description paints on top. It is the same latent fragility,
+just on the lucky side of DOM order.
+
+**Fix (any one):** (a) make the quick-edit "Open Description" close the quick-edit panel
+first, mirroring `openFullEditorFromQuick` (cleanest, matches existing pattern); or
+(b) give `#descriptionSheet` an explicit z-index above the peer sheets that launch it
+(e.g. 79 — still below `#descActionSheet`'s 81, which must stay above the description
+sheet); or (c) have `openInventoryDescription()` deactivate any other non-ancestor
+`.mobile-sheet` before showing.
+
+#### Note · Index.html:1352,2703–2781 · Mobile-sheet z-index ladder is otherwise correct
+
+Traced every pair of sheets that can be open simultaneously. The ladder is deliberate and
+correct except for the equal-z-index case above: base `.mobile-sheet` = 70; `descriptionSheet`
+70 → `descActionSheet` **81** (Sell/Give/Remove sub-actions paint above the description
+sheet ✓); `goldSheet` 70 → `payReasonSheet` **80** ✓; `quickEditSheet`/`inventorySheet` 70 →
+`giveItemSheet`/`sellItemSheet` **80** ✓; `sellBatchSheet` **82**; `identitySheet` **90**
+(always on top ✓). `.bottom-nav` is z-index **30** (line 1585), below all sheets, so the
+nav cannot be tapped while a sheet is open — the navigate-away-via-nav scenario is blocked
+by construction for every sheet flow. Stories: Give, Sell, Remove, Pay gold, Quick-adjust,
+Identity.
+
+#### Note · Index.html:118–130,3486 · Boot gate reveals the UI on every load outcome
+
+`html.app-booting` sets `opacity:0; translateY(10px)` on `.app-header/main/.bottom-nav`
+(lines 118–130); the UI only appears once `inventory-ready` replaces it via
+`markInventoryReady()` (3486). Verified `markInventoryReady()` is called on **all** branches
+of the initial `apiGetInventory` round-trip — success (3784), `!res.ok` (3767), in-flight
+defer (3771), and the failure handler (3790) — plus the cache-paint paths (3730/3741). A
+failed cold load therefore still reveals the app (with an error in `#mainStatus`) rather
+than leaving a permanently blank wallpaper. The identity sheet (z-90, not gated by the
+booting opacity rule) also remains visible during boot. Story: app launch / collaborative
+sync cold start.
+
+#### Note · Index.html:110,3482 · Body-scroll lock is self-healing
+
+`body.app-modal-open { overflow:hidden }` (line 110) is driven by `syncModalOpenState()`
+(3482), which **recomputes** the class from `document.querySelector('.mobile-sheet.active')`
+rather than incrementing a counter. It is called from ~30 open/close sites; even if one
+direct `classList.add('app-modal-open')` site missed a paired removal, the next
+`syncModalOpenState()` self-corrects, so the page cannot get stuck unscrollable. Desktop
+re-enable list (lines 1652–1664) was cross-checked against all 13 `.mobile-sheet` ids —
+complete, so no sheet is accidentally `display:none !important` on desktop.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
