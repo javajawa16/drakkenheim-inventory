@@ -25,9 +25,34 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500: design tokens, reset, all component CSS through identity/mobile-sheet styling)
+
+> Section 7 is **entirely CSS** — the `<style>` block runs to line 2174 and the
+> `<body>` does not open until 2177, so lines 1–1500 contain no HTML structure
+> and no JS. CSS rarely produces behavioral bugs, so this run focused on the
+> handful of mechanisms where styling *can* break a flow: overlay/sheet z-index
+> stacking, the desktop `display:none` allowlist, swipe geometry, the boot-reveal
+> gate, and `pointer-events`. All traced clean; one minor friction IDEA logged.
+
+#### Note · Index.html:1351,1367,2703–2781 · Sheet z-index stacking + desktop allowlist are complete and correct
+
+**Stories traced: View item details, Give item, Sell item, Remove item, Combine duplicate, Quick-adjust, Pay gold, Receive/Sell delerium, Create/Edit note, Identity selection.** Base `.mobile-sheet` is `z-index:70`; every sheet that opens *on top of* another raises its z above the parent: `descActionSheet` 81 (opens over `descriptionSheet` 70 — sell/give/remove render **inline** in `descActionBody`, confirmed in `openDescActionSheet`/`renderDescActionBody_` at 6928–6987, so the separate z80 `giveItemSheet`/`sellItemSheet` are never stacked under it), `giveItemSheet`/`sellItemSheet`/`payReasonSheet` 80 (open over edit/quick/gold sheets at 70), `sellBatchSheet` 82, `identitySheet` 90 (always topmost). No two equal-z sheets are opened simultaneously, so the DOM-order-wins ambiguity among the three z80 sheets never triggers. The desktop media query (1650–1664) hides **all** `.mobile-sheet` with `display:none !important` then re-enables exactly the 13 sheets that exist (`grep id="*Sheet"` returns 13; all 13 are in the allowlist). The dice calculator uses a separate `.dice-overlay` class (2792), so it is correctly unaffected by that blanket rule.
+
+#### Note · Index.html:587,3186,3950 · Swipe-delete geometry is self-consistent across CSS and JS
+
+**Story traced: Delete inventory item (swipe card → Delete).** The delete action's CSS bounds (`min-width:168px; max-width:240px`, line 590) exactly match the JS clamp `getSwipeOpenPx() = Math.max(168, Math.min(240, round(innerWidth*0.3)))` (3186). The card is slid left by exactly `swipeOpenPx` (3934) and the delete button's inline `width:${swipeOpenPx}px` (3950) is always inside [168,240], so the inline width never collides with the CSS min/max — the revealed strip always equals the button width, with no gap or partially-hidden label. The card (`z-index:2`) correctly sits above the action (`z-index:1`) so the revealed strip is the only tappable region.
+
+#### Note · Index.html:118–130,3486–3492,3762–3791 · Boot-reveal gate cannot strand the app on a blank screen
+
+**Cross-cutting trace: initial load failure.** `html.app-booting` sets the header/main/nav to `opacity:0`, revealed only when `html.inventory-ready` is added by `markInventoryReady()`. That function is called on **every** `loadInventory` outcome: cache/in-memory paint (3730/3741), success (3784), the `!res.ok` server-error branch (3767), the in-flight-write defer branch (3771), and the `withFailureHandler` network-error branch (3790). A failed first load therefore still removes `app-booting` and shows the error in `#inventoryStatus` rather than leaving the user staring at an invisible (opacity:0) UI. Clean.
+
+#### IDEA · Index.html:1789 · Add-search results confined to a 44vh nested-scroll box on phone
+
+**Story: Add library item — search → select result (friction).** `.results-list` is capped at `max-height:44vh` on phone (40vh on desktop, line 936) with its own `overflow-y:auto`. The README states search returns up to 20 results on mobile; at phone card sizes that is well over 44vh of content, so browsing the full result set means scrolling a small inner region nested inside the page scroll. The upside is that the search input stays pinned while results scroll, which is a reasonable deliberate tradeoff — so this is a minor, optional refinement, not a defect. If the nested-scroll feel is a problem in practice, consider letting the results list grow to natural height on the Add tab (the search input already lives in the sticky `.app-header`, so it stays visible regardless) instead of capping it.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
