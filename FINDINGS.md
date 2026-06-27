@@ -25,9 +25,37 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure / CSS) — traced item-description action sheet, give/sell/remove, sell-batch, quick-edit, identity picker, ledger note-edit, delerium counters
+
+#### RISK · Index.html:513 · Disabled-button spinner CSS fires on idle "Give to…" Confirm, faking a load that never started
+
+**Story: Give item to character (description sheet → Give to… → pick character → confirm).** The spinner CSS at lines 513–519 attaches an infinitely-rotating loader to *any* disabled `.primary`/`.success` button:
+
+```
+button.primary:disabled::after,
+button.success:disabled::after { ... animation: btn-spin .7s linear infinite; }
+```
+
+This couples "disabled" with "loading," which is true for in-flight buttons but wrong for buttons disabled *at rest waiting for input*. `openDescActionSheet('give')` (6945) sets `descActionConfirmBtn.disabled = true` so the user can't confirm before choosing a recipient — and that button is hardcoded `class="primary"` (2774). Result: the moment the Give sub-sheet opens, the Confirm button shows a spinning loader even though nothing is happening and no server call has fired. The user sees "Confirm ⟳" and may sit waiting for a non-existent operation to finish. The spinner only clears once a character card is tapped (7033 sets `disabled = false`). Same root cause would bite any future at-rest-disabled primary/success button.
+
+**Suggested fix (pick one):** (a) scope the spinner to an explicit loading class — e.g. `button.is-loading::after` — and add/remove that class only in the in-flight handlers, decoupling it from `:disabled`; or (b) in `openDescActionSheet`, give the Confirm button a non-spinner class (e.g. `secondary`) while it's the idle-disabled "pick a character first" state and swap it back to `primary` on selection. Option (a) is the durable fix and matches how `sellBatchConfirmBtn` already dodges the bug (it toggles to `.secondary` at `totalUnits === 0`, so its idle-disabled state shows no spinner).
+
+#### Note · Index.html:2536 · Item-detail sheet z-index stacking is correct across the give/sell/remove flow
+
+Traced **View item details / Give / Sell / Remove**. `#descriptionSheet` (default `.mobile-sheet` z-index 70) opens `#descActionSheet` (z-index 81) for all four actions (`openDescActionSheet`), which correctly stacks above it. `openGiveItemSheet`/`openSellItemSheet` (giveItemSheet/sellItemSheet z-index 80) are only reached from the inventory edit sheet and quickEditSheet (both default z-index 70), so they too stack above their opener. `#sellBatchSheet` (82) and `#identitySheet` (90) sit above everything as intended. No obscured-sheet bug.
+
+#### Note · Index.html:110 · Scroll-lock (`app-modal-open`) bookkeeping is consistent
+
+`syncModalOpenState()` (3483) toggles `body.app-modal-open` from `Boolean(document.querySelector('.mobile-sheet.active'))`, so closing one sheet while another remains open keeps body scroll locked. The three direct `add` sites (3580, 4575, 6815) and the direct `remove` (4603) all operate on elements that are themselves `.mobile-sheet`s (descriptionSheet / identitySheet), and the identity path runs only at first-launch when no other sheet is open — so the direct mutations are redundant-but-safe and cannot strand the lock or leak scroll behind an overlay. Traced: identity picker, item-description sheet.
+
+#### Note · Index.html:5630 · Sell-batch and delerium confirm buttons avoid the disabled-spinner trap
+
+Traced **Sell Items batch** and **Delerium receive/sell**. `sellBatchConfirmBtn` is base `class="secondary"` (5742) and only gains `.success` when `totalUnits > 0` (5636), so its idle-disabled state shows no spurious spinner; the spinner appears only during the genuine "Selling…" in-flight window (5774). The delerium `Received`/`Sell` buttons (4699–4709) are base `.secondary`, so their direction-gated disabled states are likewise spinner-free. The ledger note-edit Update flow (6231) disables all action buttons during a real "Saving…" round-trip and restores them in both success and fail handlers (6237, 6252) — correct in-flight discipline.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
