@@ -25,9 +25,87 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html lines 1–1500, HTML head / CSS)
+
+Section 1–1500 is the entire `<head>` stylesheet (design tokens, layout, component
+CSS) — no body markup or JS in range. Per audit rules, style/naming is out of scope;
+I traced the CSS rules that **gate visibility/interactivity through JS-toggled
+classes**, since those are the only CSS in this range that can produce a behavioral
+bug. Stories traced through this CSS: **View item details / Give item / Sell item /
+Remove item** (all driven by `#descriptionSheet` + `#descActionSheet`), the
+cross-cutting **initial boot reveal**, and the **modal-scroll-lock** shared by every
+sheet-based flow.
+
+#### BUG · Index.html:1370 · `#descActionSheet { display:flex }` makes the item-action sheet permanently visible on viewports < 700px
+
+**Stories: View item details → Give to… / Sell for Gold / Remove (the description
+action sub-sheet).** The base rule
+
+```
+#descActionSheet { background:…; backdrop-filter:blur(4px); display:flex; align-items:flex-end; }   /* line 1367–1371 */
+```
+
+sets `display: flex` with **ID specificity (1,0,0)**, which outranks
+`.mobile-sheet { display:none }` (line 1354, class specificity 0,1,0). The only place
+this is corrected is inside `@media (min-width: 700px)` (line 1623), where
+`.mobile-sheet { display:none !important }` (1651) + `#descActionSheet.active { display:flex !important }`
+(1653) re-gate it. So:
+
+- **≥ 700px CSS width** (the iOS GAS webview, which the README notes renders at
+  ~980px): the `!important` media rules win → sheet hidden when closed, shown when
+  `.active`. Correct. **This is why the bug is masked in the party's primary device.**
+- **< 700px CSS width** (Android Chrome opening the published `/exec` at true
+  device-width ~360–412px; iOS Safari opening the link directly rather than via the
+  embedded webview; any narrow desktop window): the media block does not apply, so the
+  base `display:flex` wins and `#descActionSheet` is rendered **always** — a
+  `position:fixed; inset:0; z-index:81` overlay with a dim + 4px-blur backdrop and the
+  static "Action / Confirm / Cancel" panel (markup at 2765–2778 is always in the DOM).
+  The overlay captures every tap, so the app is **bricked from first paint** for that
+  user. `closeDescActionSheet()` only removes `.active` (6953–6955); it never sets an
+  inline `display:none`, so nothing rescues the < 700px case.
+
+`#descActionSheet` is the **only** mobile-sheet with a base `display` declaration
+(verified: `#payReasonSheet` sets only `z-index`; all other sheets rely on the
+`.mobile-sheet` / `.active` pair), so this is a single isolated defect.
+
+**Fix:** drop `display: flex;` from the base rule (line 1370), keeping
+`align-items: flex-end;` (harmless when not flexing). `#descActionSheet.active { display:flex }`
+already exists at line 1385 (ID+class 1,1,0, beats both `.mobile-sheet`/`.mobile-sheet.active`),
+so the sheet then shows only when `.active` on every viewport. Relying on the GAS
+webview's 980px quirk for basic usability is fragile — this should not depend on the
+viewport being ≥ 700px.
+
+#### Note · Index.html:3486 · Boot reveal survives a failed first load — no stuck-invisible app
+
+**Cross-cutting: initial load failure.** The app boots with `html.app-booting`, which
+holds `.app-header`, `main`, and `.bottom-nav` at `opacity:0; translateY(10px)`
+(118–123); content is revealed only when `markInventoryReady()` swaps to
+`html.inventory-ready` (3486–3493, guarded by `inventoryReadyTransitioned` so it runs
+once). I verified every exit of `loadInventory` calls it: in-memory paint (3730),
+cache paint (3741), server `!res.ok` (3767), in-flight-write deferral (3771), normal
+success (3784), **and the failure handler (3790)**. So a first-load server error shows
+the error text in `#inventoryStatus` but still reveals the shell — the user is never
+left staring at a permanently-`opacity:0` app. Clean trace.
+
+#### Note · Index.html:3482 · Modal scroll-lock is recomputed from the DOM, not ref-counted
+
+**Cross-cutting: any sheet-based write flow + navigate-away.** `body.app-modal-open`
+(`overflow:hidden`, line 110) is driven by `syncModalOpenState()` (3482), which sets
+the class to `Boolean(document.querySelector('.mobile-sheet.active'))`. Because it
+re-derives from the live DOM rather than incrementing/decrementing a counter, closing
+one sheet while another stays open cannot prematurely unlock the body, and a missed
+close cannot leave it locked as long as `.active` is cleared. Every sheet-close path
+calls it (≈30 call sites). The lone direct `classList.remove('app-modal-open')` is the
+identity-confirm path (4603), which only runs when no other sheet is active — safe. The
+descAction confirm/footer (Confirm + Cancel) lives in `.mobile-sheet-actions`
+**outside** the 45vh-capped `#descActionSheet .mobile-sheet-body` (1380–1384 / markup
+2770–2776), so a long "Give to…" character list scrolls without pushing Confirm out of
+reach. No stuck-lock or trapped-control state found in this CSS.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
