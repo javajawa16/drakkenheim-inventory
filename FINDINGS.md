@@ -25,9 +25,65 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure + CSS)
+
+Section is overwhelmingly CSS plus some inert/legacy HTML. Traced every catalog story
+with a CSS touchpoint into the live JS handlers. One real feedback defect found; the rest
+of the flow machinery is correct. Stories traced: **Give item to character**, **View item
+details**, **Sell item**, **Remove item**, **Delete inventory item**, **Create/Edit/Pin
+note**, **Receive/Sell crystals** (CSS touchpoints only).
+
+#### RISK · Index.html:513 · Disabled-`primary` loading spinner fires in idle "Give to…" waiting state
+
+**Story: Give item to character — step "Give to… (pick character)".** The rule
+`button.primary:disabled::after` / `button.success:disabled::after` (513–519) renders an
+animated spinner on ANY disabled primary/success button — it cannot distinguish
+"in-flight, please wait" from "disabled because input is still required." `descActionConfirmBtn`
+is `class="primary"` (2774); `openDescActionSheet('give')` sets `confirmBtn.disabled = true`
+until a character is chosen (6945), re-enabling only in `selectDescGiveTarget` (7033). So from
+the moment the user taps **Give to…**, the "Confirm" button shows a perpetually spinning
+loader while the user is still picking a recipient — implying the app is already working when
+it is idle. No data impact (selection + confirm still work), but it is a misleading
+state-machine signal in a flow where every other confirm spinner means "server round-trip in
+progress." Fix options: gate the spinner behind a dedicated class (e.g. `button.is-loading::after`)
+applied only at call time, or use `button.primary.is-loading:disabled::after`. The
+input-gated disable in give mode would then show a plain dimmed button, matching the
+quantity-gated steppers elsewhere. (Delerium `[Received]`/`[Sell]` dodge this only because
+they are `.secondary` — 4699/4700/4709 — and `sellBatchConfirmBtn` dodges it as `.secondary`
+— 5742; the trap is specific to primary/success buttons disabled while waiting for input.)
+
+#### Note · Index.html:2151 · Create-note optimistic pending card is correctly non-interactive
+
+**Stories: Create note / Pin note / Edit note (CSS).** The active Party Notes UI renders
+`.note-card` with `.note-pending` while a create is in flight (4141), and
+`.note-card.note-pending { opacity: .6; pointer-events: none; }` (2151) makes the dimmed
+"Saving…" card untappable — so the user cannot open/pin/edit a note that still has only a
+temporary client ID, matching the README guarantee. Confirmed no path lets a temp-ID note
+reach `apiUpdateNote`/`apiArchiveNote` before the server assigns its real ID.
+
+#### Note · Index.html:1380 · Description action sheet body scrolls; give-list cannot overflow off-screen
+
+**Stories: View item details / Give item to character (CSS).** `#descActionBody`
+(`.mobile-sheet-body`, 2770) is capped at `max-height: 45vh` with `overflow-y: auto`
+(1380–1384) inside an `80vh` panel; the give-option cards render into that body (7003), so a
+long party roster scrolls rather than pushing the stepper/confirm off-screen. `app-modal-open`
+scroll-lock is driven by the recompute-from-DOM `syncModalOpenState`/toggle path (3483) rather
+than relying solely on the unconditional add/remove sites. Both check out.
+
+#### Note · Index.html:1226 · Two CSS/HTML blocks in this range are inert dead code (do not re-flag)
+
+To save future runs the chase: (1) `.notes-note*` (1226–1307, incl. `.notes-note.pending`
+which lacks `pointer-events:none`) is the **legacy v1** notes styling — the live Notes UI uses
+`.note-card` (2116+); nothing renders `.notes-note`. (2) `#sellItemSheet` (z-index 80, 2703–2724)
+with `confirmSellItem()`/`sellItemConfirmBtn` is never opened anywhere (no `openSellItemSheet`
+call exists) — it was superseded by the in-sheet `descActionSheet` stepper flow. Its `z-index:80`
+sitting *below* `descActionSheet`'s `z-index:81` (2765) is therefore never exercised. Neither is
+a behavioral bug.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
