@@ -25,9 +25,81 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: Index.html lines 1–1500 (HTML structure, CSS)
+
+This range is entirely the `<head>`/`<style>` block (design tokens, layout, every
+component's CSS) — no markup body and no JS yet. Per the audit charter I skipped
+pure style/dead-code findings and looked only for CSS that produces a **behavioral**
+bug in a user-story state machine. Stories traced through this CSS: Give item to
+character; Add item; Quick-adjust currency/delerium; Edit inventory item; Sell item;
+Combine; Create/Edit/Pin/Archive note (pending state). One real bug found.
+
+#### BUG · Index.html:513 · Give-to flow shows a perpetual fake loading spinner on the disabled Confirm button
+
+**Story: Give item to character — step after tapping "Give to…", before a character is picked.**
+The loading-spinner pseudo-element is keyed on the generic `:disabled` state rather
+than a dedicated loading class:
+
+```
+button.primary:disabled::after,
+button.success:disabled::after { content:''; … animation: btn-spin .7s linear infinite; }
+```
+(Index.html:513–519)
+
+`descActionConfirmBtn` is a `.primary` button (Index.html:2774). When the description
+action sheet opens in **give** mode, `openDescAction_` disables it on open and keeps
+the `.primary` class:
+
+```
+confirmBtn.disabled = mode === 'give'; // enabled once character selected
+```
+(Index.html:6945)
+
+So from the moment the user taps "Give to…", the Confirm button renders a spinning
+loader and keeps spinning the entire time the user is reading the character list and
+deciding — there is no server round-trip in progress. The spinner only stops once a
+character is selected and the button re-enables (~Index.html:7033). This falsely
+signals an in-flight server operation while the app is actually idle waiting on user
+input, and (b) navigate-away/return leaves the sheet still spinning cosmetically.
+
+**Why this is the only affected button:** every other `.primary`/`.success` button
+that gets `disabled` is disabled *only during* its real round-trip (e.g. quick-edit
+confirm at 7574, re-enabled at 7581/7610), so the spinner is correct feedback there.
+The delerium **Sell/Received** buttons are the proof the author knew this hazard —
+when idle-disabled they deliberately swap to `.secondary` (Index.html:4890,
+`sellBtn.className = on ? 'danger' : 'secondary'`) specifically so the `:disabled`
+spinner does not fire. `sellBatchConfirmBtn` is `.secondary` for the same reason.
+Only the give-mode path was missed.
+
+**Fix:** apply the same `.secondary`-while-disabled treatment to
+`descActionConfirmBtn` in give mode, or gate the spinner on an explicit `.is-loading`
+class added only when a `gasCall` is actually in flight rather than on `:disabled`.
+
+#### Note · Index.html:1226–1342, 2151, 4135–4160 · Pending note cards are correctly non-interactive (double-guarded)
+
+**Stories traced: Create note, Edit note, Pin note, Archive note — pending (optimistic-create) state.**
+The current Party Notes render produces `.note-card.note-pending`
+(Index.html:4141); CSS at Index.html:2151 sets `pointer-events:none` on it, **and**
+the JS independently omits the card's `onclick` and the entire Pin/Archive action row
+while pending (`${isPending ? '' : …}` at Index.html:4142 and 4153). So a not-yet-
+persisted note (temp id `NOTE_TEMP_*`) cannot be opened for edit, pinned, or archived —
+no path to fire a server call against a temp id. Clean trace. Note: the
+`.notes-note.pending { opacity:.72 }` block (Index.html:1288) lacks `pointer-events`,
+but it belongs to the legacy v1 notes UI (`.notes-note`, lines 1226–1342) which the
+current render does not emit, so it is not a live concern.
+
+#### Note · Index.html:504–519 · In-flight button-spinner baseline confirmed sound (except give-mode)
+
+**Stories traced: Add item, Quick-adjust currency/delerium, Edit inventory, Sell item, Combine.**
+The disabled-spinner mechanism is the app's only built-in "working…" affordance for
+primary/success action buttons and is wired correctly everywhere a button is disabled
+strictly for the duration of its `google.script.run` call. The single conflation of
+"disabled because idle/invalid" with "disabled because loading" is the give-mode
+Confirm button (BUG above). No other idle-disabled primary/success button was found.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
