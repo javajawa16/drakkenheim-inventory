@@ -25,9 +25,35 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure + CSS; cross-read 2204–2787 markup, 3142–3185, 6720–6840, 7460–7720, 8693–8743)
+
+Section is ~99% CSS. Per audit rules I skipped pure style/naming issues and hunted
+only for CSS-driven *behavioral* bugs in the overlay/sheet state machines that the
+inventory-edit, description, give/sell/remove, quick-adjust, and identity stories
+pass through.
+
+#### BUG · Index.html:1650 · `#desktopInventoryEditor` "hidden on phone" is not enforced — empty Item Details form can render on the phone Inventory tab
+
+**Stories: Edit inventory item; (collateral on) View item details / every Inventory-tab load.**
+The desktop inventory editor card (`<div id="desktopInventoryEditor" class="card desktop-editor">`, markup line 2255) lives **inside `#inventorySection`, which is `.active` on first load** (line 2204). Its visibility is governed only by:
+- `.desktop-editor { display: none; }` (line 1539, base) and
+- `@media (min-width: 700px) { .desktop-editor { display: block; } }` (line 1650).
+
+The README itself states the iOS GAS webview renders at **~980px CSS width** and that `window.innerWidth ≈ 980` (CSS/Layout notes, line 192). A CSS `@media (min-width:700px)` query evaluates against that 980px CSS viewport, so **the "desktop" media block is ALWAYS live in the phone webview** — the inline comment "media queries are dead in the AS webview" (line 1676) is only true for `max-width` phone queries, not `min-width:700px`. The authors compensated for this for sheets by re-enabling each `.mobile-sheet` by ID inside the same media block (lines 1652–1664), but **there is no `html.is-phone .desktop-editor { display:none }` override** (confirmed: only refs to `desktop-editor` are 1539, 1650, 2255). The only thing that ever hides `#desktopInventoryEditor` is the JS inline `style.display='none'` set in `setInventoryEditorOpen()` (7669) / via `closeInventoryPanels()` — and **the boot sequence (lines 8734–8742) never calls either**. Result: on a phone, after the boot fade-in, the media query forces the card to `display:block` and an empty "Item Details" form (h2 + Notes textarea + hidden inputs, 2255–2320) sits below the inventory list until the user's first edit/close cycle (e.g. a swipe-edit or any path that calls `closeInventoryPanels(false)`, which sets the inline `display:none`). Same exposure exists on real desktop, but there it's the intended editor surface; on phone it's a stray, partially-interactive form.
+**Fix:** add `html.is-phone .desktop-editor { display: none !important; }` (belt-and-suspenders, makes the "hidden on phone" intent robust regardless of media-query behavior), or call `closeInventoryPanels(false)` once in the boot block. The CSS fix is preferred — it doesn't depend on render timing.
+
+#### RISK · Index.html:1651 · Phone sheet visibility depends on an exhaustive per-ID allow-list — any new sheet is invisible on phone
+
+**Stories: every flow that opens a mobile sheet (edit, description, give, sell, sell-batch, combine, gold, delerium, pay-reason, quick-edit, identity).**
+Because the always-live `@media (min-width:700px)` block sets `.mobile-sheet { display:none !important }` (1651), each sheet must be individually re-enabled by `#id.active { display:…!important }` (1652–1664). I cross-checked all 13 `.mobile-sheet` elements in the markup (inventorySheet 2466, descriptionSheet 2536, quickEditSheet 2564, noteFormSheet 2617, combineSheet 2646, goldSheet 2666, deleriumSheet 2691, sellItemSheet 2703, sellBatchSheet 2727, giveItemSheet 2739, payReasonSheet 2752, descActionSheet 2765, identitySheet 2781) against the allow-list — **all 13 are currently present, so no sheet is broken today.** The risk is forward-looking: the next contributor who adds a sheet and forgets to append it to the 1652–1664 list will ship a sheet that is `display:none !important` on phone and **never opens, with no error** — a silent dead-end for whatever new flow it backs. Consider replacing the per-ID list with a single `@media (min-width:700px){ .mobile-sheet.active{ display:block !important } }` rule (the `#descActionSheet` flex case can keep its own override).
+
+#### Note · Index.html:1352,1583,1938 · Overlay z-index stacking correctly blocks navigate-away while a sheet is open; scroll-lock lifecycle is centrally reconciled
+
+Traced the navigate-away / tab-switch-during-in-flight cross-cutting scenarios against the CSS stacking context. Bottom-nav is `z-index:30` (1585), notes-FAB `21` (2159), app-header `22` (179); every `.mobile-sheet` is `70` base (1352) with inline bumps to 80–90, and the dice overlay is `50` (1941). So **any open sheet or the dice calc fully covers the bottom-nav and header** — the user physically cannot tap a nav tab mid-flight while a write sheet is open, which is the correct guard for the in-flight write stories. The `body.app-modal-open{overflow:hidden}` scroll-lock (110) is reconciled on **every** sheet-close path via `syncModalOpenState()` (3482, 25+ call sites), which re-derives the class from `Boolean(document.querySelector('.mobile-sheet.active'))` rather than blindly removing it — so closing one sheet while another is still active keeps the lock. `openDiceCalc`/`closeDiceCalc` (3578–3586) pair add/sync correctly, and dice (50) and sheets (70+) are mutually exclusive in practice (dice covers the header, so no sheet can be opened over it, and vice-versa). No stuck scroll-lock or tap-through found. Stories cleanly traced for this section: Edit inventory item, View item details, Give/Sell/Remove from description, Quick-adjust currency/delerium, Identity pick.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
