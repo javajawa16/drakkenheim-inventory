@@ -25,9 +25,31 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500: HTML `<head>` + full `<style>` block; cross-referenced body sheets 2466–2800 and JS handlers for sheet stacking, scroll-lock, and boot reveal)
+
+This section is the entire `<style>` block (lines 8–2174) plus the start of `<body>`. Per audit rules, pure cosmetic/style issues are out of scope — findings below are limited to CSS that drives **behavior** (stuck states, untappable controls, invisible UI, missing feedback). I traced every story that depends on a `.mobile-sheet`: **View item details**, **Give item to character**, **Sell item**, **Remove item**, **Edit inventory item**, **Delete inventory item**, **Combine duplicate**, **Quick-adjust currency/delerium**, plus the cross-cutting **boot/first-load** and **dice overlay** flows. Net result: the section is behaviorally sound — one latent fragility (RISK) and several clean traces (Note).
+
+#### RISK · Index.html:1651 · Desktop `@media (min-width:700px)` hides every `.mobile-sheet` unless its ID is hand-listed in the whitelist — load-bearing on the ~980px GAS webview
+
+Line 1651 sets `.mobile-sheet { display: none !important; }` inside `@media (min-width: 700px)`, then re-enables sheets one ID at a time (lines 1652–1664) with `display:block/flex !important`. Per the README CSS notes, the iOS GAS webview renders at **~980px CSS width** and `window.innerWidth` reports ~980 — so this media query **matches on phone**, not just desktop. (The line-1676 comment "media queries are dead in the AS webview" only means *width can't distinguish phone from desktop*; the query itself is live.) That makes the whitelist load-bearing for the actual phone UX, not a desktop-only nicety.
+
+I cross-checked all 13 `.mobile-sheet` IDs in the body (inventorySheet, descriptionSheet, quickEditSheet, noteFormSheet, combineSheet, goldSheet, deleriumSheet, sellItemSheet, sellBatchSheet, giveItemSheet, payReasonSheet, descActionSheet, identitySheet) against the whitelist — **all 13 are currently listed**, so there is no live bug today. The risk is the silent failure mode: any future `.mobile-sheet` added without also appending a `#newSheet.active { display:… !important }` line will be **`display:none` even when `.active`** — i.e. it never appears, turning whatever flow opens it into a dead end with no error. Suggested mitigation: replace the per-ID whitelist with a single `.mobile-sheet.active { display:block !important }` (and keep the `#descActionSheet.active{display:flex}` special-case), so the desktop override can't drift out of sync with the sheet inventory.
+
+#### Note · Index.html:231,1352,2703–2778 · Sheet z-index stacking is correct across the description/give/sell sub-sheet flows
+
+Traced **View item details → Give/Sell/Remove** and **Edit item → Give to…**. Stacking is internally consistent: base `.mobile-sheet` = z70; `descActionSheet` = z81 opens *over* `descriptionSheet` (z70) ✓; `giveItemSheet`/`sellItemSheet` = z80 are only opened from `inventorySheet`/`quickEditSheet` (base z70) ✓, so they layer correctly; the descAction give-path renders its character options *inside* `descActionBody` (selectDescGiveTarget, line 7003) rather than launching the z80 giveItemSheet, sidestepping any 80-vs-81 inversion; `sellBatchSheet`=z82 and `identitySheet`=z90 sit above everything. No sheet is ever opened beneath an already-higher sheet in the traced flows.
+
+#### Note · Index.html:110,3482,3580,4603,6815 · `app-modal-open` scroll-lock is consistently managed; dice overlay does not strand the lock
+
+Traced the **navigate-away / overlay** scroll-lock state machine. `body.app-modal-open{overflow:hidden}` is toggled by `syncModalOpenState()` (keys on `.mobile-sheet.active`) on sheet open/close, and added manually for the three non-`.mobile-sheet` cases (dice overlay 3580, identity 4575, descriptionSheet 6815). `closeDiceCalc()` clears it via `syncModalOpenState()`; because the dice button lives in the z22 header and sheets (z70+) cover it, dice can never open over a sheet, so the sync-based clear can't drop a still-needed lock. No path leaves the body permanently unscrollable in the traced flows.
+
+#### Note · Index.html:118,3486,3767,3790 · Boot reveal has an error-path failsafe — first-load failure does not strand the user on the blank `app-booting` wallpaper
+
+`html.app-booting` zeroes the opacity of `.app-header`, `main`, and `.bottom-nav` (lines 118–123); only `markInventoryReady()` (3486) removes `app-booting`/adds `inventory-ready`. Verified the failsafe: `loadInventory`'s `!res.ok` branch (3767) **and** `withFailureHandler` (3790) both call `markInventoryReady()`, so a failed cold start reveals the shell with an inline error instead of an indefinitely blank screen. (Note `app-booting` only dims header/main/nav — the position:fixed sheets, including the identity picker at z90, render regardless, so the first-open character picker is never hidden by the boot gate.)
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
