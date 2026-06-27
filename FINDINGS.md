@@ -25,9 +25,25 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500 — design tokens + CSS for header, cards, sheets, notes, identity, steppers)
+
+This range is entirely the `<style>` block (no JS, no interactive HTML — `<body>` markup begins later). Per audit rules, pure style/dead-code issues are excluded; only CSS that produces a *behavioral* bug in a traced story is reportable. Traced every story whose visual state machine is driven by classes defined here. No behavioral bugs found — the state-class CSS is sound. Details below.
+
+#### Note · Index.html:1–1500 · CSS state-class behavior verified clean across sheet/notes/feedback flows
+Stories traced (read into JS handlers as needed):
+- **Create note** (pending card non-clickable): the *current* Party Notes card renders `note-card`/`note-pending` (line 4141) which maps to `.note-card.note-pending { opacity:.6; pointer-events:none }` (line 2151) — correctly blocks taps on a saving card. The legacy `.notes-note.pending { opacity:.72 }` (line 1288) lacks `pointer-events:none`, but the entire `.notes-note*` family (1226–1307) is **dead CSS** — no render path emits those classes (the v1 notes UI was replaced by `.note-card`). Not reportable (dead code), noted only to record the divergence was checked.
+- **View item details → Sell for Gold / Give to… / Remove** (modal scroll-lock state machine): `body.app-modal-open { overflow:hidden }` (line 110) is the background-scroll lock. Opening the description sheet then a sub-sheet (give/sell/remove) nests two overlays; both `closeDescActionSheet` and `closeDescriptionSheet` call `syncModalOpenState()` (line 3483), which recomputes the lock from `Boolean(document.querySelector('.mobile-sheet.active'))` rather than blindly removing it — so closing the inner sheet keeps the lock while the outer is still open, and only the last close unlocks. Navigate-away/close-during-flow leaves no stuck `overflow:hidden`. Sound.
+- **Split gold evenly / Receive / Pay** (in-flight button feedback): the disabled-progress spinner CSS (lines 513–519) is keyed only to `button.primary:disabled::after` and `button.success:disabled::after`. Every non-primary in-flight confirm compensates: `Pay` is `.danger` but swaps its label to "Recording…" and disables (line 6083); `Split Evenly` is `.secondary` with no spinner but gives immediate feedback via an optimistic pending ledger row (lines 6002–6015) and is double-tap-guarded because the amount input is cleared on first tap, so a second tap fails the `amount<=0` check (lines 5994, 6012). No feedback gap, no double-submit.
+- **First open / identity splash**: `confirmIdentity` removes `app-modal-open` directly (line 4603) rather than via `syncModalOpenState`, which is safe only because the identity sheet is guaranteed to be the sole open overlay at first launch; no other sheet can be active behind it.
+- **Swipe-to-delete layering**: `.inventory-card` (z-index 2) over `.inventory-delete-action` (z-index 1, line 587) — the delete action is revealed behind the card and becomes tappable once JS translates the card away. `.scope-slider-indicator { pointer-events:none }` (line 326) and `html::before/::after { pointer-events:none }` (line 65) confirm decorative overlays never intercept taps on the scope pills or content.
+
+#### IDEA · Index.html:513 · In-flight spinner affordance is coupled to button *color*, not to "is submitting"
+Not a current bug — see the Note above; every live non-primary submit path compensates by other means. The friction is consistency/robustness: the only built-in progress affordance (the spin keyframe) fires solely for `.primary`/`.success`. The `Split Evenly` (`.secondary`) and `Pay`/`ledger-cancel` (`.danger`) buttons get only `opacity:.5` from `button:disabled` (line 510) when disabled, so any future non-primary confirm button added without a manual text swap or optimistic row would silently show no progress, inconsistent with adjacent flows. Suggest keying the spinner to a state class (e.g. `button.is-busy::after`) toggled centrally in `gasCall`, decoupling the affordance from button color.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
