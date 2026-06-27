@@ -25,9 +25,30 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500: design tokens, component CSS, mobile-sheet system; traced against the sheet markup at 2466–2787 and the open/close JS at 3482–6955)
+
+This range is entirely CSS inside the `<style>` block (no JS, no write paths). Per protocol, pure aesthetic/style issues are out of scope; I traced only CSS that governs behavioral state of user-story flows — sheet visibility, background-scroll lock, swipe reveal, and z-stacking — reading the corresponding markup and JS as needed.
+
+#### RISK · Index.html:1651 · Every mobile sheet depends on a hand-maintained per-ID allow-list that the phone webview makes load-bearing
+
+**Stories: all sheet-based flows** — item detail/Give/Sell/Remove (descriptionSheet→descActionSheet), edit item (inventorySheet), quick-adjust (quickEditSheet), combine (combineSheet), gold Got Paid/Pay (goldSheet→payReasonSheet), delerium (deleriumSheet), batch sell (sellBatchSheet), note create/edit (noteFormSheet), identity selection (identitySheet).
+
+Line 1651 sets `.mobile-sheet { display: none !important }` inside `@media (min-width: 700px)`, then lines 1652–1664 re-enable each sheet individually by ID (`#descriptionSheet.active { display: block !important }`, etc.). The README's own CSS notes state the iOS GAS webview reports `window.innerWidth ≈ 980`, so **this "desktop" media query is active on the primary phone platform**, not just real desktops. That makes the explicit ID list the *only* thing that lets any sheet open on-device — the `!important` default would otherwise keep them all `display:none` even when `.active` is set.
+
+I verified the list is currently **complete**: all 13 sheets (`inventorySheet, descriptionSheet, quickEditSheet, noteFormSheet, combineSheet, goldSheet, deleriumSheet, sellItemSheet, sellBatchSheet, giveItemSheet, payReasonSheet, descActionSheet, identitySheet`) appear at 1652–1664, so there is no current bug. The risk is latent: any sheet added in a future change that isn't manually appended here will be silently invisible on phones — `.active` toggles, `app-modal-open` locks background scroll, but nothing renders, leaving the user on a scroll-locked dead screen with no sheet. Suggest collapsing the list to one general rule plus the flex exception: `.mobile-sheet.active { display: block !important }` and `#descActionSheet.active { display: flex !important }` (descActionSheet is the only `display:flex` sheet, line 1653), so new sheets work by default.
+
+#### Note · Index.html:110 · Background-scroll lock, sheet stacking, and action-button reachability all trace clean
+
+Traced the cross-cutting "navigate-away / stacked-sheet" concerns through the CSS + its drivers:
+- **Scroll lock (`body.app-modal-open { overflow: hidden }`, line 110):** added on sheet open (3580/4575/6815) and, critically, *recomputed* on every close via `syncModalOpenState()` (3483: `toggle('app-modal-open', Boolean(document.querySelector('.mobile-sheet.active')))`), which is called on all close paths (3519, 4642, 5329, 5359, 5381, 5581, 6924, 6955, 7521, 7675…). Closing an inner sheet (e.g. descActionSheet z81) over an outer one (descriptionSheet z70) correctly *retains* the lock because the recompute still sees an active sheet — no premature unlock, no stuck lock. The single blind `remove('app-modal-open')` (4603, `confirmIdentity`) is safe because the identity splash is the first-open gate with no other sheet stacked beneath it.
+- **z-stacking:** bottom-nav is `z-index:30` (1585) and sheets are `≥70`, so an open sheet always covers the nav — a user cannot tab away by tapping a nav button through the modal. Stacked sheets use ascending z (descriptionSheet 70 < descActionSheet 81 < identitySheet 90), so inner actions render above their parent.
+- **descActionSheet button reachability:** bottom-anchored panel `max-height:80vh` (1372) with only the scrollable body capped at `max-height:45vh` (1380); the Confirm/Cancel footer is a separate `flex:0 0 auto` actions block (markup 2771–2776), so a long stat block scrolls internally instead of pushing the action buttons off-screen.
+
+Also noted (not reported — out of scope): `.notes-edit-action`/`.notes-delete-action` (1254–1286, `opacity:0` with no reveal class) are dead CSS — the notes swipe-edit/delete UI is unreferenced anywhere in JS or markup.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
