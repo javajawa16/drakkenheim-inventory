@@ -25,9 +25,21 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500 — design tokens, reset, header, component CSS; cross-referenced sheet HTML 2466–2787, desktop media query 1622–1673, app-modal-open toggles)
+
+Lines 1–1500 are entirely CSS inside the `<style>` block (no HTML body or JS in range). Traced the CSS surface of every story whose UI is styled here: **identity select** (`.identity-card`/`#identitySheet`), **quick-adjust currency/delerium** (`.quick-editor`, `.delerium-row` counters), **inventory swipe + delete** (`.inventory-card`, `.inventory-delete-action`), **view details / give / sell / remove** (`#descActionSheet`, `.mobile-sheet-body`), **gold/delerium ledger** (`.resource-ledger-row`), **party notes create/edit/pin/archive** (`.note-card`, `.notes-fab`, `.note-card.note-pending`), **add library/custom item** (`.add-stepper`, `.selected-item-card`, `.quick-add-mode`), **sell batch** (`.sell-batch-row`/steppers). Visibility (`.section`/`.active`, `.mobile-sheet`/`.active`), scroll-lock (`body.app-modal-open`), and stacking (z-index 22→90) all map correctly to their JS toggles. One latent RISK below; otherwise clean.
+
+#### RISK · Index.html:1651 · Desktop (≥700px) hides every `.mobile-sheet` except a hand-maintained allowlist
+
+At `@media (min-width:700px)` the rule `.mobile-sheet { display: none !important; }` blanks **all** sheets, then 13 per-ID lines (1652–1664) re-enable specific sheets with `#id.active { display: block|flex !important; }`. I verified every one of the 13 `class="mobile-sheet"` divs currently in the HTML (inventorySheet, descriptionSheet, quickEditSheet, noteFormSheet, combineSheet, goldSheet, deleriumSheet, sellItemSheet, sellBatchSheet, giveItemSheet, payReasonSheet, descActionSheet, identitySheet) **is** present in the allowlist — so there is **no live bug today**. The risk is structural: this is the kind of view used by the DM (≥700px). Any sheet added in a future run without also adding a matching `#newSheet.active { display: ... !important }` line will be **completely invisible and unclosable on desktop** — and because the close handlers/`app-modal-open` reconciliation (3483) key off `.mobile-sheet.active` existing, the body stays scroll-locked (`overflow:hidden`) with an invisible active sheet, a stuck state requiring reload. Affects every sheet-based story when viewed ≥700px. Suggested fix: replace the per-ID allowlist with two grouped rules keyed on a layout class (e.g. `.mobile-sheet.active.sheet-flex { display:flex !important } .mobile-sheet.active:not(.sheet-flex) { display:block !important }`) so new sheets inherit correct desktop visibility automatically.
+
+#### Note · Index.html:1254 · Legacy notes-swipe CSS confirmed dead (not a bug); scroll-lock + stacking trace clean
+
+Checked the `opacity:0`-by-default swipe actions `.notes-edit-action`/`.notes-delete-action` (1254–1286): there is **no** reveal state anywhere that restores `opacity:1`/`translateX(0)`, which would make swipe-to-edit/delete invisible — **but** `.notes-note-card`/`.notes-note-row`/`.notes-composer`/`.notes-editor` appear only in CSS and are never rendered in HTML or referenced in JS. This is the retired v1 (`CAMPAIGN_NOTES_FEED`) chat-style notes UI noted in README "Known TODOs"; the live Party Notes tab uses `.note-card` (tap-to-edit + inline pin/archive `.note-action-btn`), so no live story hits the broken swipe CSS. Reported per the "no dead code" rule only as confirmation it was examined. Separately confirmed the `body.app-modal-open` scroll-lock and the z-index ladder (header 22 < bottom-nav 30 < dice 50 < sheets 70–90, with sellItem/give 80 < descAction 81 < sellBatch 82 < identity 90) order sheets-over-nav correctly for the give/sell/remove/identity stories.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
