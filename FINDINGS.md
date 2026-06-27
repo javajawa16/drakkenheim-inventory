@@ -25,9 +25,27 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html lines 1–1500, HTML structure + CSS)
+
+Section is pure CSS/design-tokens/HTML structure (no JS, no server calls). Per audit rules I skipped style/naming issues and looked only for CSS that produces a **behavioral bug or false feedback** inside a user story. Stories whose feedback components live here were traced through to their JS to confirm behavior: **Give item to character**, **Sell crystals / Receive crystals**, **Sell Items batch**, plus the visual states of Add item, Quick-adjust, Combine, Sell item, Edit item, and Party Notes.
+
+#### RISK · Index.html:513 · Disabled `.primary` "Give to…" Confirm button shows a perpetual loading spinner before any input
+
+**Story: Give item to character — description sheet → "Give to…".** The CSS rule `button.primary:disabled::after` / `button.success:disabled::after` (lines 513–519) renders an infinitely-spinning spinner on *any* disabled `.primary`/`.success` button — it is intended as in-flight feedback. But `openDescAction` (Index.html:6945) opens the give sheet with `confirmBtn.disabled = mode === 'give'`, and that button (`#descActionConfirmBtn`, line 2774) carries class `primary` the whole time. So the moment the give sheet opens — before the user has picked a character — the Confirm button is disabled-with-spinner, signalling "loading / working" when the app is actually idle and waiting for the user to tap a character. The spinner only stops once `selectDescGiveTarget` (Index.html:7033) sets `disabled = false`. This is false/confusing feedback at the first step of the give flow and may make the user wait instead of selecting a recipient.
+
+The codebase already knows the correct pattern: `updateDeleriumButtonStates` (Index.html:4889/4895) swaps the delerium Received/Sell buttons to class `secondary` (no spinner) while disabled and only applies `success`/`danger` when enabled; `sellBatchConfirmBtn` (line 5742) is `secondary` for the same reason. Fix options: (a) give `#descActionConfirmBtn` class `secondary` while disabled in give mode and swap to `primary` on holder selection, or (b) scope the spinner pseudo-element to an explicit `.is-loading` class set only during the actual `google.script.run` call rather than to every `:disabled` state.
+
+#### Note · Index.html:4889 · Delerium and sell-batch buttons correctly avoid the false spinner
+
+**Stories traced: Sell crystals, Receive crystals, Sell Items batch.** `updateDeleriumButtonStates` toggles `deleriumSellBtn`/`deleriumReceivedBtn` between `secondary` (disabled, no spinner) and `danger`/`success` (enabled), and `sellBatchConfirmBtn` stays `secondary` while disabled — so none of these at-rest-disabled buttons trip the `:disabled::after` spinner rule. The give-sheet Confirm button (RISK above) is the one place this pattern is not followed.
+
+#### Note · Index.html:1350 · Mobile-sheet overlay z-index ordering is internally consistent
+
+**Stories traced: Combine duplicate, Sell item, View item details, Give item, identity selection.** Overlay stacking is coherent: `.mobile-sheet` z-index 70 (description action / combine / sell / identity sheets), `#payReasonSheet` bumped to 80 so the pay-reason chooser layers above the gold sheet, `.app-header` at 22 below all sheets. No two simultaneously-openable overlays share a layer in a way that would let a tap fall through to the wrong sheet. `body.app-modal-open { overflow: hidden }` (line 110) is the scroll-lock mechanism — whether it is always cleared on close is a JS concern for a later section, not visible in this CSS-only range.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
