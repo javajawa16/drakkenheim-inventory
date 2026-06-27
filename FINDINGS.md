@@ -25,9 +25,70 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure & CSS)
+
+Stories traced through this section's CSS state machines: **Sell item**, **Give item to
+character**, **Remove item** (all routed through `#descActionSheet`); **Create note /
+optimistic card** (`.note-card` pending state); plus the generic mobile-sheet show/hide
+machine shared by every sheet-based flow (quick-adjust, edit, combine, gold, delerium,
+identity). CSS that is purely presentational (tokens, gradients, typography) was treated
+as out of scope per the audit rules; only visibility/interaction state machines were
+analyzed.
+
+#### BUG · Index.html:1367 · `#descActionSheet` is permanently visible on any true <700px viewport
+
+**Stories: Sell item / Give item to character / Remove item — all reach the screen
+through `#descActionSheet`.** The sheet carries `class="mobile-sheet"` (line 2765), and
+`.mobile-sheet { display: none }` (line 1351) is the base hidden state for every sheet.
+`openDescActionSheet`/`closeDescActionSheet` (6949/6954) only toggle the `.active` class —
+they never set an inline `style.display` — so visibility is 100% CSS-driven.
+
+The bare-ID rule `#descActionSheet { … display: flex; align-items: flex-end; }` (line 1367)
+has ID specificity (1,0,0), which **outranks** `.mobile-sheet { display:none }` (class,
+0,1,0). So in the *base* (non-media) stylesheet the sheet is `display:flex` **even with no
+`.active` class** — i.e. its "closed" state does not hide it. The only thing that rescues
+this is the desktop block `@media (min-width:700px) { .mobile-sheet { display:none
+!important } … #descActionSheet.active { display:flex !important } }` (lines 1651/1653):
+there `!important` beats the bare-ID rule, restoring correct closed→hidden / open→flex
+behavior.
+
+Per the README CSS-architecture note, the iOS GAS webview renders at ~980px CSS width, so
+`(min-width:700px)` *matches on the primary target phone* and masks the defect there. But
+on any genuinely <700px CSS viewport — an Android webview reporting real device width, a
+narrowed desktop window, or any client where the webview does not inflate to ~980px — the
+media query does not apply, the base rules win, and `#descActionSheet` renders as a
+full-screen `position:fixed; inset:0; z-index:81` container with a 55%-opaque blurred
+backdrop (`background: rgba(6,10,20,.55); backdrop-filter: blur(4px)`) on top of the whole
+app from first paint. It intercepts every tap → the app is effectively unusable on that
+device class, independent of any user action.
+
+Note this is the *only* sheet ID rule that sets `display` in its base block (verified:
+`#payReasonSheet` only sets `z-index`; all other sheets inherit `display:none` from
+`.mobile-sheet` and get shown solely via their `.active` rule). The `display:flex` was
+placed in the base rule to get the bottom-sheet flex layout, but the matching
+`#descActionSheet.active { display:flex }` (line 1385) already exists, proving the intent
+was for `display` to be active-gated. **Fix:** remove `display:flex` from the base
+`#descActionSheet` block (keep `background`/`align-items` there if desired) so the closed
+state inherits `display:none` from `.mobile-sheet`; let `#descActionSheet.active { display:
+flex }` own the shown state on every viewport. This also makes the app no longer depend on
+a width media query for a sheet's closed state — consistent with the project's stated
+distrust of width-based breakpoints (phone detection deliberately uses `pointer:coarse`).
+
+#### Note · Index.html:2151 · Party Notes pending-card guard is clean
+
+**Story: Create note → optimistic card appears → server confirms.** The optimistic card is
+rendered as `.note-card.note-pending` (line 4141). Unlike the legacy `.notes-note.pending`
+rule in this section (line 1288, opacity only), the v2 rule
+`.note-card.note-pending { opacity:.6; pointer-events:none }` (line 2151) disables
+interaction, *and* the renderer omits the `onclick` entirely while pending (line 4142:
+`${isPending ? '' : onclick=…}`). Double defence — CSS and markup — so a duplicate "Saving…"
+card cannot be tapped into the edit form mid-create. Matches the README's "dimmed +
+non-clickable with Saving… badge" claim. No defect.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
