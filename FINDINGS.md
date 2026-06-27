@@ -25,9 +25,81 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html lines 1–1500, HTML `<head>` + full CSS `<style>` block)
+
+This range is entirely the design-token + component CSS. Per audit rules, style/naming
+findings are excluded; the trace targeted CSS rules that have *behavioral* coupling to JS
+(tap-blocking, scroll-lock leaks, stuck-invisible states). Stories traced end-to-end through
+their CSS: **Delete inventory item** (swipe → arm → confirm), **View item details / Give /
+Sell / Remove** (description + action sheets), **Combine duplicate**, **Quick-adjust
+currency/delerium**, and the **boot/identity reveal** cross-cutting flow.
+
+#### RISK · Index.html:118 · Cold start hides its own "Loading…" indicator — blank wallpaper with zero feedback, latent permanent-blank if first fetch never resolves
+
+**Flow: app boot (every story's entry point).** The document ships as `<html class="app-booting">`
+(Index.html:2), and `html.app-booting .app-header, main, .bottom-nav { opacity: 0; transform: translateY(10px) }`
+(Index.html:118–123) keeps the entire app chrome invisible until `markInventoryReady()`
+swaps `app-booting`→`inventory-ready` (Index.html:3490–3491). `markInventoryReady()` is reached
+**only** from inside `loadInventory()`'s handlers (3730/3741/3767/3771/3784/3790) — there is no
+timeout fallback and no other caller.
+
+Trace of the cold-start path (first-ever visit, or cache cleared): boot runs
+`setCommandMode('inventory')` → `loadInventory()` (8737 → 3394). With `inventoryRows.length === 0`
+and no localStorage cache, the synchronous branch is skipped (`paintedFromCache` stays false),
+so the function sets `#inventoryStatus.textContent = 'Loading…'` (3750) and then waits on
+`apiGetInventory()`. **But `#inventoryStatus` lives inside `<main>` (Index.html:2200, 2207), which
+is still `opacity: 0` under `app-booting`.** Result: during the entire first GAS round-trip — which
+on a cold Apps Script container is routinely several seconds — the user sees only the wallpaper
+(`html::before/::after`, the one thing not gated by `app-booting`). No spinner, no text, no
+identity sheet yet (that too waits on `apiGetMyCharacter`). It reads as a frozen/blank app on the
+exact first impression a new player gets.
+
+Latent worse case: because nothing reveals the UI except `loadInventory`'s success/failure
+handlers and there is **no fallback timer**, if that first `apiGetInventory` neither resolves nor
+rejects (GAS stall / dropped `google.script.run` callback), the app stays at `opacity: 0`
+permanently — a hard stuck state with no recovery short of reload.
+
+Warm starts are fine: when `inventoryRows` or the localStorage cache is non-empty, `loadInventory`
+calls `markInventoryReady()` synchronously (3730/3741) and the reveal is instant.
+
+Suggested fix (any one): (a) don't hide `main` under `app-booting` — fade only header/nav, or use
+a content-only fade so the centered "Loading…" is visible; (b) add a dedicated boot spinner as a
+sibling of `main` (outside the `app-booting` opacity rule); or (c) add a fallback
+`setTimeout(markInventoryReady, ~4000)` so a stalled first fetch can never leave a permanently
+blank screen.
+
+#### Note · Index.html:587 · Swipe-to-delete CSS state machine is sound — no stuck `.delete-armed`/`.deleting`
+
+**Story: Delete inventory item.** `.inventory-delete-action` (587) sits at `z-index: 1` behind the
+card (`z-index: 2`), revealed by the JS drag transform — correct stacking, the button is only
+reachable once the card slides. The two-step arm in `handleInventoryDeleteActionById` (7804–7826)
+toggles `.delete-armed` on (with a 2500 ms self-disarm timer) then `.deleting` + `disabled` on the
+confirm tap. Crucially, `deleteSelectedInventory` calls `renderInventory()` (7890) immediately on
+the optimistic update, which rebuilds the row DOM — so the transient `.deleting`/`disabled` button
+is discarded rather than left to get stuck, and on failure the rollback `renderInventory()`
+(7899/7914) likewise rebuilds a fresh, unarmed button. Navigate-away while armed is safe for the
+same reason (background-sync `renderInventory` replaces the element; the orphaned disarm timer
+fires harmlessly on a detached node).
+
+#### Note · Index.html:110 · Modal scroll-lock (`body.app-modal-open`) cannot leak across sheets
+
+**Stories: View item details / Give / Sell / Remove, Combine duplicate, Quick-adjust.**
+`body.app-modal-open { overflow: hidden }` (110) is driven by `syncModalOpenState()` (3482–3484),
+which **recomputes** the lock from live `document.querySelector('.mobile-sheet.active')` rather than
+trusting paired add/remove calls. Every sheet-close path audited routes through it
+(closeDescriptionSheet 6921–6924, closeDescActionSheet 6953–6955, combine keep/confirm 3524/3550,
+identity 4512–4513, note-form 3369, and the 20+ other `syncModalOpenState()` sites). Even the
+direct `add('app-modal-open')` sites (dice 3580, identity 4575, description 6815) are reconciled on
+close, so an error mid-flow that leaves one sheet's own remove unreached still self-heals the lock
+the next time any sheet closes. `#descActionSheet`/`#descriptionSheet` share `z-index: 70` but
+`#descActionSheet`'s markup (≈2775) is later in source than `#descriptionSheet`'s (≈2558), so the
+action sheet paints on top and its Give/Sell/Remove controls stay tappable; `#payReasonSheet`
+(z-index 80) correctly outranks both.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
