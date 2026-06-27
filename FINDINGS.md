@@ -25,9 +25,77 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-27 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure + CSS; traced Give-to-character, Sell item, Quick-adjust, Identity-pick, Dice-calc, all mobile-sheet flows)
+
+This section is almost entirely the design-token block, layout, and component CSS.
+Per audit rules I skipped pure style/naming issues and hunted only for CSS that
+produces a *behavioral* bug (misleading feedback states, stacking/tap blocking,
+toggled-class state machines). Two findings plus a clean-trace note.
+
+#### RISK · Index.html:513 · Disabled `.primary`/`.success` buttons always animate a "loading" spinner — fires on the resting (validation-gated) Give Confirm
+
+**Story: Give item to character — open give sheet.** The CSS rule at 513–519
+(`button.primary:disabled::after`, `button.success:disabled::after`) appends an
+infinitely-spinning `btn-spin` spinner to *every* disabled primary/success
+button. The intent is an in-flight loading indicator, but it is keyed off
+`:disabled`, not an explicit loading flag — so it also fires whenever such a
+button is disabled for **validation** reasons. `openDescActionSheet('give')`
+(6945) does exactly this: `confirmBtn.disabled = (mode === 'give')`, and
+`#descActionConfirmBtn` is `class="primary"` (markup 2774). Result: the instant
+the "Give to…" sheet opens — before the user has selected a character — the
+"Confirm" button shows a perpetual spinning spinner, signalling "work in
+progress / loading" when the app is simply idle waiting for a tap. A user can
+reasonably read this as "the give is already processing" or "the app is stuck,"
+and either retry-tap or back out. Selecting a character clears it
+(`selectDescGiveTarget` → `disabled = false`, 7033), so the spinner only haunts
+the pre-selection state, but that *is* the first thing the user sees in this
+flow. Blast radius is narrow today (the only resting-disabled primary/success
+button: `addSubmitBtn` is `success` but hidden-not-disabled via `display`, and
+`sellBatchConfirmBtn` is `secondary`), but it is a latent trap for any future
+validation-gated primary/success button. Fix: gate the spinner on an explicit
+`.is-loading` / `[aria-busy="true"]` selector set by the in-flight handlers
+instead of `:disabled`, so a disabled-for-validation button stays static.
+
+#### RISK · Index.html:3483 · `syncModalOpenState()` ignores the dice overlay, so the body-scroll lock has two un-coordinated owners (latent)
+
+**Cross-cutting: modal scroll-lock state machine.** `body.app-modal-open`
+(110, `overflow:hidden`) is managed two different ways. The robust path,
+`syncModalOpenState()` (3482), recomputes the class from
+`document.querySelector('.mobile-sheet.active')` — i.e. it only knows about
+`.mobile-sheet` overlays. But the dice calculator is a *separate* overlay
+(`#diceOverlay.open`, not a `.mobile-sheet`): `openDiceCalc` (3578) adds
+`app-modal-open` directly and `closeDiceCalc` (3583) calls
+`syncModalOpenState()`. As long as the dice overlay and a mobile sheet can never
+be open at once (today they can't — the dice trigger lives in the header at
+z-index 22, fully covered by any z-index-70 sheet), the asymmetry is benign:
+closing dice with no sheet active correctly clears the lock. But it is a real
+latent state-machine inconsistency — `syncModalOpenState()` is the
+"single source of truth" everywhere else yet is blind to one of the two overlay
+families. The day any flow opens a mobile sheet while the dice overlay is up (or
+vice-versa), closing the inner one will call `syncModalOpenState()`, see no
+`.mobile-sheet.active`, and unlock body scroll while the dice overlay is still
+visible — a scroll-bleed-through bug. Cheap hardening: make
+`syncModalOpenState()` also test `#diceOverlay.open` (and route `openDiceCalc`
+through it), so the lock has one authority.
+
+#### Note · Index.html:6928 · Description-sheet, sell-batch, and identity flows trace clean through this CSS
+
+Traced **Give item to character**, **Sell item**, **Remove item**,
+**Quick-adjust currency/delerium**, **Identity pick**, and the generic
+mobile-sheet open/close state machine against this section's CSS. Aside from the
+two findings above, the sheet machinery is sound: `openDescActionSheet`/`close`
+and the identity/give/sell sheets all funnel through `syncModalOpenState()`
+(3369, 4513, 4642, 4721, 5131, 5324+, 6950, 6955, 7516, 7670…) so the body lock
+self-heals when overlapping sheets stack and unstack; `sellBatchConfirm` (5774)
+rolls inventoryRows back and re-enables its button on both failure paths
+(5797–5803, 5813–5819); the swipe-delete CSS layers (`.inventory-card` z-index 2
+over `.inventory-delete-action` z-index 1, 560/587) keep the tap target correct;
+and `#mainStatus:empty { display:none }` (354) avoids dead layout space. No data
+loss or stuck-state defects found in the card/swipe/ledger styling itself.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
