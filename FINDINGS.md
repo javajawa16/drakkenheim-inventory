@@ -25,9 +25,100 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-28 (run 59) — Sections audited: 7 (Index.html 1–1500: HTML structure + CSS; cross-read sheet open/close JS 5333–7356, descActionSheet 6928)
+
+Stories traced through this section (all are sheet/overlay-driven and depend on the
+CSS in 1–1500 for their show/hide + stacking behavior): **View item details**, **Give
+item to character**, **Sell item**, **Remove item** (description sheet → descActionSheet),
+plus the structural stacking of every mobile-sheet used by Add/Edit/Delete/Combine,
+Gold (Got Paid/Pay/Split/pay-reason), Delerium, Party Notes (note form), Quick-adjust,
+Sell-batch, and the Identity splash. Section 1–1500 is 100% CSS (the `<style>` block runs
+to 2174; HTML body begins at 2177), so findings are CSS-state-machine / stacking issues
+that govern whether a sheet is visible, reachable, or trapped.
+
+#### RISK · Index.html:1370 · `#descActionSheet` base rule hard-sets `display:flex`, defeating `.mobile-sheet { display:none }` below 700px
+
+**Stories: View item details → Give to… / Sell for Gold / Remove (the unified description
+action sheet).** The base rule added in commit `312a3e7`:
+
+```css
+#descActionSheet {                       /* line 1367 — specificity (1,0,0) */
+  background: rgba(6,10,20,.55);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: flex-end;  /* line 1370 — overrides .mobile-sheet display:none (0,1,0) */
+}
+#descActionSheet.active { display: flex; }   /* line 1385 — redundant; intent was to gate on .active */
+```
+
+`.mobile-sheet { display:none }` (line 1353, specificity 0,1,0) is supposed to keep every
+sheet hidden until JS adds `.active`. But the bare `#descActionSheet` ID selector (1,0,0)
+wins on the `display` property, so `#descActionSheet` computes to `display:flex`
+**regardless of `.active`**. Since `.mobile-sheet` keeps `position:fixed; inset:0` and the
+element has no `pointer-events:none`, that is a full-viewport blurred overlay at `z-index:81`
+(above bottom-nav z=30) covering and blocking the entire app. The presence of the redundant
+`#descActionSheet.active { display:flex }` at 1385 confirms the author believed `.active`
+controlled visibility — the `display:flex` simply leaked into the wrong (un-`.active`) block.
+
+**Why it hasn't shown on the primary platform:** the iOS GAS webview renders at ~980px CSS
+width (README "CSS / Layout Architecture Notes"), so `@media (min-width:700px)` *matches*
+there. That block contains `.mobile-sheet { display:none !important }` (line 1651) — and
+`!important` beats specificity — plus `#descActionSheet.active { display:flex !important }`
+(line 1653). So on the 980px webview the overlay is correctly hidden when not active and
+shown when active. The bug is **masked only by an unrelated desktop `!important` rule.**
+
+**Where it bites:** any true viewport < 700px CSS width — a phone browser opening the web-app
+URL directly (outside the iOS webview), a narrow desktop window, or an Android webview that
+reports real device width — drops out of the media query. There, `#descActionSheet{display:flex}`
+(1,0,0) wins over the non-`!important` `.mobile-sheet{display:none}` (0,1,0) and the action
+sheet is permanently on screen, making the app unusable before the user can tap anything.
+`syncModalOpenState` (3483) keys off `.mobile-sheet.active`, so it never sets
+`app-modal-open` for this phantom overlay either — the body keeps scrolling behind it,
+confirming the show is purely a CSS cascade accident, not an intended state.
+
+**Fix:** remove `display:flex` from the bare rule; let only `.active` show it:
+
+```css
+#descActionSheet {
+  background: rgba(6,10,20,.55);
+  backdrop-filter: blur(4px);
+  align-items: flex-end;
+}
+#descActionSheet.active { display: flex; }
+```
+
+This is the same `position:absolute`/bottom-sheet override pattern the other sheets use via
+`.active` only; the fragile reliance on the desktop `!important` rule then disappears.
+
+#### Note · Index.html:1652 · Desktop sheet-visibility allowlist is complete — every mobile-sheet is re-enabled
+
+The desktop `@media (min-width:700px)` block hides all sheets with
+`.mobile-sheet { display:none !important }` (1651) then re-enables an explicit allowlist
+(1652–1664). Enumerated all 13 top-level `class="mobile-sheet"` overlays — `inventorySheet`,
+`descriptionSheet`, `quickEditSheet`, `noteFormSheet`, `combineSheet`, `goldSheet`,
+`deleriumSheet`, `sellItemSheet`, `sellBatchSheet`, `giveItemSheet`, `payReasonSheet`,
+`descActionSheet`, `identitySheet` — and confirmed **all 13 appear in the allowlist**. No
+sheet is left invisible-on-desktop (the classic "added a sheet, forgot the allowlist" bug
+is absent here). Inner `.mobile-sheet-body/-header/-actions/-panel` carry distinct class
+tokens, so the `.mobile-sheet` selector does not match them. Clean.
+
+#### Note · Index.html:2703,2739,2765 · Sheet z-index stacking is consistent for the give/sell flows
+
+Traced the stacking for **Give item** and **Sell item** across both the live and legacy
+entry points. Live path: description sheet (`#descriptionSheet`, base z=70) → buttons at
+2553–2556 call `openDescActionSheet(mode)` → `#descActionSheet` (z=81) renders above its
+opener (81 > 70). The give/sell/remove sub-actions render *inside* `descActionBody`
+(`renderDescActionBody_`, 6958) rather than opening a separate sheet, so no same-flow
+sheet-over-sheet conflict exists. Legacy path: `openGiveItemSheet()`/`openSellItemSheet()`
+(2308 edit panel, 2606 quick-edit sheet) open `#giveItemSheet`/`#sellItemSheet` (z=80) over
+their openers (`inventorySheet`/`quickEditSheet`, base z=70) — 80 > 70, correctly on top.
+`identitySheet` (z=90) sits above all; `sellBatchSheet` (z=82) above `descActionSheet`
+(z=81). No flow opens a lower-z sheet on top of a higher-z one. Stacking is sound. (Only
+caveat is the descActionSheet `display` leak logged above, which is a visibility bug, not a
+stacking one.)
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
