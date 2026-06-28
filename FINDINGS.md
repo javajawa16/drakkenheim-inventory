@@ -25,9 +25,78 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-28 (run 59) — Sections audited: 7 (Index.html 1–1500, the `<style>` block + sheet container HTML)
+
+> Section is ~1,500 lines of CSS plus the mobile-sheet container markup it
+> styles. Pure-style issues skipped per protocol; only CSS that changes
+> *behavior* (taps, show/hide, scroll lock, stacking) is reported. Stories
+> traced through this CSS: **View item details / Give item / Sell item /
+> Remove item** (descriptionSheet + descActionSheet + give/sell sheets),
+> **Edit inventory item** (inventorySheet), **Quick-adjust currency**
+> (quickEditSheet), **Add library item** (search results list), plus the
+> cross-cutting **tab-switch / navigate-away** scroll-lock behavior.
+
+#### RISK · Index.html:1651 · Sheet visibility on iOS depends on a hand-maintained allow-list, not the base `.active` rule — any new sheet is invisible until added
+
+**Cross-cutting / all mobile-sheet stories.** The GAS iOS webview renders at
+~980px CSS width (documented in README + the in-file comment at line 1676
+"media queries are dead in the AS webview"), so the **`@media (min-width: 700px)`
+block at line 1623 is effectively *always on* on phones.** Inside it,
+`.mobile-sheet { display: none !important; }` (1651) kills the base
+`.mobile-sheet.active { display: block }` rule (1358) — so the *real* gate that
+shows a sheet on every device is the explicit 13-line allow-list at
+1652–1664 (`#descriptionSheet.active { display:block !important }`, etc.), not
+the generic `.active` rule developers would expect to work.
+
+I verified all 13 current sheets are covered (inventory, description, quickEdit,
+noteForm, combine, gold, delerium, sellItem, sellBatch, giveItem, payReason,
+descAction, identity) — **so there is no live bug today.** The risk is the
+maintenance trap: anyone adding a new `class="mobile-sheet"` element (the obvious
+pattern, copied from the existing 13) and wiring `classList.add('active')` will
+ship a sheet that opens correctly in a desktop browser narrower than 700px and in
+unit reasoning, but is **permanently `display:none` on every player's phone**,
+with no error — the most common real device is the one place it breaks. The dice
+overlay sidesteps this only because it uses `.dice-overlay`, not `.mobile-sheet`.
+Suggested fix: drop the allow-list and instead scope the kill rule so it doesn't
+fight `.active` — e.g. `.mobile-sheet:not(.active) { display: none !important }`
+inside the media query, keeping the `#descActionSheet.active { display:flex }`
+special-case — so future sheets need no per-sheet line.
+
+#### IDEA · Index.html:936 · Add-item search results capped at 40vh — only ~2–3 of 20 results visible with the keyboard open
+
+**Story: Add library item — search → select result.** `#searchResults`
+(2348) uses `.results-list { max-height: 40vh; overflow-y: auto }` (934–938).
+The search input lives in the Add section with the soft keyboard open during
+typing; on a typical phone the visible viewport collapses to ~45–50vh, of which
+the results box gets 40vh ≈ 3 cards at the 72px `min-height` (`.result-card`,
+881). The app fetches 20 results (README: "20 results on mobile") but the user
+can see only a few without scrolling a nested scroll region inside an already
+scrolled sheet — a known awkward gesture on iOS. Friction, not breakage:
+consider letting the results list grow to fill available height (flex column
+with the input pinned) instead of a fixed 40vh cap, so the fetched results are
+actually reachable in one scroll context.
+
+#### Note · Index.html:1352 · Sheet stacking order and the modal scroll-lock are correct across the description/give/sell flows
+
+Traced **View item details / Give / Sell / Remove**, **Edit item**, and
+**Quick-adjust**. The z-index ladder is sound for every reachable combination:
+parent sheets (inventorySheet, quickEditSheet, descriptionSheet) sit at the base
+`.mobile-sheet` layer (70); the action sub-sheets opened *from* them always sit
+above — descActionSheet (81) over descriptionSheet (70) for sell/give/remove, and
+giveItemSheet/sellItemSheet (80) over the edit/quick-edit sheets (70). The one
+inverted pair (descActionSheet 81 > giveItem/sellItem 80) is never realized
+because the description-sheet give/sell path routes through `openDescActionSheet`,
+not `openGiveItemSheet`/`openSellItemSheet` (those are only called from the 70-level
+edit panels) — no occlusion in any current flow. The body-scroll lock is also
+robust: `syncModalOpenState()` (3482) toggles `app-modal-open` from
+`document.querySelector('.mobile-sheet.active')`, so closing one stacked sheet
+while another stays open keeps the lock — a tab-switch or sheet-close mid-stack
+does not leave the background scrollable or stuck-locked.
+
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
