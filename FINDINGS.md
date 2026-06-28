@@ -25,9 +25,39 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS)
 
 ## Sessions
+
+### 2026-06-28 (run 59) — Sections audited: 7 (Index.html 1–1500, HTML structure + CSS; traced description-sheet action overlay state machine across Index.html 2765–2778, 6935–6956, and the desktop media query at 1622–1673)
+
+#### RISK · Index.html:1369 · `#descActionSheet` is `display:flex` unconditionally — sheet is stuck visible (and blocks all taps) in any viewport < 700px
+
+**Stories traced: View item details → description sheet, and its Give-to / Sell-for-Gold / Remove actions (all routed through `descActionSheet`).**
+
+`descActionSheet` is opened/closed purely by toggling the `.active` class — `openDescAction…`/`closeDescActionSheet` (6949/6954) call `classList.add/remove('active')` and never touch `style.display`; the element (2765) carries only `style="z-index:81;"`. So its visibility is governed entirely by the CSS cascade.
+
+The base rule at line 1367 sets `display` unconditionally:
+
+```css
+#descActionSheet {            /* specificity = 1 ID */
+  background: …; backdrop-filter: blur(4px);
+  display: flex; align-items: flex-end;   /* line 1369 */
+}
+```
+
+This ID-specificity `display: flex` overrides `.mobile-sheet { display: none }` (line 1353, one class) in the **inactive** state. The only thing that re-hides it is the desktop block at line 1651, `.mobile-sheet { display: none !important }`, which is gated on `@media (min-width: 700px)`.
+
+- **Primary deployment (GAS webview ~980px):** 980 ≥ 700, so the desktop `!important` hide applies and the inactive sheet is correctly hidden. No visible bug here — which is why this has survived.
+- **Any viewport < 700px CSS width** (the deployment URL opened directly in mobile Safari/Chrome rather than the embedded webview — which reports the real ~390px device width — or a desktop window narrowed below 700px): the `@media (min-width:700px)` block does **not** match, nothing carries `!important`, and the ID rule wins. `descActionSheet` is then `display:flex` permanently. Because `.mobile-sheet` is `position:fixed; inset:0` with a dim+blur backdrop, the full screen is covered by a click-absorbing overlay on load, and removing `.active` cannot hide it. The app is effectively unusable for those users. (`body.app-modal-open` is *not* set, since `syncModalOpenState` keys off `.active`, so the overlay blocks taps while the body still scrolls underneath — a confusing half-state.)
+
+`descActionSheet` is the **only** sheet with this defect: every other overlay (`identitySheet`, `goldSheet`, `payReasonSheet`, `giveItemSheet`, `deleriumSheet`, `sellItemSheet`, `sellBatchSheet`, `combineSheet`, `inventorySheet`, `quickEditSheet`, `noteFormSheet`, `descriptionSheet`) sets `display` only via `.mobile-sheet.active` and the per-id `.active` overrides — none set `display` on the bare id.
+
+**Fix:** move the `display: flex` off the bare `#descActionSheet` rule and onto the active state only. The `.active` rule already exists — `#descActionSheet.active { display: flex; }` (1385) and the desktop `#descActionSheet.active { display: flex !important; }` (1653) — so simply deleting `display: flex;` from line 1369 (keeping `align-items: flex-end`, which is harmless when hidden) closes the gap with no change to the open-state layout in any viewport.
+
+#### Note · Index.html:1350–1664 · Sheet show/hide state machine is otherwise consistent; `.primary` confirm buttons carry in-flight spinner feedback
+
+Traced the open/close transitions for the description action sheet and reviewed the display-state rules for every `.mobile-sheet` overlay. Aside from the `#descActionSheet` cascade gap above, the show/hide contract is uniform: base `.mobile-sheet { display:none }`, `.mobile-sheet.active { display:block }`, and a desktop `@media` block that re-asserts each active sheet with `!important`. The destructive/confirm button in the description action sheet (`descActionConfirmBtn`, 2774) is `.primary`, so it inherits the `button.primary:disabled::after` spinner (512–519) and gives clear in-flight feedback when a Sell/Give/Remove round-trip is pending; `button.success` (Got Paid) shares this. (Observed but not logged as a finding: `.danger`/`.secondary` disabled buttons get only opacity, no spinner — purely cosmetic, no behavioral impact since the disabled attribute still blocks taps.)
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
