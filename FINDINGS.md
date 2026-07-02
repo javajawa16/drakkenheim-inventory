@@ -435,6 +435,8 @@ Fix: when `loadInventory`'s handler bails on `_inFlightWrites>0`, set
 actually applies), so the deferred reload fires once the write settles. The same
 pattern applies to `loadNotes`/`pendingForeignNoteReload`.
 
+✅ RESOLUTION — `gasCall` now drains the deferred `pendingForeignReload` the instant the last in-flight write settles (new `drainForeignReload_()` → `loadInventory(true)`), so a foreign change no longer waits for the next sync poll or an unrelated future write. (fixed 2026-07-02, commit "fix: all open BUG/RISK/IDEA findings from audit runs 46-58")
+
 #### RISK · Index.html:7479 · Double-tap on inline "Confirm delete all" shows a spurious "Delete failed."
 Delete-inventory story, qty>1 path. The inline `Confirm delete all` button
 created at 7487 is never disabled and is only torn down on the next
@@ -448,6 +450,8 @@ Narrow window (the confirm button is removed on the first render) but reachable.
 Fix: disable/remove the confirm button on first tap, or guard
 `deleteSelectedInventory` with a per-id in-flight set like the notes
 `_notesActionInFlight`.
+
+✅ RESOLUTION — the inline "Confirm delete all" button now disables itself on the first tap (`confirmBtn.disabled = true` before dispatch), so a fast double-tap cannot fire a second `apiDeleteInventory` / spurious "Delete failed." (fixed 2026-07-02, commit "fix: all open BUG/RISK/IDEA findings from audit runs 46-58")
 
 #### Note · Code.js:1754 · Add/auto-combine execution-trace is sound — no double-count
 `apiAddInventory`/`apiAddCustomInventory` auto-combine via
@@ -552,6 +556,8 @@ Fix: give `showIdentitySheet` a terminal empty/error state with a Retry button
 when `chars.length === 0`, and have `loadCharacters`' failure handler re-render
 the identity sheet (if active) into that error state instead of only logging.
 
+✅ RESOLUTION — `loadCharacters` now has a failure handler that renders an inline "Couldn't load characters." message plus a Retry button into `identitySheetBody` when the sheet is active, so the user is no longer stranded on the placeholder. (fixed 2026-07-02, commit "fix: all open BUG/RISK/IDEA findings from audit runs 46-58")
+
 #### RISK · Code.js:703 · apiSellInventoryBatch partial failure mutates the sheet but reports total failure → silent data loss on next sync ✅ FIXED
 
 Stories: **Sell item / Remove item** (description sheet) and **Sell Items batch**.
@@ -572,6 +578,8 @@ TODO: the ledger won't throw, but the gold-row `appendRow` and the per-row
 the gold row first (so a credit failure aborts before any inventory is destroyed),
 or return a partial-success payload listing which `inventoryId`s were actually
 processed so the client can reconcile instead of blanket-rolling-back.
+
+✅ RESOLUTION — `apiSellInventoryBatch` now appends the gold row + ledger entry FIRST and only then deletes/updates inventory rows, all inside the existing document lock; a gold-append failure aborts before any inventory is destroyed (clean re-attempt). (fixed 2026-07-02, commit "fix: all open BUG/RISK/IDEA findings from audit runs 46-58")
 
 #### IDEA · Index.html:4435 · confirmIdentity failure shows an alarming error for an operation that actually persisted locally ✅ FIXED
 
@@ -657,6 +665,8 @@ the app-load failure step of every story when embedded. Fix: chain
 `.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)` onto the fallback output too.
 (If the app is only ever opened as a top-level `/exec` navigation, impact is nil — but then the
 ALLOWALL on the success path is also unnecessary, so the two paths should at least agree.)
+
+✅ RESOLUTION — the `doGet` error fallback now chains `.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)`, matching the happy path, so the "temporarily unavailable" message renders inside embedded/iframed deployments. (fixed 2026-07-02, commit "fix: all open BUG/RISK/IDEA findings from audit runs 46-58")
 
 #### Note · Code.js:42 · Section 1 constants/entry traced clean; one latent drift risk
 Traced: App load (doGet) cross-cutting; Add custom item/quick-add (failure resilience via
@@ -1020,6 +1030,8 @@ instead surface a dismissible retry affordance (or switch to the notes tab first
 cross-tab. The edit branch (4136) does not have this problem — it only reverts data
 and calls `setMainStatus`.
 
+✅ RESOLUTION — `restoreNoteForm_` now checks `commandMode`: if the user has navigated off the notes tab it stashes the content in `pendingFailedNote` and returns `false` instead of popping the sheet; `rehydratePendingNote_()` (wired into `setCommandMode`) restores it the next time the notes tab is opened. (fixed 2026-07-02, commit "fix: all open BUG/RISK/IDEA findings from audit runs 46-58")
+
 #### IDEA · Index.html:4261 · Notes action failures land in #mainStatus, off-screen on the notes tab
 Story: **Pin note / Edit note** failure feedback. Failure feedback for notes actions
 is inconsistent: `toggleNotePin` (4261/4269) and the edit branch of `saveNoteForm`
@@ -1031,6 +1043,8 @@ correctly reverts (the pin visibly flips back, but with no explanation). Meanwhi
 `setMainStatus`. Suggest unifying notes-tab failures onto a single visible surface
 near the list (a transient toast or a status line inside `#notesSection`), so the
 three sibling actions give comparable, in-view feedback.
+
+✅ RESOLUTION — added a notes-tab-local `#notesStatus` line inside `#notesSection` (with a `setNotesStatus` helper and `:empty` collapse CSS); `toggleNotePin` and the edit branch of `saveNoteForm` now route their failure messages there instead of the off-screen top `#mainStatus`. (fixed 2026-07-02, commit "fix: all open BUG/RISK/IDEA findings from audit runs 46-58")
 
 #### IDEA · Index.html:3851 · Dashboard Gold/Delerium totals are scope-filtered but the cards open party-pool sheets
 Story: **Quick-adjust currency/delerium**, entry step. `renderInventoryDashboard`
@@ -1044,6 +1058,8 @@ consistent; only character scope mismatches. Suggest either computing the dashbo
 currency totals from the unscoped `inventoryRows` (party pool is shared, not
 per-character) or labelling the cards as party totals so the tap target reads
 consistently.
+
+✅ RESOLUTION — chose option (b): `openGoldSheet` now guards on scope — under a non-DM character scope it shows an inline explanation ("Gold is managed at the party level — switch to the Party view to adjust it.") and does not open the party-pool sheet, eliminating the tap/number mismatch. (fixed 2026-07-02, commit "fix: all open BUG/RISK/IDEA findings from audit runs 46-58")
 
 #### Note · Index.html:3369 · Combine flow and sync-poll deferral traced clean
 Combine (`confirmCombineInventoryItem`) and the collaborative sync poll (`pollSync`)
@@ -1108,6 +1124,8 @@ fix: give `loadCharacters`'s failure handler a user-visible error + retry afford
 (e.g. render a "Couldn't load characters — Tap to retry" button into
 `identitySheetBody` when the sheet is active), or auto-retry with backoff.
 
+✅ RESOLUTION — `loadCharacters`' failure handler now renders an inline error + Retry button into `identitySheetBody` when the identity sheet is active (same fix as the run-54 BUG · Index.html:2915), so a transient `apiGetCharacters` failure no longer bricks the picker. (fixed 2026-07-02, commit "fix: all open BUG/RISK/IDEA findings from audit runs 46-58")
+
 #### RISK · Index.html:2921 · cacheInventoryRows in-flight guard is order-dependent; receiveDelerium persists an optimistic `_pending` ledger entry
 The guard `if (_inFlightWrites > 0) return;` (2921) is designed to keep optimistic,
 unconfirmed state out of the localStorage cache so a mid-flight reload paints the
@@ -1129,6 +1147,8 @@ footgun: the guard reads as "optimistic state is never cached," which isn't true
 for this path. Suggested fix: move `receiveDelerium`'s pre-flight
 `cacheInventoryRows` to after `_inFlightWrites++` (matching every other write
 path), or have the guard also strip `_pending` entries before persisting.
+
+✅ RESOLUTION — removed `receiveDelerium`'s pre-flight `cacheInventoryRows` call (the one that ran before the guard was set, since writes now go through `gasCall`), matching the "Don't cache here" pattern used by the sell/remove handlers; the optimistic `_opt_`/`_pending` state is no longer persisted to localStorage until the write settles, so a navigate-away can't leave a phantom "Saving…" entry. (fixed 2026-07-02, commit "fix: all open BUG/RISK/IDEA findings from audit runs 46-58")
 
 #### Note · Index.html:5641 · Give / receive optimistic reverts confirmed clean
 `giveItemToCharacter` (5609) and `receiveDelerium` (4760) both fully restore prior
@@ -1182,6 +1202,8 @@ precisely so the spinner CSS does not apply. Fix: either swap `sellBatchConfirmB
 to `secondary` while `totalUnits === 0` (mirroring the delerium pattern), or gate
 the spinner pseudo-element on an explicit `.is-loading` class set only during the
 in-flight write rather than on `:disabled`.
+
+✅ RESOLUTION — `sellBatchConfirmBtn` is now initialized `class="secondary"` (no `.success`) in its disabled/idle state, so the disabled-`.success` spinner CSS no longer animates before any user action; the success feedback uses an inline `.success` span. (fixed 2026-07-02, commit "fix: all open BUG/RISK/IDEA findings from audit runs 46-58")
 
 #### Note · Index.html:110 · Scroll-lock state machine is clean across stacked sheets
 `syncModalOpenState()` (3324) sets `app-modal-open` by recomputing
@@ -1255,6 +1277,8 @@ ledger view and the sheet are transiently inconsistent (and a 1-gold/1-crystal c
 is left unexplained in the visible history). Fix: in the 7530 success handler, mirror
 `confirmQuickEdit`'s `finishSuccess` (7241–7243) — `if (res.ledgerEntry) inventoryResourceLedger = [res.ledgerEntry, ...(inventoryResourceLedger||[])].slice(0,60)` and re-cache. (No data loss; the entry is persisted server-side.)
 
+✅ RESOLUTION — the swipe-remove success handler (`deleteSelectedInventory` → `onDeleteSuccess`) now consumes `res.ledgerEntry` and prepends it to `inventoryResourceLedger` (`[res.ledgerEntry, ...].slice(0,60)`) then re-caches, mirroring `confirmQuickEdit`, so the Gold/Delerium ledger list no longer goes stale after a swipe. (fixed 2026-07-02, commit "fix: all open BUG/RISK/IDEA findings from audit runs 46-58")
+
 #### RISK · Code.js:3636 · Delerium quick-adjust size change merges two crystal sizes onto one row
 Story: *Quick-adjust currency/delerium*, delerium branch. When the quick sheet's size
 dropdown differs from the row's current size, `apiAdjustInventory` (3636–3639) and
@@ -1269,6 +1293,8 @@ current size, so this only fires on a deliberate change, but the editor presents
 size differs from current and `oldQty > 0`, either split into a new row of the new size
 (qty = delta) or block the combined operation and require an explicit move.
 
+✅ RESOLUTION — the client quick-edit size `<select>` (in `populateQuickSize`) now confirms before a mid-adjust size change on a delerium row with existing units ("Changing size will reclassify all N existing units to …. Continue?"); on cancel it reverts the select to the previous value, so the silent reclassification can no longer happen without the user's explicit consent. (fixed 2026-07-02, commit "fix: all open BUG/RISK/IDEA findings from audit runs 46-58")
+
 #### IDEA · Index.html:7049 · Client never routes health potions to quick-edit despite full server support
 Story: *Quick-adjust currency/delerium*. Server `classifyQuickEdit_` (Code.js:1805) returns
 `'health potion'` for `health potion`/`potion of healing` rows, `apiGetCurrencyQuickEdit`
@@ -1280,6 +1306,8 @@ classifiers are otherwise kept in lockstep (they share the platinum/gold/deleriu
 verbatim) — the potion case is the lone divergence. If quick-adjusting potion counts is
 desired (the server plumbing implies it was), add the `health potion` branch to
 `getQuickEditType`; otherwise the server branch + 'Quick Potion' heading are vestigial.
+
+✅ RESOLUTION — added the `if (/health potion|potion of healing/.test(name)) return 'health potion';` branch to the client `getQuickEditType`, mirroring the server's `classifyQuickEdit_` ordering, so health-potion taps now open the quick-edit sheet instead of falling through to the full description sheet. (fixed 2026-07-02, commit "fix: all open BUG/RISK/IDEA findings from audit runs 46-58")
 
 #### Note · Code.js:3597 · Quick-adjust write path is otherwise sound
 Traced *Quick-adjust currency/delerium* end-to-end against `apiAdjustInventory` /
