@@ -353,6 +353,16 @@
        above the content (e.g. above the Add-tab stepper). */
     #mainStatus:empty { display: none; }
 
+    /* Notes-tab-local status line: pin/edit failures render here so they stay in
+       view while the notes list is scrolled (unlike #mainStatus at the page top). */
+    #notesStatus {
+      margin: 0 0 8px;
+      padding: 2px 0;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    #notesStatus:empty { display: none; }
+
     .mode-btn {
       min-height: 42px;
       border: 0;
@@ -2232,7 +2242,7 @@
 
           <div id="quickDesktopSizeField" class="field quick-size-field">
             <label for="quickDesktopSize">Delerium size</label>
-            <select id="quickDesktopSize"></select>
+            <select id="quickDesktopSize" onchange="onQuickSizeChange(this)"></select>
           </div>
 
           <div class="field">
@@ -2457,6 +2467,7 @@
 
     <!-- ── Party Notes tab ───────────────────────────────────────── -->
     <section id="notesSection" class="section">
+      <div id="notesStatus" class="status"></div>
       <div id="notesList" class="notes-list-body"></div>
     </section>
 
@@ -2590,7 +2601,7 @@
 
         <div id="quickSheetSizeField" class="field quick-size-field">
           <label for="quickSheetSize">Delerium size</label>
-          <select id="quickSheetSize"></select>
+          <select id="quickSheetSize" onchange="onQuickSizeChange(this)"></select>
         </div>
 
         <div class="field">
@@ -2887,9 +2898,19 @@
     function gasCall(fn, args, onSuccess, onFail) {
       _inFlightWrites++;
       google.script.run
-        .withSuccessHandler(res => { _inFlightWrites--; onSuccess(res); })
-        .withFailureHandler(err => { _inFlightWrites--; onFail(err); })
+        .withSuccessHandler(res => { _inFlightWrites--; onSuccess(res); drainPendingForeignReload_(); })
+        .withFailureHandler(err => { _inFlightWrites--; onFail(err); drainPendingForeignReload_(); })
         [fn](args);
+    }
+    // When the last in-flight write settles, apply any foreign inventory change that
+    // pollSync/loadInventory deferred while the write was pending. Without this, a
+    // concurrent edit from another client is dropped until an unrelated future write
+    // happens to trigger another sync.
+    function drainPendingForeignReload_() {
+      if (_inFlightWrites <= 0 && pendingForeignReload) {
+        pendingForeignReload = false;
+        loadInventory(true);
+      }
     }
     function _armSellBtn(btn) {
       if (!btn) return;
@@ -3405,6 +3426,14 @@
 
     function setMainStatus(html) {
       const el = document.getElementById('mainStatus');
+      if (!el) return;
+      el.innerHTML = html || '';
+    }
+
+    // Notes-tab-local status surface, always visible when the notes tab is active
+    // (unlike #mainStatus, which scrolls off the top of the page).
+    function setNotesStatus(html) {
+      const el = document.getElementById('notesStatus');
       if (!el) return;
       el.innerHTML = html || '';
     }
@@ -3964,10 +3993,11 @@
     }
 
     function renderInventoryDashboard(rows) {
-      // Always compute resource totals from the full list so the card numbers match what the sheets open to.
-      // Use the scope-filtered rows so the Party/Character slider actually filters
-      // the Gold/Delerium dashboard totals.
-      const totals = rows.reduce((acc, row) => {
+      // Gold/Delerium live in the shared party pool, not per-character. Compute the
+      // card totals from the *unscoped* inventoryRows so a character scope doesn't
+      // show "0 Gold" while the card still opens the (non-empty) party-pool sheet —
+      // the number tapped now always matches the number landed on.
+      const totals = (inventoryRows || []).reduce((acc, row) => {
         const name = String(row['Item'] || '').toLowerCase();
         const qty = toNumber(row['Qty'] || 0);
 
@@ -4313,7 +4343,7 @@
               const ri = notesData.findIndex(x => x.noteId === editId);
               if (backup && ri >= 0) notesData[ri] = backup;
               renderNotesList();
-              setMainStatus(`<span class="error">Save failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
+              setNotesStatus(`<span class="error">Save failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
             }
           })
           .withFailureHandler(() => {
@@ -4323,7 +4353,7 @@
             const ri = notesData.findIndex(x => x.noteId === editId);
             if (backup && ri >= 0) notesData[ri] = backup;
             renderNotesList();
-            setMainStatus('<span class="error">Save failed — please try again.</span>');
+            setNotesStatus('<span class="error">Save failed — please try again.</span>');
           })
           .apiUpdateNote({ noteId: editId, patch: { Category: category, Title: title, Note: note, 'Related Item ID': relatedItemId }, _syncClientId: syncClientId });
       } else {
@@ -4438,7 +4468,7 @@
           if (!res || !res.ok) {
             n.pinned = !newPinned;
             renderNotesList();
-            setMainStatus(`<span class="error">Pin failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
+            setNotesStatus(`<span class="error">Pin failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
           }
         })
         .withFailureHandler(() => {
@@ -4446,7 +4476,7 @@
           _inFlightNoteWrites--;
           n.pinned = !newPinned;
           renderNotesList();
-          setMainStatus('<span class="error">Pin failed — please try again.</span>');
+          setNotesStatus('<span class="error">Pin failed — please try again.</span>');
         })
         .apiUpdateNote({ noteId, patch: { Pinned: newPinned }, _syncClientId: syncClientId });
     }
@@ -4950,8 +4980,16 @@
       if (noteInput) noteInput.value = '';
       if (status) status.textContent = 'Saving…';
       refreshDeleriumStateFromInventory_();
+      // Set the in-flight guard *before* persisting so cacheInventoryRows (a no-op
+      // while a write is pending) keeps the optimistic rows and the synthetic
+      // _pending "Saving…" ledger entry out of localStorage — a navigate-away
+      // mid-flight then repaints the last confirmed state, not a phantom entry with
+      // no counter to clear it. gasCall re-increments for the round-trip, so drop
+      // this temporary guard first (both statements run synchronously).
+      _inFlightWrites++;
       cacheInventoryRows(inventoryRows, inventoryResourceLedger);
       renderDeleriumSheetBody();
+      _inFlightWrites--;
 
       gasCall('apiReceiveResource', { resource: 'delerium', items, note: recNote, clientCharacter: myCharacterName || '', _syncClientId: syncClientId },
         res => {
@@ -7408,6 +7446,12 @@
         return 'delerium crystal';
       }
 
+      // Mirror the server's classifyQuickEdit_ (Code.js) — health potions have a
+      // quick-adjust handler, so route their taps to the quick editor too.
+      if (/health potion|potion of healing/.test(name)) {
+        return 'health potion';
+      }
+
       return '';
     }
 
@@ -7503,6 +7547,30 @@
         `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`
       ).join('');
       if (currentSize) select.value = currentSize;
+      // Remember the confirmed size so onQuickSizeChange can detect (and, if
+      // cancelled, revert) a mid-adjust reclassification.
+      select.dataset.prevSize = select.value;
+    }
+
+    function onQuickSizeChange(select) {
+      if (!select) return;
+      const prev = select.dataset.prevSize || '';
+      const next = select.value;
+      if (prev === next) return;
+      const currentQty = selectedQuickEdit ? toNumber(selectedQuickEdit.quantity) : 0;
+      // Changing the size reclassifies every existing unit on this row to the new
+      // size (the server keeps the running quantity). Warn before silently merging.
+      if (prev && currentQty > 0) {
+        const ok = confirm(
+          `Changing size will reclassify all ${currentQty} existing ` +
+          `unit${currentQty !== 1 ? 's' : ''} from ${titleCase(prev)} to ${titleCase(next)}. Continue?`
+        );
+        if (!ok) {
+          select.value = prev;
+          return;
+        }
+      }
+      select.dataset.prevSize = next;
     }
 
     function setQuickEditorOpen(isOpen) {
