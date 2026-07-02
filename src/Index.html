@@ -353,6 +353,16 @@
        above the content (e.g. above the Add-tab stepper). */
     #mainStatus:empty { display: none; }
 
+    /* Notes-tab-local status so pin/edit failures stay visible within the notes
+       panel instead of scrolling off-screen at the top #mainStatus line. */
+    #notesStatus {
+      margin: 0 0 6px;
+      padding: 2px 4px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    #notesStatus:empty { display: none; }
+
     .mode-btn {
       min-height: 42px;
       border: 0;
@@ -2457,6 +2467,7 @@
 
     <!-- ── Party Notes tab ───────────────────────────────────────── -->
     <section id="notesSection" class="section">
+      <div id="notesStatus" class="status"></div>
       <div id="notesList" class="notes-list-body"></div>
     </section>
 
@@ -2887,9 +2898,18 @@
     function gasCall(fn, args, onSuccess, onFail) {
       _inFlightWrites++;
       google.script.run
-        .withSuccessHandler(res => { _inFlightWrites--; onSuccess(res); })
-        .withFailureHandler(err => { _inFlightWrites--; onFail(err); })
+        .withSuccessHandler(res => { _inFlightWrites--; onSuccess(res); drainForeignReload_(); })
+        .withFailureHandler(err => { _inFlightWrites--; onFail(err); drainForeignReload_(); })
         [fn](args);
+    }
+    // A foreign inventory write that landed while our own write was in flight is
+    // deferred (pendingForeignReload) rather than dropped. Once the last in-flight
+    // write settles, catch up immediately instead of waiting for the next sync poll.
+    function drainForeignReload_() {
+      if (_inFlightWrites === 0 && pendingForeignReload) {
+        pendingForeignReload = false;
+        loadInventory(true);
+      }
     }
     function _armSellBtn(btn) {
       if (!btn) return;
@@ -3406,6 +3426,14 @@
     function setMainStatus(html) {
       const el = document.getElementById('mainStatus');
       if (!el) return;
+      el.innerHTML = html || '';
+    }
+
+    // Notes-tab-local status line — keeps pin/edit failure messages visible within
+    // the notes panel rather than at the off-screen top #mainStatus line.
+    function setNotesStatus(html) {
+      const el = document.getElementById('notesStatus');
+      if (!el) return setMainStatus(html);
       el.innerHTML = html || '';
     }
 
@@ -4313,7 +4341,7 @@
               const ri = notesData.findIndex(x => x.noteId === editId);
               if (backup && ri >= 0) notesData[ri] = backup;
               renderNotesList();
-              setMainStatus(`<span class="error">Save failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
+              setNotesStatus(`<span class="error">Save failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
             }
           })
           .withFailureHandler(() => {
@@ -4323,7 +4351,7 @@
             const ri = notesData.findIndex(x => x.noteId === editId);
             if (backup && ri >= 0) notesData[ri] = backup;
             renderNotesList();
-            setMainStatus('<span class="error">Save failed — please try again.</span>');
+            setNotesStatus('<span class="error">Save failed — please try again.</span>');
           })
           .apiUpdateNote({ noteId: editId, patch: { Category: category, Title: title, Note: note, 'Related Item ID': relatedItemId }, _syncClientId: syncClientId });
       } else {
@@ -4438,7 +4466,7 @@
           if (!res || !res.ok) {
             n.pinned = !newPinned;
             renderNotesList();
-            setMainStatus(`<span class="error">Pin failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
+            setNotesStatus(`<span class="error">Pin failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
           }
         })
         .withFailureHandler(() => {
@@ -4446,7 +4474,7 @@
           _inFlightNoteWrites--;
           n.pinned = !newPinned;
           renderNotesList();
-          setMainStatus('<span class="error">Pin failed — please try again.</span>');
+          setNotesStatus('<span class="error">Pin failed — please try again.</span>');
         })
         .apiUpdateNote({ noteId, patch: { Pinned: newPinned }, _syncClientId: syncClientId });
     }
@@ -4624,6 +4652,13 @@
     /* ── Gold sheet ──────────────────────────────────────────────── */
 
     function openGoldSheet() {
+      // Under a (non-DM) character scope the card shows that character's balance, but
+      // gold is only ever adjusted against the party pool — opening the pool sheet here
+      // would be a confusing mismatch. Explain instead of silently swapping context.
+      if (inventoryViewScope !== 'all' && !(isDMUser && inventoryViewScope === myCharacterName)) {
+        setMainStatus('<span class="error">Gold is managed at the party level — switch to the Party view to adjust it.</span>');
+        return;
+      }
       const sheet = document.getElementById('goldSheet');
       if (!sheet) return;
       goldSheetMutated = false;
@@ -4950,7 +4985,11 @@
       if (noteInput) noteInput.value = '';
       if (status) status.textContent = 'Saving…';
       refreshDeleriumStateFromInventory_();
-      cacheInventoryRows(inventoryRows, inventoryResourceLedger);
+      // Don't cache here — _inFlightWrites is still 0 (gasCall sets the guard), so the
+      // cacheInventoryRows guard wouldn't fire and the optimistic _opt_/_pending rows
+      // would persist to localStorage. A navigate-away before the write cycles would
+      // leave a phantom "Saving…" entry with no in-flight counter to clear it. The
+      // success/fail handlers re-cache once the write has cycled.
       renderDeleriumSheetBody();
 
       gasCall('apiReceiveResource', { resource: 'delerium', items, note: recNote, clientCharacter: myCharacterName || '', _syncClientId: syncClientId },
@@ -7404,6 +7443,12 @@
         return 'currency';
       }
 
+      // Mirror the server's classifyQuickEdit_ ordering so health potions route to
+      // the quick-edit sheet (the server has a health-potion quick-adjust handler).
+      if (/health potion|potion of healing/.test(name)) {
+        return 'health potion';
+      }
+
       if (category === 'delerium' || /^(delerium|delirium)\s+(chip|fragment|shard|crystal|geode|massive\s+cluster|unknown)/i.test(row && row['Item'] || '')) {
         return 'delerium crystal';
       }
@@ -7503,6 +7548,25 @@
         `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`
       ).join('');
       if (currentSize) select.value = currentSize;
+
+      // Changing the size mid-adjust reclassifies ALL existing units to the new size
+      // (the server merges them), so confirm before doing it — and revert on cancel.
+      if (!select.dataset.sizeChangeWired) {
+        select.dataset.sizeChangeWired = '1';
+        select.addEventListener('change', function () {
+          const existing = Number(selectedQuickEdit && selectedQuickEdit.quantity) || 0;
+          const prev = select.dataset.prevSize || '';
+          if (selectedQuickEdit && selectedQuickEdit.editType === 'delerium crystal'
+              && existing > 0 && select.value !== prev) {
+            if (!window.confirm(`Changing size will reclassify all ${existing} existing unit${existing !== 1 ? 's' : ''} to "${select.value}". Continue?`)) {
+              select.value = prev;
+              return;
+            }
+          }
+          select.dataset.prevSize = select.value;
+        });
+      }
+      select.dataset.prevSize = select.value;
     }
 
     function setQuickEditorOpen(isOpen) {
