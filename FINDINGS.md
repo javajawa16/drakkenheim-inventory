@@ -3,17 +3,21 @@
 > ## ⚠️ AUDIT PROTOCOL — READ BEFORE STARTING A RUN
 > **This file on `main` is the single source of truth. Do not fork it.**
 >
-> 1. **Branch from `main`** (which always holds the latest consolidated findings).
->    Never branch from an older audit branch or a previous run's branch.
+> 1. **Work on `main` directly** — `git checkout main && git pull origin main`
+>    before starting. Never branch from an older audit branch or a previous
+>    run's branch. If unmerged `audit/*` branches exist on origin, merge them
+>    into `main` first (they hold a previous run's findings that failed to land).
 > 2. **Append, don't rewrite.** Add your new `### <date> (run N) — Sections
 >    audited: X` block directly **below** this header and **above** the previous
 >    run — newest first. Leave every earlier run intact.
 > 3. **Increment the run number** from the most recent run in this file (the top
 >    Sessions entry). Check it first so two runs never share a number.
 > 4. **Advance the Audit Cursor** below to the next unaudited section when done.
-> 5. **One run = one branch = one commit to `FINDINGS.md`**, then open a PR into
->    `main` (or commit to `main` directly if that's the workflow). Delete the
->    branch after merge so stale forks don't accumulate.
+> 5. **One run = one commit, pushed straight to `main`** (`git push origin
+>    HEAD:main`; on rejection `git pull --rebase origin main` and retry once).
+>    Only if pushing to `main` is blocked entirely, push to a branch named
+>    `audit/section-<N>-<YYYYMMDD>` — the next run will merge it (see rule 1).
+>    Never let a run end on an unnamed/auto-generated branch.
 > 6. **Finding format:** `#### BUG|RISK|IDEA|Note · File:line · Short title`
 >    followed by the detailed body. When you fix a finding, mark it with a
 >    `✅ RESOLUTION` line citing the commit (see run 56 for the pattern).
@@ -25,7 +29,9 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited
+Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited.
+(Section numbering: 1–6 = Code.js in ~700-line slices, 7–12 = Index.html in ~1500-line slices.
+The line-range text above is authoritative if a prompt's numbering ever disagrees.)
 
 ## Sessions
 
