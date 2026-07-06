@@ -4688,7 +4688,10 @@
       const sheet = document.getElementById('goldSheet');
       if (!sheet) return;
       goldSheetMutated = false;
-      goldSheetScope = 'party';
+      // Carry the inventory tab's Party/Character selection into the sheet toggle
+      // instead of snapping back to Party Pool on every open.
+      goldSheetScope = (myCharacterName && inventoryViewScope === myCharacterName)
+        ? myCharacterName : 'party';
       if (ledgerEditTarget && ledgerEditTarget.resource !== 'gold') ledgerEditTarget = null;
       // The amount/note inputs are static (outside goldSheetBody), so a dismiss-
       // without-submit leaves stale values behind. Clear them on open so a hurried
