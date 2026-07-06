@@ -6167,24 +6167,39 @@
     // Actions shown in the general gold ledger (hides per-member credit bookkeeping)
     const LEDGER_VISIBLE_ACTIONS = new Set(['PAY', 'ADD', 'RECEIVE', 'SPLIT_DEDUCT', 'SEND_DEDUCT', 'PERSONAL_SEND_DEDUCT', 'ADJUST']);
 
-    function getLedgerWho_(entry) {
+    // Renders every gold entry as a "Source → Destination" flow so a row reads
+    // "Actor · Source → Destination · note". Party pool is labelled "Party";
+    // sources/destinations are parsed from the server's ledger Item strings
+    // (e.g. "Gold Payment (Corvane)" = paid FROM Corvane's personal gold).
+    function getLedgerFlow_(entry) {
       const action = String(entry['Action'] || '').toUpperCase();
       const item   = String(entry['Item']   || '');
       if (action === 'ADD' || action === 'RECEIVE') {
-        const m = item.match(/\(sold ([^)]+)\)/);
-        return m ? m[1] : '';
+        const sold = item.match(/\(sold ([^)]+)\)/);
+        if (sold) return `Sold ${sold[1]} → Party`;
+        const dest = item.match(/→\s*(.+)$/);
+        if (dest) {
+          const to = dest[1].trim();
+          return `Received → ${to.toLowerCase() === 'party' ? 'Party' : to}`;
+        }
+        return 'Received'; // legacy entries predate destination recording
       }
       if (action === 'PAY') {
-        const m = item.match(/\(([^)]+)\)/);
-        return m ? `→ ${m[1]}` : 'Purchase';
+        const src = item.match(/\(([^)]+)\)/);
+        return `${src ? src[1] : 'Party'} → Purchase`;
       }
-      if (action === 'SPLIT_DEDUCT') return 'Split';
-      if (action === 'SPLIT') return 'Split';
-      if (action === 'SPLIT_REMAINDER') return 'Remainder';
-      if (action === 'SEND' || action === 'SEND_DEDUCT' || action === 'PERSONAL_SEND_DEDUCT') {
-        const m = item.match(/→\s*([^(]+)/);
-        return m ? `→ ${m[1].trim()}` : 'Sent';
+      if (action === 'SPLIT_DEDUCT' || action === 'SPLIT') return 'Party → Split (everyone)';
+      if (action === 'SPLIT_REMAINDER') return 'Split remainder → Party';
+      if (action === 'PERSONAL_SEND_DEDUCT') {
+        const dest = item.match(/→\s*([^(]+)/);
+        const src  = item.match(/\(from ([^)]+)\)/);
+        return `${src ? src[1] : 'Personal'} → ${dest ? dest[1].trim() : 'member'}`;
       }
+      if (action === 'SEND' || action === 'SEND_DEDUCT') {
+        const dest = item.match(/→\s*([^(]+)/);
+        return `Party → ${dest ? dest[1].trim() : 'member'}`;
+      }
+      if (action === 'ADJUST') return 'Adjusted Party';
       if (action === 'SELL') return 'Sold';
       return action ? action[0] + action.slice(1).toLowerCase() : 'Entry';
     }
@@ -6211,17 +6226,14 @@
           ${entries.map(entry => {
             const qty      = toNumber(entry['Qty'] || 0);
             const sign     = qty >= 0 ? '+' : '−';
-            const who      = resource === 'gold' ? getLedgerWho_(entry) : titleCase(entry['Subtype'] || resource);
+            const flow     = resource === 'gold' ? getLedgerFlow_(entry) : titleCase(entry['Subtype'] || resource);
             const note     = String(entry['Notes'] || entry['_note'] || '');
             const char     = String(entry['Character'] || '');
             const pending  = Boolean(entry['_pending']);
             const noteText = note.split('\n')[0].slice(0, 40);
-            const showNote = noteText && noteText !== char && noteText !== who;
-            // Merge actor+recipient into one token when who is directional ("→ X")
-            const actor    = (char && who.startsWith('→')) ? `${char} ${who}` : null;
-            const middle   = actor
-              ? [actor, showNote ? noteText : ''].filter(Boolean).join(' · ')
-              : [char, who, showNote ? noteText : ''].filter(Boolean).join(' · ');
+            const showNote = noteText && noteText !== char && noteText !== flow;
+            // Row reads: Actor · Source → Destination · note
+            const middle   = [char, flow, showNote ? noteText : ''].filter(Boolean).join(' · ');
             const fullBody = [String(entry['Item'] || ''), note].filter(Boolean).join('\n');
             return `
               <div class="resource-ledger-row${pending ? '' : ' editable'}"

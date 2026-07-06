@@ -2936,13 +2936,17 @@ function apiReceiveResource(payload) {
         'Notes': recNote, 'Date Added': new Date()
       };
       sheet.appendRow(headers.map(h => rowObj[h] !== undefined ? rowObj[h] : ''));
+      // Ledger item records the destination (party pool vs a character's personal
+      // gold) so the client can render the full from→to flow; the inventory row
+      // keeps the plain 'Gold' item name.
+      const receiveLedgerItem = holder ? `Gold → ${holder}` : 'Gold → party';
       appendResourceLedger_({ userEmail, action: 'RECEIVE', resource: 'gold', subtype: 'gold',
-        qty: amount, valueGp: 1, inventoryId: rowObj['Inventory ID'], item: rowObj['Item'], notes: recNote,
+        qty: amount, valueGp: 1, inventoryId: rowObj['Inventory ID'], item: receiveLedgerItem, notes: recNote,
         character: safeText_(payload && payload.clientCharacter) });
       ledgerEntries.push(sanitizeResourceLedgerForClient_({
         'Timestamp': nowStr, 'Action': 'RECEIVE', 'Resource': 'gold',
         'Subtype': 'gold', 'Qty': amount, 'Value GP': 1,
-        'Inventory ID': rowObj['Inventory ID'], 'Item': rowObj['Item'], 'Notes': recNote,
+        'Inventory ID': rowObj['Inventory ID'], 'Item': receiveLedgerItem, 'Notes': recNote,
         'Character': safeText_(payload && payload.clientCharacter)
       }));
       addedItems.push(sanitizeInventoryForClient_(rowObj));
