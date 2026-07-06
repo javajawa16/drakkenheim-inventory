@@ -3997,24 +3997,20 @@
     }
 
     function renderInventoryDashboard(rows) {
-      // Gold/Delerium live in the shared party pool, not per-character. Compute the
-      // card totals from the *unscoped* inventoryRows so a character scope doesn't
-      // show "0 Gold" while the card still opens the (non-empty) party-pool sheet —
-      // the number tapped now always matches the number landed on.
-      const totals = (inventoryRows || []).reduce((acc, row) => {
+      // Gold follows the Party/Character scope: compute it from the scoped rows so
+      // the card total always matches the view the gold sheet opens to (the sheet
+      // inherits the same scope on open). Delerium stays party-wide because the
+      // delerium sheet always shows the whole party's crystals regardless of scope.
+      const totals = { gold: 0, delerium: 0 };
+      (rows || []).forEach(row => {
+        if (isGoldItem_(row)) totals.gold += toNumber(row['Qty'] || 0);
+      });
+      (inventoryRows || []).forEach(row => {
         const name = String(row['Item'] || '').toLowerCase();
-        const qty = toNumber(row['Qty'] || 0);
-
-        if (isGoldItem_(row)) {
-          acc.gold += toNumber(row['Qty'] || 0);
-        }
-
         if (isDeleriumCrystalRow_(row) && !name.includes('unknown')) {
-          acc.delerium += qty;
+          totals.delerium += toNumber(row['Qty'] || 0);
         }
-
-        return acc;
-      }, { gold: 0, delerium: 0 });
+      });
 
       const groups = buildInventoryGroups(rows);
 
