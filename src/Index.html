@@ -4704,6 +4704,9 @@
 
     function setGoldSheetScope(scope) {
       goldSheetScope = scope;
+      // Keep the inventory tab's toggle in sync so the selection survives the
+      // round-trip Gold → Inventory just like Inventory → Gold.
+      setInventoryScope(scope === 'party' ? 'all' : scope);
       renderGoldSheetBody();
       renderGoldSheetButtons();
     }
