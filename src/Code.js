@@ -2338,7 +2338,10 @@ function apiArchiveNote(payload) {
     if (rowIdx < 0) return { ok: false, error: 'Note not found.' };
     const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
     const sheetRow = rowIdx + 1;
-    sheet.getRange(sheetRow, i('Archived') + 1).setValue(true);
+    // Defaults to archiving (true) so existing callers are unaffected; pass
+    // { archived: false } to restore a note to the open list.
+    const archived = !(payload && payload.archived === false);
+    sheet.getRange(sheetRow, i('Archived') + 1).setValue(archived);
     sheet.getRange(sheetRow, i('Updated At') + 1).setValue(now);
     bumpSync_('notes', payload && payload._syncClientId);
     return { ok: true };
