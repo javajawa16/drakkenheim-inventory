@@ -79,14 +79,15 @@ Local working repo for the **Wieners of Drakkenheim** D&D campaign inventory web
   `Note ID · Created At · Updated At · Author · Category · Title · Note · Tags · Pinned · Archived · Related Item ID`
 - **3 categories**: General, Quest, Location — `PARTY_NOTES_CATEGORIES` in Code.js and `NOTE_CATEGORIES` in client are authoritative; README "8 categories" table is stale
 - **Filter bar**: in the app header (replaces commandSearch row on notes tab). Live search, category dropdown, 📌 pinned-only toggle — all client-side, no server roundtrip
-- **Note cards**: category pill + tags on same row (tags right-aligned), title, 3-line body preview, author + date, Pin/Archive buttons. Cards with in-flight creates are dimmed + non-clickable with "Saving…" badge.
+- **Note cards**: category pill + tags on same row (tags right-aligned), title, 3-line body preview, author + date, Pin/Archive buttons (archived cards show a single Unarchive button). Cards with in-flight creates are dimmed + non-clickable with "Saving…" badge.
+- **Archived section**: archived notes are not hidden — they render in a collapsed-by-default group at the bottom of the open list (`Archived (N)`), reusing the inventory tab's `inventory-group` / `group-toggle` / `group-list` pattern. Archived cards are dimmed (opacity), open the same edit form on tap, and can be restored via Unarchive. Section is omitted when there are no archived notes; expand/collapse state (`notesArchivedExpanded`) persists across re-renders within the session (survives the 20 s sync poll).
 - **Optimistic saves**: create/edit/archive/pin all update local state immediately; server syncs in background; rollback on failure. Failed create re-opens the form pre-filled (no content loss).
 - **Caching**: notes loaded once and kept in memory; 2-minute TTL triggers silent background refresh on tab switch; preloaded in background immediately after identity resolves
 - **In-flight guards**: `_inFlightNoteWrites` counter defers poll-triggered `loadNotes(true)` mid-write; `_notesActionInFlight` Set prevents double-tap on pin/archive/delete; rollbacks find note by ID at handler time (no stale array index)
 - **Add/Edit form**: mobile-sheet overlay — Title, Category, Note body, Tags, Pinned checkbox, hidden Related Item ID
 - Author set from `clientCharacter` (not `Session.getActiveUser()` — known unreliable)
-- `apiGetNotes({})` — loads all non-archived notes, pinned-first, Updated At desc. Client applies all filters.
-- `apiCreateNote(payload)`, `apiUpdateNote({noteId, patch})`, `apiArchiveNote({noteId})`
+- `apiGetNotes({ includeArchived: true })` — loads all notes (open + archived) with `archived` flag intact, pinned-first, Updated At desc. Client splits open vs archived and applies all filters to both.
+- `apiCreateNote(payload)`, `apiUpdateNote({noteId, patch})`, `apiArchiveNote({noteId, archived})` — `apiArchiveNote` toggles the flag (defaults to `true`; pass `archived: false` to unarchive)
 - `Related Item ID` field plumbed server-side and in form — item-detail integration not yet built
 - Legacy `CAMPAIGN_NOTES_FEED` (5-col schema) and its four API functions still in Code.js — both note backends are live; see Known TODOs
 

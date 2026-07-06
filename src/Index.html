@@ -2149,6 +2149,9 @@
     .note-action-btn.archive { color: var(--danger); border-color: rgba(239,68,68,.35); }
     .note-action-btn.pin-btn { color: #fbbf24; border-color: rgba(234,179,8,.35); }
     .note-card.note-pending { opacity: .6; pointer-events: none; }
+    .note-card.note-archived { opacity: .62; }
+    .note-action-btn.unarchive { color: var(--accent); border-color: rgba(94,118,164,.4); }
+    .notes-archived-group { margin-top: 4px; }
     .note-saving-badge { font-size: 10px; font-weight: 700; color: var(--text-muted); letter-spacing: .04em; text-transform: uppercase; margin-left: 4px; }
     html.is-phone .note-saving-badge { font-size: var(--phone-font-label, 20px); }
 
@@ -2951,6 +2954,7 @@
     let pendingFailedNote = null;  // create-note content stashed when a save fails off the Notes tab
     let notesSearchTimer = null;
     let notesFilters     = { search: '', category: '', pinnedOnly: false };
+    let notesArchivedExpanded = false;  // collapsed by default; persists within the session across re-renders
     let lastNotesLoadAt  = 0;
     const NOTES_REVALIDATE_MS = 2 * 60 * 1000; // 2 minutes
 
@@ -4098,66 +4102,94 @@
           notesLoading = false;
           if (!notesLoaded) document.getElementById('notesList').innerHTML = `<div class="notes-empty error">Load failed: ${escapeHtml(err.message || err)}</div>`;
         })
-        .apiGetNotes({});
+        .apiGetNotes({ includeArchived: true });
+    }
+
+    function noteCardHtml_(n, archived) {
+      const isPending = n.noteId.startsWith('NOTE_TEMP_');
+      const catLabel  = NOTE_CATEGORY_LABELS[n.category] || n.category;
+      const catColor  = NOTE_CATEGORY_COLORS[n.category] || 'rgba(94,118,164,.55)';
+      const tags = (n.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+      return `
+        <div class="note-card${n.pinned ? ' pinned' : ''}${isPending ? ' note-pending' : ''}${archived ? ' note-archived' : ''}"
+             ${isPending ? '' : `onclick="openNoteForm('edit','${escapeJsString(n.noteId)}')"`}>
+          <div class="note-card-header">
+            ${n.pinned ? '<span class="note-pin-mark">📌</span>' : ''}
+            <span class="note-cat-pill" style="background:${catColor};color:#fff;">${escapeHtml(catLabel)}</span>
+            ${isPending ? '<span class="note-saving-badge">Saving…</span>' : ''}
+            ${tags.length ? `<div class="note-tag-row">${tags.map(t => `<span class="note-tag">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+          </div>
+          ${n.title ? `<div class="note-card-title">${escapeHtml(n.title)}</div>` : ''}
+          ${n.note  ? `<div class="note-card-body">${escapeHtml(n.note)}</div>` : ''}
+          <div class="note-card-meta">
+            <span>${escapeHtml(n.author ? n.author + ' · ' : '')}${escapeHtml(formatShortDate(n.updatedAt || n.createdAt))}</span>
+            ${isPending ? '' : `
+            <div class="note-card-actions" onclick="event.stopPropagation()">
+              ${archived
+                ? `<button class="note-action-btn unarchive" type="button" onclick="unarchiveNote('${escapeJsString(n.noteId)}')">Unarchive</button>`
+                : `<button class="note-action-btn pin-btn" type="button" onclick="toggleNotePin('${escapeJsString(n.noteId)}')">${n.pinned ? 'Unpin' : 'Pin'}</button>
+                   <button class="note-action-btn archive" type="button" onclick="archiveNote('${escapeJsString(n.noteId)}')">Archive</button>`}
+            </div>`}
+          </div>
+        </div>`;
     }
 
     function renderNotesList() {
       const list = document.getElementById('notesList');
       if (!list) return;
 
-      let filtered = notesData.filter(n => !n.archived);
       const { search, category, pinnedOnly } = notesFilters;
-      if (pinnedOnly) filtered = filtered.filter(n => n.pinned);
-      if (category)   filtered = filtered.filter(n => n.category === category);
-      if (search) {
-        const q = search.toLowerCase();
-        filtered = filtered.filter(n =>
+      const q = search ? search.toLowerCase() : '';
+      const matchesFilters = n => {
+        if (pinnedOnly && !n.pinned) return false;
+        if (category && n.category !== category) return false;
+        if (q && !(
           (n.title    || '').toLowerCase().includes(q) ||
           (n.note     || '').toLowerCase().includes(q) ||
           (n.tags     || '').toLowerCase().includes(q) ||
           (n.category || '').toLowerCase().includes(q)
-        );
-      }
+        )) return false;
+        return true;
+      };
+      // Always sort pinned-first, then newest-first so optimistic inserts land in the right place
+      const sortNotes = arr => arr.sort((a, b) => {
+        if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
+        return (b.updatedAt || '').localeCompare(a.updatedAt || '');
+      });
 
-      if (!filtered.length) {
+      const open     = sortNotes(notesData.filter(n => !n.archived && matchesFilters(n)));
+      const archived = sortNotes(notesData.filter(n =>  n.archived && matchesFilters(n)));
+
+      if (!open.length && !archived.length) {
         list.innerHTML = '<div class="notes-empty">' +
           (notesData.length ? 'No notes match your filters.' : 'No notes yet. Tap + Add Note to start.') +
           '</div>';
         return;
       }
 
-      // Always sort pinned-first, then newest-first so optimistic inserts land in the right place
-      filtered.sort((a, b) => {
-        if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
-        return (b.updatedAt || '').localeCompare(a.updatedAt || '');
-      });
+      let html = open.length
+        ? open.map(n => noteCardHtml_(n, false)).join('')
+        : '<div class="notes-empty">No open notes match your filters.</div>';
 
-      list.innerHTML = filtered.map(n => {
-        const isPending = n.noteId.startsWith('NOTE_TEMP_');
-        const catLabel  = NOTE_CATEGORY_LABELS[n.category] || n.category;
-        const catColor  = NOTE_CATEGORY_COLORS[n.category] || 'rgba(94,118,164,.55)';
-        const tags = (n.tags || '').split(',').map(t => t.trim()).filter(Boolean);
-        return `
-          <div class="note-card${n.pinned ? ' pinned' : ''}${isPending ? ' note-pending' : ''}"
-               ${isPending ? '' : `onclick="openNoteForm('edit','${escapeJsString(n.noteId)}')"`}>
-            <div class="note-card-header">
-              ${n.pinned ? '<span class="note-pin-mark">📌</span>' : ''}
-              <span class="note-cat-pill" style="background:${catColor};color:#fff;">${escapeHtml(catLabel)}</span>
-              ${isPending ? '<span class="note-saving-badge">Saving…</span>' : ''}
-              ${tags.length ? `<div class="note-tag-row">${tags.map(t => `<span class="note-tag">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
-            </div>
-            ${n.title ? `<div class="note-card-title">${escapeHtml(n.title)}</div>` : ''}
-            ${n.note  ? `<div class="note-card-body">${escapeHtml(n.note)}</div>` : ''}
-            <div class="note-card-meta">
-              <span>${escapeHtml(n.author ? n.author + ' · ' : '')}${escapeHtml(formatShortDate(n.updatedAt || n.createdAt))}</span>
-              ${isPending ? '' : `
-              <div class="note-card-actions" onclick="event.stopPropagation()">
-                <button class="note-action-btn pin-btn" type="button" onclick="toggleNotePin('${escapeJsString(n.noteId)}')">${n.pinned ? 'Unpin' : 'Pin'}</button>
-                <button class="note-action-btn archive" type="button" onclick="archiveNote('${escapeJsString(n.noteId)}')">Archive</button>
-              </div>`}
-            </div>
+      // Archived notes live in a collapsible group at the bottom, mirroring the
+      // inventory tab's group-toggle / group-list pattern. Omitted when empty.
+      if (archived.length) {
+        html += `
+          <div class="inventory-group notes-archived-group">
+            <button class="group-toggle" type="button" onclick="toggleNotesArchived()">
+              <span>Archived</span>
+              <span class="group-count">${archived.length} note${archived.length === 1 ? '' : 's'}</span>
+            </button>
+            ${notesArchivedExpanded ? `<div class="group-list">${archived.map(n => noteCardHtml_(n, true)).join('')}</div>` : ''}
           </div>`;
-      }).join('');
+      }
+
+      list.innerHTML = html;
+    }
+
+    function toggleNotesArchived() {
+      notesArchivedExpanded = !notesArchivedExpanded;
+      renderNotesList();
     }
 
     function handleNotesSearch() {
@@ -4218,7 +4250,11 @@
         }
       }
       const deleteBtn = document.getElementById('noteFormDeleteBtn');
-      if (deleteBtn) deleteBtn.style.display = mode === 'edit' ? '' : 'none';
+      if (deleteBtn) {
+        deleteBtn.style.display = mode === 'edit' ? '' : 'none';
+        const editing = mode === 'edit' && noteId ? notesData.find(x => x.noteId === noteId) : null;
+        deleteBtn.textContent = (editing && editing.archived) ? 'Unarchive Note' : 'Archive Note';
+      }
       document.getElementById('noteFormSheet').classList.add('active');
       syncModalOpenState();
     }
@@ -4232,28 +4268,11 @@
       const noteId = notesFormNoteId;
       if (!noteId || _notesActionInFlight.has(noteId)) return;
       closeNoteForm();
-      const idx    = notesData.findIndex(n => n.noteId === noteId);
-      const backup = idx >= 0 ? notesData[idx] : null;
-      if (idx >= 0) notesData.splice(idx, 1);
-      renderNotesList();
-      _notesActionInFlight.add(noteId);
-      _inFlightNoteWrites++;
-      google.script.run
-        .withSuccessHandler(res => {
-          _notesActionInFlight.delete(noteId);
-          _inFlightNoteWrites--;
-          if (!res || !res.ok) {
-            if (backup !== null && !notesData.some(n => n.noteId === backup.noteId)) { notesData.unshift(backup); renderNotesList(); }
-            setMainStatus(`<span class="error">Delete failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
-          }
-        })
-        .withFailureHandler(() => {
-          _notesActionInFlight.delete(noteId);
-          _inFlightNoteWrites--;
-          if (backup !== null && !notesData.some(n => n.noteId === backup.noteId)) { notesData.unshift(backup); renderNotesList(); }
-          setMainStatus('<span class="error">Delete failed — please try again.</span>');
-        })
-        .apiArchiveNote({ noteId, _syncClientId: syncClientId });
+      const n = notesData.find(x => x.noteId === noteId);
+      if (!n) return;
+      // Same soft-archive path as the card button — toggles based on current state so
+      // an archived note reopened in the form flips back to open.
+      setNoteArchived_(noteId, !n.archived);
     }
 
     function formatNoteTs_(d) {
@@ -4393,33 +4412,45 @@
       }
     }
 
-    function archiveNote(noteId) {
+    // Flip a note's archived flag in place (optimistic) so it moves between the open
+    // list and the collapsible Archived section. Rollback re-finds the note by ID at
+    // handler time (loadNotes may have replaced the array), matching toggleNotePin.
+    function setNoteArchived_(noteId, archived) {
       if (_notesActionInFlight.has(noteId)) return;
-      if (!confirm('Archive this note? It will be hidden but not deleted.')) return;
-      const idx = notesData.findIndex(n => n.noteId === noteId);
-      const backup = idx >= 0 ? notesData[idx] : null;
-      if (idx >= 0) notesData.splice(idx, 1);
+      const n = notesData.find(x => x.noteId === noteId);
+      if (!n) return;
+      n.archived = archived;
       renderNotesList();
       _notesActionInFlight.add(noteId);
       _inFlightNoteWrites++;
+      const label = archived ? 'Archive' : 'Unarchive';
+      const revert = () => { const t = notesData.find(x => x.noteId === noteId); if (t) t.archived = !archived; renderNotesList(); };
       google.script.run
         .withSuccessHandler(res => {
           _notesActionInFlight.delete(noteId);
           _inFlightNoteWrites--;
           if (!res || !res.ok) {
-            if (backup && !notesData.some(n => n.noteId === backup.noteId)) notesData.unshift(backup);
-            renderNotesList();
-            setMainStatus(`<span class="error">Archive failed: ${escapeHtml((res && res.error) || 'Unknown error')}</span>`);
+            revert();
+            setMainStatus(`<span class="error">${label} failed: ${escapeHtml((res && res.error) || 'Unknown error')}</span>`);
           }
         })
         .withFailureHandler(() => {
           _notesActionInFlight.delete(noteId);
           _inFlightNoteWrites--;
-          if (backup && !notesData.some(n => n.noteId === backup.noteId)) notesData.unshift(backup);
-          renderNotesList();
-          setMainStatus('<span class="error">Archive failed — please try again.</span>');
+          revert();
+          setMainStatus(`<span class="error">${label} failed — please try again.</span>`);
         })
-        .apiArchiveNote({ noteId, _syncClientId: syncClientId });
+        .apiArchiveNote({ noteId, archived, _syncClientId: syncClientId });
+    }
+
+    function archiveNote(noteId) {
+      if (_notesActionInFlight.has(noteId)) return;
+      if (!confirm('Archive this note? It will move to the Archived section.')) return;
+      setNoteArchived_(noteId, true);
+    }
+
+    function unarchiveNote(noteId) {
+      setNoteArchived_(noteId, false);
     }
 
     function toggleNotePin(noteId) {
