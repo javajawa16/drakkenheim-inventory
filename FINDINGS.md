@@ -29,11 +29,27 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 7. Index.html lines 1–1500 (HTML structure, CSS) — Code.js is now fully audited.
+Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS, identity/init).
 (Section numbering: 1–6 = Code.js in ~700-line slices, 7–12 = Index.html in ~1500-line slices.
 The line-range text above is authoritative if a prompt's numbering ever disagrees.)
 
 ## Sessions
+
+### 2026-07-07 (run 59) — Sections audited: 7 (Index.html 1–2187, HTML structure + all CSS, plus the shared sheet-display / z-index / scroll-lock layer)
+
+> **Stories traced** (all route through the shared mobile-sheet display, z-index stacking, and `app-modal-open` scroll-lock defined in this section): View item details, Give item, Sell item, Remove item, Combine duplicate, Quick-adjust, Add library/custom item, Receive/Pay gold, Delerium receive/sell, Party Notes create/edit, Identity pick. This section is CSS + top-level HTML; the interactive JS lives in sections 8–12 and was read as needed to close each trace. Focus per protocol: only CSS/structure that causes a *behavioral* bug — style/naming/dead-code skipped (e.g. the orphaned `.notes-note*` swipe classes at 1236–1317, replaced by tap-based `.note-card` at 2126/4140, and the never-set `--keyboard-offset` var at line 44, were both confirmed dead and are NOT reported).
+
+#### RISK · Index.html:1661 · Desktop `.mobile-sheet { display:none !important }` + per-ID allow-list silently hides any *new* sheet on every device
+
+**Stories: every sheet-based flow.** The `@media (min-width:700px)` block (line 1633) is **always active in the GAS iOS webview** — `window.innerWidth` reports ~980 there (README → CSS/Layout Architecture Notes; the in-file comment at 1686 even says "media queries are dead in the AS webview"). Inside it, line 1661 sets `.mobile-sheet { display:none !important }` and lines **1662–1674** re-enable exactly **13 sheets by ID** with `!important` (`#descriptionSheet`, `#descActionSheet`, `#noteFormSheet`, `#goldSheet`, `#payReasonSheet`, `#giveItemSheet`, `#deleriumSheet`, `#sellItemSheet`, `#sellBatchSheet`, `#combineSheet`, `#identitySheet`, `#inventorySheet`, `#quickEditSheet`). This allow-list is the **only** thing that makes any sheet visible in the webview: the base `.mobile-sheet.active { display:block }` (1368) is out-ranked by the `!important` hide. I cross-checked every top-level `.mobile-sheet` element (2480–2795) against the list — **all 13 are present, so there is no live bug today.** The risk is the invisible coupling: a future `.mobile-sheet` added without a matching `#id.active { display:… !important }` line will **never open on phone or desktop, with no console error** — it just silently does nothing, and the failure looks like a JS wiring bug, not a CSS one. Recommend collapsing 1661–1674 to a single default rule — `.mobile-sheet.active { display:block !important }` plus a `#descActionSheet.active { display:flex !important }` (bottom-sheet) override — so new sheets are visible by default and the per-ID enumeration disappears.
+
+#### IDEA · Index.html:2779 · descAction sub-sheet has no tap-outside-to-dismiss (inconsistent with the dice overlay)
+
+**Stories: Sell item / Give item / Remove item / Add-from-description.** `#descActionSheet` (2779) is a bottom-sheet whose backdrop is deliberately semi-transparent (`rgba(6,10,20,.55)`, line 1378) so the description sheet shows through behind it — a visual affordance that reads as "tap the dimmed area to dismiss." But the overlay div carries no `onclick`, so only the in-panel **Cancel** button closes it. The dice overlay (2806) *does* close on backdrop tap (`onclick="closeDiceCalc()"`), so the two bottom-sheet-style overlays behave inconsistently. Low-severity friction; to match the dice pattern add `onclick="closeDescActionSheet()"` to `#descActionSheet` and `onclick="event.stopPropagation()"` to its `.mobile-sheet-panel` (2780).
+
+#### Note · Index.html:3516 · Scroll-lock (`app-modal-open`) discipline across stacked sheets is clean
+
+`body.app-modal-open { overflow:hidden }` (line 110) is the modal scroll-lock. It is centrally reconciled by `syncModalOpenState()` (3516), which sets the class iff any `.mobile-sheet.active` still exists. Every sheet-close path calls it — `closeDescriptionSheet` (7007), `closeDescActionSheet` (7038), `keepDuplicateInventoryItem` (3558), `closeDiceCalc` (3618), and `setCommandMode`'s notes-form close (3394) — so a stacked pair like descActionSheet-over-descriptionSheet keeps the lock until the **last** sheet closes (verified: the sell/give/remove success handlers at 7190/7287/7351/7435 close *both* sheets before firing, and each fail/success path resets its in-flight flag). The three direct `add('app-modal-open')` calls (identity 4632, dice 3613, description-open 6898) are each paired with a removal on their own close path. Bottom-nav tabs sit at `z-index:30` (line 1595) beneath all sheets (`z-index:70–90`), so "switch tabs mid-flight while a sheet is open" is **structurally unreachable** — the sheet overlay covers the nav — which closes the navigate-away concern for every sheet-based story in this section. No stuck scroll-lock or orphaned-overlay state found.
 
 ### 2026-06-24 (run 58) — Sections audited: 6 (Code.js 3900–4045 + quick-adjust flow: apiAdjustInventory/apiSetItemQuantity, client confirmQuickEdit)
 
