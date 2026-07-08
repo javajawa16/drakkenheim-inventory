@@ -237,11 +237,6 @@ function runHealthCheck() {
 
 function doGet(e) {
   try {
-    // Temporary one-shot migration hook — remove after run (2026-07-06).
-    if (e && e.parameter && e.parameter.migrate === 'k9f3x7w2m5q8z1v4') {
-      return ContentService.createTextOutput(JSON.stringify(migrateReceiveLedgerDestinations_()))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
     return HtmlService
       .createTemplateFromFile('Index')
       .evaluate()
@@ -1980,62 +1975,6 @@ function auditWrite_(entry) {
     ]);
   } catch (err) {
     Logger.log(`Failed to write audit log: ${err.message}`);
-  }
-}
-
-/*
- * One-time backfill (run 2026-07-06): legacy RECEIVE gold ledger entries were
- * written with the plain item 'Gold', so the client cannot show where the gold
- * landed. The destination (party pool vs a character's personal gold) lives on
- * the inventory row the entry references — rewrite Item to 'Gold → <holder>' /
- * 'Gold → party' to match the format new entries use. Idempotent: entries
- * already containing '→' are skipped; entries whose inventory row no longer
- * exists are left untouched (destination unknowable).
- */
-function migrateReceiveLedgerDestinations_() {
-  const lock = LockService.getDocumentLock();
-  if (!lock.tryLock(10000)) return { ok: false, error: 'Server busy, please try again.' };
-  try {
-    const ss = getInventorySpreadsheet_();
-    const ledger = getSheetByTrimmedName_(ss, CONFIG.RESOURCE_LEDGER_SHEET);
-    if (!ledger || ledger.getLastRow() < 2) return { ok: true, scanned: 0, updated: 0, skipped: 0 };
-
-    const holderById = {};
-    const inv = getSheetByTrimmedName_(ss, CONFIG.INVENTORY_SHEET);
-    if (inv && inv.getLastRow() >= 2) {
-      const invHeaders = inv.getRange(1, 1, 1, inv.getLastColumn()).getValues()[0].map(String);
-      const idIdx     = invHeaders.indexOf('Inventory ID');
-      const holderIdx = invHeaders.indexOf('Holder');
-      inv.getRange(2, 1, inv.getLastRow() - 1, inv.getLastColumn()).getValues().forEach(r => {
-        const id = String(r[idIdx] || '').trim();
-        if (id) holderById[id] = String(r[holderIdx] || '').trim();
-      });
-    }
-
-    const actionCol   = RESOURCE_LEDGER_HEADERS.indexOf('Action');
-    const resourceCol = RESOURCE_LEDGER_HEADERS.indexOf('Resource');
-    const idCol       = RESOURCE_LEDGER_HEADERS.indexOf('Inventory ID');
-    const itemCol     = RESOURCE_LEDGER_HEADERS.indexOf('Item');
-    const rows = ledger.getRange(2, 1, ledger.getLastRow() - 1, RESOURCE_LEDGER_HEADERS.length).getValues();
-
-    let updated = 0, skipped = 0;
-    const itemValues = rows.map(r => [r[itemCol]]);
-    rows.forEach((r, i) => {
-      const action   = String(r[actionCol]   || '').toUpperCase();
-      const resource = String(r[resourceCol] || '').toLowerCase();
-      const item     = String(r[itemCol]     || '');
-      if (action !== 'RECEIVE' || resource !== 'gold' || item.indexOf('→') !== -1) return;
-      const id = String(r[idCol] || '').trim();
-      if (!(id in holderById)) { skipped++; return; }
-      const holder = holderById[id];
-      itemValues[i][0] = holder ? `Gold → ${holder}` : 'Gold → party';
-      updated++;
-    });
-
-    if (updated) ledger.getRange(2, itemCol + 1, itemValues.length, 1).setValues(itemValues);
-    return { ok: true, scanned: rows.length, updated, skipped };
-  } finally {
-    lock.releaseLock();
   }
 }
 
