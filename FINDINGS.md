@@ -29,11 +29,42 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 8. Index.html lines 1501–3000 (CSS continued, early JS, identity/init).
+Next section: 9. Index.html lines 3001–4500 (inventory render, search, notes UI).
 (Section numbering: 1–6 = Code.js in ~700-line slices, 7–12 = Index.html in ~1500-line slices.
 The line-range text above is authoritative if a prompt's numbering ever disagrees.)
 
 ## Sessions
+
+### 2026-07-08 (run 60) — Sections audited: 8 (Index.html 1501–3000: CSS continued, body/sheet HTML, top-level JS state + identity/init/collaborative-sync boot layer)
+
+> **Stories traced:** Identity pick / first-open (`loadMyIdentity` 4583 → `loadFallbackCharacterIdentity` 4590 → `apiGetMyCharacter`; `applyIdentity` 4544, `confirmIdentity` 4647, `showIdentitySheet` 4608, `readCachedIdentity`/`cacheIdentity` 4517/4530) and the cross-cutting **Collaborative sync interference** / **iOS background-foreground** stories (`gasCall`/`drainPendingForeignReload_` 2901/2912, `pollSync`/`startSyncPoll`/`stopSyncPoll` 4036/4067/4072, `visibilitychange` 8827, sync state vars 2982–2986). The section is mostly the `<style>` block (1501–2187) + body/sheet HTML (2190–2859) + the top-level `<script>` state block (2861–3000) — per protocol I read the driving JS (identity/init/sync, boot tail 8838–8847) as needed to close each trace. CSS/structure examined only for behavioral bugs (the run-59 `.mobile-sheet` display allow-list at 1661–1674, the `--keyboard-offset` var at 1542 and `--nav-height` fallbacks were re-confirmed as already-logged/benign and are NOT re-reported). Interactive components in-range with no story attached — dice calculator (`dkRoll` 3668 sanitizes via `[^0-9+\-*/().() ]` before `Function()`; client-side `Math.random` is valid in the webview), `confirmCombineInventoryItem` (3561, rollback vetted run 57) — checked clean.
+
+#### BUG · Index.html:4596 · `loadFallbackCharacterIdentity` failure handler wipes an already-applied cached identity and force-shows the picker on any transient `apiGetMyCharacter` error
+
+**Story: Identity pick — returning user, boot-time server failure.** Run 41 (FINDINGS:1901) vetted the *success* path and correctly noted that "`applyIdentity` returning false for a null-character server response leaves any already-applied cached identity intact and only shows the picker when `!myCharacterName`." But the **`withFailureHandler`** (4596–4604) was never examined, and it does the opposite — it *unconditionally* wipes identity and pops the picker.
+
+Trace: a returning user boots with a valid (<24 h) cached identity. `loadMyIdentity` (4583) reads it and calls `applyIdentity(cached)` (4585) — `myCharacterName`, `isTreasurer`, `isDMUser` are set, `startSyncPoll` runs, the inventory renders; **the app is fully usable and correctly logged in**. `loadMyIdentity` then fires `loadFallbackCharacterIdentity` → `apiGetMyCharacter(myCharacterName)`. If that call hits `withFailureHandler` — a transient GAS/network error, cold-start, or quota blip (and note per FINDINGS:3472 this endpoint also does an unlocked sheet write to `Last Seen` on every call, so it is not a pure read) — the handler sets `myCharacterName = null`, `isTreasurer = false`, `isDMUser = false`, `identityResolved = false`, and calls `showIdentitySheet()`. Consequences:
+
+- The user is bounced to the full-screen character-selection splash **despite** having been logged in from cache a moment earlier — every transient boot-time failure of `apiGetMyCharacter` forces a re-selection.
+- A treasurer/DM is momentarily demoted (`isTreasurer`/`isDMUser` cleared) until they re-tap.
+- Inconsistent residual state: `syncClientId` is *not* reset here (only `applyIdentity` sets it), and the cache-`applyIdentity`'s `syncPollTimer` keeps polling — so the poll runs with the old client id while `identityResolved` is `false`.
+
+Recoverable (re-tapping the card runs `confirmIdentity` → `applyIdentity` → `apiSetMyCharacter`), so not data loss — but it defeats the entire point of the 24 h identity cache for exactly the flaky-network conditions the cache exists to paper over. Fix: guard the failure handler the same way the success handler already is — bail if a cached identity is live:
+
+```js
+.withFailureHandler(() => {
+  if (myCharacterName) return;   // cached identity already applied; keep it
+  myCharacterName = null; myGoogleEmail = ''; isTreasurer = false;
+  isDMUser = false; identityResolved = false;
+  updateInventoryScopeRow(); showIdentitySheet();
+})
+```
+
+#### RISK · Index.html:8830 · `visibilitychange` resume guard leaves the sync poll permanently dead if the app is backgrounded within the first 20 s (before the first `pollSync` cycle) after identity resolves
+
+**Story: iOS background/foreground (cross-cutting) — residual gap distinct from the run-13 fix (FINDINGS:3501).** Run 13 corrected the guard operand to `syncState.inventory.ts !== '0'` and reasoned about the "backgrounded *before* identity resolves" case being correctly excluded. But the guard uses `ts !== '0'` as a proxy for "the poll was ever started," and that proxy is wrong in one window: `startSyncPoll` (4067) sets `syncPollTimer` via `setInterval(pollSync, 20000)` but does **not** run `pollSync` immediately, so `syncState.inventory.ts` stays `'0'` until the first cycle completes at +20 s.
+
+Trace: cold load → `applyIdentity` → `startSyncPoll` sets the timer (ts still `'0'`). User backgrounds at, say, +5 s → `visibilitychange` hidden → `stopSyncPoll()` clears the timer (`syncPollTimer = null`). User foregrounds at +60 s → the resume guard `syncState.inventory.ts !== '0' || syncPollTimer` evaluates `('0' !== '0') || null` → **false**, so neither the immediate `pollSync()` nor `startSyncPoll()` runs. Because nothing else re-arms the poll for an already-resolved user (no further `applyIdentity`, and local writes don't restart it), **collaborative sync is dead for the rest of the session** — the user silently stops receiving other players' inventory/notes changes until a full reload. The window (backgrounding within 20 s of a cold open) is narrow but matches very common mobile behavior (open, glance, switch away). Fix: key the resume on a signal that means "polling should be active" rather than "a cycle has completed" — e.g. gate on `identityResolved` (or a dedicated `syncStarted` flag set in `startSyncPoll`) instead of `syncState.inventory.ts !== '0'`.
 
 ### 2026-07-07 (run 59) — Sections audited: 7 (Index.html 1–2187, HTML structure + all CSS, plus the shared sheet-display / z-index / scroll-lock layer)
 
