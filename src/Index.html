@@ -7491,12 +7491,6 @@
         return 'delerium crystal';
       }
 
-      // Mirror the server's classifyQuickEdit_ (Code.js) — health potions have a
-      // quick-adjust handler, so route their taps to the quick editor too.
-      if (/health potion|potion of healing/.test(name)) {
-        return 'health potion';
-      }
-
       return '';
     }
 
@@ -7534,9 +7528,7 @@
 
       document.getElementById(`${prefix}Heading`).textContent = editType === 'currency'
         ? 'Quick Currency'
-        : editType === 'health potion'
-          ? 'Quick Potion'
-          : 'Quick Delerium';
+        : 'Quick Delerium';
       document.getElementById(`${prefix}Title`).textContent = selectedQuickEdit.itemName;
       document.getElementById(`${prefix}Meta`).textContent = meta;
       document.getElementById(`${prefix}Mode`).value = 'add';
