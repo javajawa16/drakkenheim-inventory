@@ -1970,10 +1970,11 @@
        shrinks by that factor on screen. calc(Npx * scale) = N real points. */
     html.is-phone #inventoryList .inventory-group { margin-bottom: 0; }
     html.is-phone #inventoryList .group-toggle {
-      /* One tight line of text: same horizontal inset as the item cards,
-         minimal vertical padding, no inherited line-height inflation */
-      min-height: 0;
-      padding: calc(2px * var(--phone-scale, 2.5)) calc(7px * var(--phone-scale, 2.5));
+      /* One tight line of text: same horizontal inset as the item cards.
+         !important needed to beat the global `html.is-phone button
+         { min-height: var(--phone-button-height) !important }` rule. */
+      min-height: 0 !important;
+      padding: calc(2px * var(--phone-scale, 2.5)) calc(7px * var(--phone-scale, 2.5)) !important;
       line-height: 1;
     }
     html.is-phone #inventoryList .group-heading { font-size: calc(13px * var(--phone-scale, 2.5)); gap: calc(4px * var(--phone-scale, 2.5)); line-height: 1; }
