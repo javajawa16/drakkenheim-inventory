@@ -832,19 +832,12 @@
     }
     html.is-phone .sell-batch-btn { min-height: var(--phone-card-min-height, 88px); }
 
-    /* Sell Items docks with the bottom nav (fixed, same gutters, just above
-       it); the in-flow spacer lets the last items scroll clear of the band. */
-    .sell-batch-spacer { height: 0; }
-    html.is-phone #inventoryList .sell-batch-btn {
-      position: fixed;
-      left: 8px; right: 8px; width: auto;
-      bottom: calc(var(--phone-nav-height, 110px) + var(--safe-bottom, 0px) + 6px);
-      margin-top: 0;
-      z-index: 29;
-      box-shadow: 0 -4px 18px rgba(0, 0, 0, .4);
-    }
-    html.is-phone #inventoryList .sell-batch-spacer {
-      height: calc(var(--phone-card-min-height, 88px) + 14px);
+    /* Sell Items lives inside the bottom nav as a full-width row above the
+       tab buttons (shown only for the treasurer on the inventory tab). */
+    .bottom-nav .sell-batch-btn {
+      grid-column: 1 / -1;
+      margin: 0;
+      border-radius: 14px;
     }
 
     .sell-batch-group-label {
@@ -2946,6 +2939,10 @@
 
   <!-- ── Bottom nav ─────────────────────────────────────────────── -->
   <div class="bottom-nav">
+    <button id="sellDockBtn" class="sell-batch-btn" type="button" style="display:none;" onclick="openSellBatchSheet()">
+      <span>Sell Items</span>
+      <span class="group-count">sell party loot</span>
+    </button>
     <button id="inventoryTab" class="active" type="button" onclick="setCommandMode('inventory')">Inventory</button>
     <button id="addTab" type="button" onclick="handleAddTabClick()">Add Item</button>
     <button id="notesTab" type="button" onclick="notesTabAction()" style="display:none;">Party Notes</button>
@@ -3290,7 +3287,22 @@
       root.style.setProperty('--phone-card-min-height',`${Math.round(76 * scale)}px`);
       root.style.setProperty('--phone-nav-height',     `${Math.round(84 * scale)}px`);
 
+      updateSellDockVisibility();
       return true;
+    }
+
+    // The Sell Items row lives inside the bottom nav; show it only for the
+    // treasurer while the inventory tab is active, and grow the nav-height
+    // variable (which drives the body's bottom padding) to match its row.
+    function updateSellDockVisibility() {
+      const btn = document.getElementById('sellDockBtn');
+      if (!btn) return;
+      const show = Boolean(isTreasurer) && commandMode === 'inventory';
+      btn.style.display = show ? '' : 'none';
+      if (isMobileLayout()) {
+        const scale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--phone-scale')) || 2.5;
+        document.documentElement.style.setProperty('--phone-nav-height', `${Math.round((show ? 148 : 84) * scale)}px`);
+      }
     }
 
     function isMobileLayout() {
@@ -3462,6 +3474,7 @@
       const inventoryActive = commandMode === 'inventory';
       const addActive       = commandMode === 'add';
       const notesActive     = commandMode === 'notes';
+      updateSellDockVisibility();
       const commandSearch = document.getElementById('commandSearch');
       const appHeader = document.getElementById('appHeader');
 
@@ -4100,10 +4113,6 @@
           </button>
         </div>
         ${groups.map(group => renderInventoryGroup(group)).join('')}
-        ${isTreasurer ? `<button class="sell-batch-btn" type="button" onclick="openSellBatchSheet()">
-          <span>Sell Items</span>
-          <span class="group-count">sell party loot</span>
-        </button><div class="sell-batch-spacer"></div>` : ''}
       `;
     }
 
@@ -4641,6 +4650,7 @@
 
       updateInventoryScopeRow();
       populateCharacterSelectors();
+      updateSellDockVisibility();
       const identitySheet = document.getElementById('identitySheet');
       if (identitySheet) identitySheet.classList.remove('active');
       syncModalOpenState();
