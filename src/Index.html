@@ -832,6 +832,15 @@
     }
     html.is-phone .sell-batch-btn { min-height: var(--phone-card-min-height, 88px); }
 
+    /* Pin the Sell Items band above the bottom nav while the inventory list
+       scrolls; it settles into normal flow at the end of the list. */
+    html.is-phone #inventoryList .sell-batch-btn {
+      position: sticky;
+      bottom: calc(var(--phone-nav-height, 110px) + var(--safe-bottom, 0px) + 10px);
+      z-index: 5;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
+    }
+
     .sell-batch-group-label {
       font-size: 13px;
       font-weight: 600;
