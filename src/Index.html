@@ -832,13 +832,19 @@
     }
     html.is-phone .sell-batch-btn { min-height: var(--phone-card-min-height, 88px); }
 
-    /* Pin the Sell Items band above the bottom nav while the inventory list
-       scrolls; it settles into normal flow at the end of the list. */
+    /* Sell Items docks with the bottom nav (fixed, same gutters, just above
+       it); the in-flow spacer lets the last items scroll clear of the band. */
+    .sell-batch-spacer { height: 0; }
     html.is-phone #inventoryList .sell-batch-btn {
-      position: sticky;
-      bottom: calc(var(--phone-nav-height, 110px) + var(--safe-bottom, 0px) + 10px);
-      z-index: 5;
-      box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
+      position: fixed;
+      left: 8px; right: 8px; width: auto;
+      bottom: calc(var(--phone-nav-height, 110px) + var(--safe-bottom, 0px) + 6px);
+      margin-top: 0;
+      z-index: 29;
+      box-shadow: 0 -4px 18px rgba(0, 0, 0, .4);
+    }
+    html.is-phone #inventoryList .sell-batch-spacer {
+      height: calc(var(--phone-card-min-height, 88px) + 14px);
     }
 
     .sell-batch-group-label {
@@ -4097,7 +4103,7 @@
         ${isTreasurer ? `<button class="sell-batch-btn" type="button" onclick="openSellBatchSheet()">
           <span>Sell Items</span>
           <span class="group-count">sell party loot</span>
-        </button>` : ''}
+        </button><div class="sell-batch-spacer"></div>` : ''}
       `;
     }
 
