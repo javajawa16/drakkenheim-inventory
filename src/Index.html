@@ -772,6 +772,53 @@
       font-size: 15px;
     }
 
+    /* ─── Flat inventory list (inventory tab only — sell-batch sheet and
+       archived notes keep the boxed group style) ─────────────────── */
+    #inventoryList .inventory-group {
+      margin-bottom: 2px;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      overflow: visible;
+    }
+    #inventoryList .group-toggle {
+      min-height: 40px;
+      padding: 8px 10px;
+      background: transparent;
+      border-radius: 10px;
+    }
+    #inventoryList .group-heading {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 14px; font-weight: 800;
+      letter-spacing: .07em; text-transform: uppercase;
+      color: var(--text-secondary);
+    }
+    #inventoryList .group-chevron {
+      color: var(--accent);
+      font-size: 16px; line-height: 1;
+      transition: transform 160ms ease;
+    }
+    #inventoryList .group-toggle:not(.open) .group-chevron { transform: rotate(-90deg); }
+    #inventoryList .group-count { font-size: 13px; }
+    #inventoryList .group-list { padding: 0 0 6px; gap: 0; }
+    #inventoryList .group-list .inventory-row { margin-bottom: 4px; }
+    #inventoryList .inventory-card { padding: 8px 10px; border-radius: 12px; }
+    #inventoryList .item-title-row { justify-content: flex-start; align-items: center; gap: 10px; }
+    #inventoryList .item-main { flex: 1; min-width: 0; }
+    #inventoryList .item-title { font-size: 16px; font-weight: 700; }
+    #inventoryList .item-meta { margin-top: 1px; font-size: 13px; }
+    .item-qty-badge {
+      flex: 0 0 auto;
+      min-width: 30px; height: 30px; padding: 0 7px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: rgba(70,86,119,.30);
+      border: 1px solid rgba(94,118,164,.42);
+      border-radius: 9px;
+      font-size: 14px; font-weight: 700;
+      color: var(--text-secondary);
+      font-variant-numeric: tabular-nums;
+    }
+
     .sell-batch-btn {
       width: 100%;
       justify-content: space-between;
@@ -1917,9 +1964,19 @@
       min-height: var(--phone-card-min-height, 88px);
     }
 
+    /* Flat inventory list: headers stay as slim as item rows on phones too */
+    html.is-phone #inventoryList .group-toggle { min-height: 52px; }
+    html.is-phone #inventoryList .group-heading { font-size: 17px; }
+    html.is-phone #inventoryList .group-chevron { font-size: 19px; }
+    html.is-phone #inventoryList .group-count { font-size: 16px; }
+    html.is-phone #inventoryList .item-title { font-size: 20px; }
+    html.is-phone #inventoryList .item-meta { font-size: 15px; }
+    html.is-phone .item-qty-badge { min-width: 40px; height: 40px; font-size: 18px; border-radius: 10px; }
+
     html.is-phone .inventory-row {
       margin-bottom: 5px;
     }
+    html.is-phone #inventoryList .group-list .inventory-row { margin-bottom: 4px; }
 
     html.is-phone .resource-ledger-title,
     html.is-phone .resource-ledger-row {
@@ -3932,45 +3989,27 @@
       inventoryExpandedGroups = savedExpanded;
     }
 
-    function renderInventoryRowCard(row, options) {
-      const opts = options || {};
+    function renderInventoryRowCard(row) {
       const representativeId = row._representativeInventoryId || row['Inventory ID'] || '';
       const rollupKey = row._rollupKey || '';
       const index = inventoryRows.findIndex(r => r['Inventory ID'] === representativeId);
       const inventoryId = escapeHtml(row['Inventory ID'] || '');
       const representativeIdAttr = escapeHtml(representativeId);
       const rollupKeyAttr = escapeHtml(rollupKey);
-      const qty = escapeHtml(row['Qty'] || '');
+      const qty = escapeHtml(String(row['Qty'] || '0'));
       const item = escapeHtml(row['Item'] || '');
       const holder = escapeHtml(row['Holder'] || '');
-      const category = escapeHtml(row['Category'] || '');
       const rarity = escapeHtml(row['Rarity'] || '');
-      const valueGp = escapeHtml(row['Value GP'] || '');
       const isSwiped = swipedInventoryId && swipedInventoryId === row['Inventory ID'];
       const swipeOpenPx = getSwipeOpenPx();
-      const metaParts = opts.showMeta ? [
-        category,
-        rarity,
-        holder ? `${holder}` : ''
-      ].filter(Boolean) : [];
 
-      // valueGp shown right-aligned in title row instead of meta line
+      const metaParts = [rarity, holder].filter(Boolean);
       if (row._rollupCount > 1) {
         const adders = (row._rollupAdders || []).map(n => shortCharacterLabel(n));
-        const addersStr = adders.length
-          ? `added by ${adders.join(', ')}`
-          : `${row._rollupCount} additions`;
-        metaParts.push(addersStr);
+        metaParts.push(adders.length ? `added by ${adders.join(', ')}` : `${row._rollupCount} additions`);
       }
-
       const meta = metaParts.join(' · ');
       const offsetStyle = isSwiped ? ` style="transform:translateX(-${swipeOpenPx}px)"` : '';
-
-      const rawCat  = String(row['Category'] || '').toLowerCase();
-      const rawName = String(row['Item'] || '').toLowerCase();
-      const isLedgerRow = isGoldItem_(row) || rawCat === 'delerium' || /delerium|delirium/.test(rawName);
-      const rowNotes = opts.showMeta && isLedgerRow ? (row['Notes'] || '') : '';
-      const notesHtml = rowNotes ? `<div class="item-meta" style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${escapeHtml(rowNotes)}</div>` : '';
 
       return `
         <div class="inventory-row" data-index="${index}" data-inventory-id="${inventoryId}" data-representative-id="${representativeIdAttr}">
@@ -3986,11 +4025,12 @@
                data-representative-id="${representativeIdAttr}"
                onclick="handleInventoryCardClickById(this.dataset.representativeId)">
             <div class="item-title-row">
-              <div class="item-title">${qty ? qty + '× ' : ''}${item}</div>
-              ${(opts.showMeta && valueGp && Number(valueGp) > 0 && !/scroll/i.test(String(row['Item'] || '')) && String(row['Category'] || '').toLowerCase() !== 'scroll') ? `<span class="item-value-gp">${Number(valueGp)} gp</span>` : ''}
+              <span class="item-qty-badge">${qty}</span>
+              <div class="item-main">
+                <div class="item-title">${item}</div>
+                ${meta ? `<div class="item-meta">${meta}</div>` : ''}
+              </div>
             </div>
-            ${notesHtml}
-            ${(!notesHtml && meta) ? `<div class="item-meta">${meta}</div>` : ''}
           </div>
         </div>
       `;
@@ -6487,17 +6527,18 @@
     }
 
     function renderInventoryGroup(group) {
-      const isOpen = Boolean(inventoryExpandedGroups[group.key]);
+      // Groups are open unless the user explicitly collapsed them this session.
+      const isOpen = inventoryExpandedGroups[group.key] !== false;
       const displayRows = rollupInventoryRows(group.rows);
       const totalQty = displayRows.reduce((sum, row) => sum + toNumber(row['Qty'] || 0), 0);
 
       return `
         <div class="inventory-group">
-          <button class="group-toggle" type="button" onclick="toggleInventoryGroup('${group.key}')">
-            <span>${escapeHtml(group.label)}</span>
+          <button class="group-toggle${isOpen ? ' open' : ''}" type="button" onclick="toggleInventoryGroup('${group.key}')">
+            <span class="group-heading"><span class="group-chevron">⌄</span>${escapeHtml(group.label)}</span>
             <span class="group-count">${displayRows.length} item${displayRows.length === 1 ? '' : 's'} · ${escapeHtml(formatCount(totalQty))}</span>
           </button>
-          ${isOpen ? `<div class="group-list">${displayRows.map(row => renderInventoryRowCard(row, { showMeta: false })).join('')}</div>` : ''}
+          ${isOpen ? `<div class="group-list">${displayRows.map(row => renderInventoryRowCard(row)).join('')}</div>` : ''}
         </div>
       `;
     }
@@ -6551,7 +6592,9 @@
     }
 
     function toggleInventoryGroup(key) {
-      inventoryExpandedGroups[key] = !inventoryExpandedGroups[key];
+      // Open is the default (missing key = open), so toggling means: collapsed
+      // (=== false) flips back to open, anything else collapses.
+      inventoryExpandedGroups[key] = inventoryExpandedGroups[key] === false;
       renderInventory();
     }
 
