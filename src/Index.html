@@ -1970,14 +1970,16 @@
        shrinks by that factor on screen. calc(Npx * scale) = N real points. */
     html.is-phone #inventoryList .inventory-group { margin-bottom: 0; }
     html.is-phone #inventoryList .group-toggle {
-      /* Same padding box as the item cards below, no extra min-height */
+      /* One tight line of text: same horizontal inset as the item cards,
+         minimal vertical padding, no inherited line-height inflation */
       min-height: 0;
-      padding: calc(4px * var(--phone-scale, 2.5)) calc(7px * var(--phone-scale, 2.5));
+      padding: calc(2px * var(--phone-scale, 2.5)) calc(7px * var(--phone-scale, 2.5));
+      line-height: 1;
     }
-    html.is-phone #inventoryList .group-heading { font-size: calc(13px * var(--phone-scale, 2.5)); gap: calc(4px * var(--phone-scale, 2.5)); }
-    html.is-phone #inventoryList .group-chevron { font-size: calc(15px * var(--phone-scale, 2.5)); }
-    html.is-phone #inventoryList .group-count { font-size: calc(11px * var(--phone-scale, 2.5)); }
-    html.is-phone #inventoryList .group-list { padding: 0 0 calc(4px * var(--phone-scale, 2.5)); }
+    html.is-phone #inventoryList .group-heading { font-size: calc(13px * var(--phone-scale, 2.5)); gap: calc(4px * var(--phone-scale, 2.5)); line-height: 1; }
+    html.is-phone #inventoryList .group-chevron { font-size: calc(15px * var(--phone-scale, 2.5)); line-height: 1; }
+    html.is-phone #inventoryList .group-count { font-size: calc(11px * var(--phone-scale, 2.5)); line-height: 1; }
+    html.is-phone #inventoryList .group-list { padding: 0 0 calc(2px * var(--phone-scale, 2.5)); }
     html.is-phone #inventoryList .item-title { font-size: calc(16px * var(--phone-scale, 2.5)); line-height: 1.15; }
     html.is-phone #inventoryList .item-meta { font-size: calc(12px * var(--phone-scale, 2.5)); margin-top: calc(1px * var(--phone-scale, 2.5)); line-height: 1.15; }
     html.is-phone #inventoryList .inventory-card {
