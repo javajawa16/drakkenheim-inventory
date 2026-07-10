@@ -1964,24 +1964,36 @@
       min-height: var(--phone-card-min-height, 88px);
     }
 
-    /* Flat inventory list: headers stay as slim as item rows on phones too.
-       The GAS webview renders ~980px wide and scales down (~2.5x), so phone
-       sizes must sit near the 28px body scale (html.is-phone body font-size). */
+    /* Flat inventory list on phones. Sizes MUST be expressed in the runtime
+       scale unit (--phone-scale = devicePixelRatio, set by updatePhoneClass),
+       because the GAS webview renders ~980px wide and every fixed px value
+       shrinks by that factor on screen. calc(Npx * scale) = N real points. */
     html.is-phone #inventoryList .inventory-group { margin-bottom: 0; }
-    html.is-phone #inventoryList .group-toggle { min-height: 54px; padding: 6px 12px; }
-    html.is-phone #inventoryList .group-heading { font-size: 22px; gap: 10px; }
-    html.is-phone #inventoryList .group-chevron { font-size: 25px; }
-    html.is-phone #inventoryList .group-count { font-size: 18px; }
-    html.is-phone #inventoryList .group-list { padding: 0 0 8px; }
-    html.is-phone #inventoryList .item-title { font-size: 26px; line-height: 1.15; }
-    html.is-phone #inventoryList .item-meta { font-size: 20px; margin-top: 1px; line-height: 1.15; }
-    html.is-phone #inventoryList .inventory-card { padding: 10px 14px; }
-    html.is-phone .item-qty-badge { min-width: 56px; height: 56px; font-size: 26px; border-radius: 12px; }
+    html.is-phone #inventoryList .group-toggle {
+      min-height: calc(34px * var(--phone-scale, 2.5));
+      padding: calc(4px * var(--phone-scale, 2.5)) calc(5px * var(--phone-scale, 2.5));
+    }
+    html.is-phone #inventoryList .group-heading { font-size: calc(13px * var(--phone-scale, 2.5)); gap: calc(4px * var(--phone-scale, 2.5)); }
+    html.is-phone #inventoryList .group-chevron { font-size: calc(15px * var(--phone-scale, 2.5)); }
+    html.is-phone #inventoryList .group-count { font-size: calc(11px * var(--phone-scale, 2.5)); }
+    html.is-phone #inventoryList .group-list { padding: 0 0 calc(4px * var(--phone-scale, 2.5)); }
+    html.is-phone #inventoryList .item-title { font-size: calc(16px * var(--phone-scale, 2.5)); line-height: 1.15; }
+    html.is-phone #inventoryList .item-meta { font-size: calc(12px * var(--phone-scale, 2.5)); margin-top: calc(1px * var(--phone-scale, 2.5)); line-height: 1.15; }
+    html.is-phone #inventoryList .inventory-card {
+      padding: calc(6px * var(--phone-scale, 2.5)) calc(7px * var(--phone-scale, 2.5));
+      border-radius: calc(6px * var(--phone-scale, 2.5));
+    }
+    html.is-phone .item-qty-badge {
+      min-width: calc(28px * var(--phone-scale, 2.5));
+      height: calc(28px * var(--phone-scale, 2.5));
+      font-size: calc(13px * var(--phone-scale, 2.5));
+      border-radius: calc(5px * var(--phone-scale, 2.5));
+    }
 
     html.is-phone .inventory-row {
       margin-bottom: 5px;
     }
-    html.is-phone #inventoryList .group-list .inventory-row { margin-bottom: 3px; }
+    html.is-phone #inventoryList .group-list .inventory-row { margin-bottom: calc(2px * var(--phone-scale, 2.5)); }
 
     html.is-phone .resource-ledger-title,
     html.is-phone .resource-ledger-row {
