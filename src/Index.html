@@ -1965,21 +1965,23 @@
     }
 
     /* Flat inventory list: headers stay as slim as item rows on phones too.
-       The GAS webview renders ~980px wide and scales down ~2.5x, so phone
-       sizes must sit in the same 20-30px range as the --phone-font-* scale. */
-    html.is-phone #inventoryList .group-toggle { min-height: 64px; }
-    html.is-phone #inventoryList .group-heading { font-size: 21px; gap: 10px; }
-    html.is-phone #inventoryList .group-chevron { font-size: 24px; }
-    html.is-phone #inventoryList .group-count { font-size: 19px; }
-    html.is-phone #inventoryList .item-title { font-size: var(--phone-font-body, 24px); }
-    html.is-phone #inventoryList .item-meta { font-size: 19px; margin-top: 2px; }
-    html.is-phone #inventoryList .inventory-card { padding: 12px 14px; }
-    html.is-phone .item-qty-badge { min-width: 52px; height: 52px; font-size: 24px; border-radius: 12px; }
+       The GAS webview renders ~980px wide and scales down (~2.5x), so phone
+       sizes must sit near the 28px body scale (html.is-phone body font-size). */
+    html.is-phone #inventoryList .inventory-group { margin-bottom: 0; }
+    html.is-phone #inventoryList .group-toggle { min-height: 54px; padding: 6px 12px; }
+    html.is-phone #inventoryList .group-heading { font-size: 22px; gap: 10px; }
+    html.is-phone #inventoryList .group-chevron { font-size: 25px; }
+    html.is-phone #inventoryList .group-count { font-size: 18px; }
+    html.is-phone #inventoryList .group-list { padding: 0 0 8px; }
+    html.is-phone #inventoryList .item-title { font-size: 26px; line-height: 1.15; }
+    html.is-phone #inventoryList .item-meta { font-size: 20px; margin-top: 1px; line-height: 1.15; }
+    html.is-phone #inventoryList .inventory-card { padding: 10px 14px; }
+    html.is-phone .item-qty-badge { min-width: 56px; height: 56px; font-size: 26px; border-radius: 12px; }
 
     html.is-phone .inventory-row {
       margin-bottom: 5px;
     }
-    html.is-phone #inventoryList .group-list .inventory-row { margin-bottom: 4px; }
+    html.is-phone #inventoryList .group-list .inventory-row { margin-bottom: 3px; }
 
     html.is-phone .resource-ledger-title,
     html.is-phone .resource-ledger-row {
