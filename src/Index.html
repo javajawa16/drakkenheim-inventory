@@ -1977,8 +1977,8 @@
       padding: calc(2px * var(--phone-scale, 2.5)) calc(7px * var(--phone-scale, 2.5)) !important;
       line-height: 1;
     }
-    html.is-phone #inventoryList .group-heading { font-size: calc(13px * var(--phone-scale, 2.5)); gap: calc(4px * var(--phone-scale, 2.5)); line-height: 1; }
-    html.is-phone #inventoryList .group-chevron { font-size: calc(15px * var(--phone-scale, 2.5)); line-height: 1; }
+    html.is-phone #inventoryList .group-heading { font-size: calc(16px * var(--phone-scale, 2.5)); gap: calc(4px * var(--phone-scale, 2.5)); line-height: 1; }
+    html.is-phone #inventoryList .group-chevron { font-size: calc(18px * var(--phone-scale, 2.5)); line-height: 1; }
     html.is-phone #inventoryList .group-count { font-size: calc(11px * var(--phone-scale, 2.5)); line-height: 1; }
     html.is-phone #inventoryList .group-list { padding: 0 0 calc(2px * var(--phone-scale, 2.5)); }
     html.is-phone #inventoryList .item-title { font-size: calc(16px * var(--phone-scale, 2.5)); line-height: 1.15; }
@@ -6553,11 +6553,15 @@
       const displayRows = rollupInventoryRows(group.rows);
       const totalQty = displayRows.reduce((sum, row) => sum + toNumber(row['Qty'] || 0), 0);
 
+      // The item count is only informative while the rows are hidden.
+      const countHtml = isOpen
+        ? ''
+        : `<span class="group-count">${displayRows.length} item${displayRows.length === 1 ? '' : 's'} · ${escapeHtml(formatCount(totalQty))}</span>`;
       return `
         <div class="inventory-group">
           <button class="group-toggle${isOpen ? ' open' : ''}" type="button" onclick="toggleInventoryGroup('${group.key}')">
             <span class="group-heading"><span class="group-chevron">⌄</span>${escapeHtml(group.label)}</span>
-            <span class="group-count">${displayRows.length} item${displayRows.length === 1 ? '' : 's'} · ${escapeHtml(formatCount(totalQty))}</span>
+            ${countHtml}
           </button>
           ${isOpen ? `<div class="group-list">${displayRows.map(row => renderInventoryRowCard(row)).join('')}</div>` : ''}
         </div>
