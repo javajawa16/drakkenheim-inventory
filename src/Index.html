@@ -8694,6 +8694,20 @@
       const payloadSnapshot = { ...payload };
       const selectedSnapshot = selectedEquipment ? { ...selectedEquipment } : null;
 
+      // Route add feedback to whichever card is actually on screen: the details
+      // form's #addStatus when it's open, else the search card's #searchStatus.
+      // (#mainStatus lives on the inventory tab and is invisible from here.)
+      const showAddFeedback = html => {
+        const formEl   = document.getElementById('addStatus');
+        const searchEl = document.getElementById('searchStatus');
+        if (selectedEquipment && formEl) {
+          formEl.innerHTML = html;
+        } else if (searchEl) {
+          searchEl.classList.add('centered');
+          searchEl.innerHTML = html;
+        }
+      };
+
       // Build an optimistic row so the item appears instantly on switch to inventory
       const optId  = '_opt_' + Date.now();
       const optQty = Number(payload.qty) || 1;
@@ -8719,6 +8733,7 @@
       status.textContent = 'Adding…';
       setMainStatus(`<span class="success">Adding ${escapeHtml(itemName)}…</span>`);
       clearAddForm();
+      showAddFeedback(`Adding ${escapeHtml(itemName)}…`);
       window.setTimeout(() => {
         const _addSearchEl = document.getElementById('commandSearch');
         if (_addSearchEl) { _addSearchEl.focus(); _addSearchEl.select(); }
@@ -8749,6 +8764,7 @@
             updateAddFlow();
           }
           setMainStatus(`<span class="error">${escapeHtml((res && res.error) || `Failed to add ${itemName}.`)}</span>`);
+          showAddFeedback(`<span class="error">${escapeHtml((res && res.error) || `Failed to add ${itemName}.`)}</span>`);
           return;
         }
         if (res.ledgerEntry) {
@@ -8758,6 +8774,7 @@
         if (!cachePrimed) bustInventoryCache();
         renderInventory();
         setMainStatus(`<span class="success">${escapeHtml(res.message || `${itemName} added.`)}</span>`);
+        showAddFeedback(`<span class="success">${escapeHtml(res.message || `${itemName} added.`)}</span>`);
         const duplicateCandidate = findDuplicateInventoryCandidate(res.item);
         if (duplicateCandidate) {
           const sameHolder = (res.item['Holder'] || '') === (duplicateCandidate['Holder'] || '');
@@ -8789,6 +8806,7 @@
           document.getElementById('addStatus').innerHTML = `<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`;
           updateAddFlow();
         }
+        showAddFeedback(`<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`);
       };
 
       if (isQuickAdd) {
