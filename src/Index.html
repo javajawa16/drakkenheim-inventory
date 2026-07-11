@@ -800,7 +800,7 @@
     }
     #inventoryList .group-toggle:not(.open) .group-chevron { transform: rotate(-90deg); }
     #inventoryList .group-count { font-size: 13px; }
-    #inventoryList .group-list { padding: 0 0 6px; gap: 0; }
+    #inventoryList .group-list { padding: 0; gap: 0; }
     #inventoryList .group-list .inventory-row { margin-bottom: 4px; }
     #inventoryList .inventory-card { padding: 8px 10px; border-radius: 12px; }
     #inventoryList .item-title-row { justify-content: flex-start; align-items: center; gap: 10px; }
@@ -1988,7 +1988,7 @@
     html.is-phone #inventoryList .group-heading { font-size: calc(16px * var(--phone-scale, 2.5)); gap: calc(4px * var(--phone-scale, 2.5)); line-height: 1; }
     html.is-phone #inventoryList .group-chevron { font-size: calc(18px * var(--phone-scale, 2.5)); line-height: 1; }
     html.is-phone #inventoryList .group-count { font-size: calc(11px * var(--phone-scale, 2.5)); line-height: 1; }
-    html.is-phone #inventoryList .group-list { padding: 0 0 calc(2px * var(--phone-scale, 2.5)); }
+    html.is-phone #inventoryList .group-list { padding: 0; }
     html.is-phone #inventoryList .item-title { font-size: calc(16px * var(--phone-scale, 2.5)); line-height: 1.15; }
     html.is-phone #inventoryList .item-meta { font-size: calc(12px * var(--phone-scale, 2.5)); margin-top: calc(1px * var(--phone-scale, 2.5)); line-height: 1.15; }
     html.is-phone #inventoryList .inventory-card {
@@ -6578,17 +6578,12 @@
       const displayRows = rollupInventoryRows(group.rows);
       const totalQty = displayRows.reduce((sum, row) => sum + toNumber(row['Qty'] || 0), 0);
 
-      // The item count is only informative while the rows are hidden.
-      const countHtml = isOpen
-        ? ''
-        : `<span class="group-count">${displayRows.length} item${displayRows.length === 1 ? '' : 's'} · ${escapeHtml(formatCount(totalQty))}</span>`;
+      // Trial (2026-07-10): no section headers — one continuous list, still
+      // ordered by group. Header/toggle machinery kept for an easy revert.
+      void isOpen; void totalQty;
       return `
         <div class="inventory-group">
-          <button class="group-toggle${isOpen ? ' open' : ''}" type="button" onclick="toggleInventoryGroup('${group.key}')">
-            <span class="group-heading"><span class="group-chevron">⌄</span>${escapeHtml(group.label)}</span>
-            ${countHtml}
-          </button>
-          ${isOpen ? `<div class="group-list">${displayRows.map(row => renderInventoryRowCard(row)).join('')}</div>` : ''}
+          <div class="group-list">${displayRows.map(row => renderInventoryRowCard(row)).join('')}</div>
         </div>
       `;
     }
