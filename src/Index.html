@@ -2259,6 +2259,25 @@
       width: auto; min-width: 0; border: none;
     }
 
+    /* Shared transient toast — always visible, unlike #mainStatus which scrolls
+       off the top of the page and is hidden entirely on the notes tab. */
+    .app-toast {
+      position: fixed; left: 50%;
+      bottom: calc(var(--nav-height, 80px) + var(--safe-bottom, 0px) + 16px);
+      transform: translateX(-50%) translateY(12px);
+      max-width: min(92vw, 460px);
+      padding: 12px 18px; border-radius: 14px;
+      background: rgba(17,25,44,.96); border: 1px solid rgba(94,118,164,.45);
+      box-shadow: 0 10px 30px rgba(0,0,0,.45);
+      color: var(--text-secondary); font-size: 15px; line-height: 1.4; text-align: center;
+      z-index: 2000; opacity: 0; pointer-events: none;
+      transition: opacity .18s ease, transform .18s ease;
+    }
+    .app-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .app-toast.error   { border-color: rgba(253,164,175,.6); color: #fecdd3; }
+    .app-toast.success { border-color: rgba(134,239,172,.5); color: #bbf7d0; }
+    html.is-phone .app-toast { font-size: var(--phone-font-meta, 22px); }
+
     html.is-phone .notes-toolbar { padding: 8px 12px; }
     html.is-phone .notes-cat-select { font-size: var(--phone-font-meta, 22px); padding: 10px 12px; min-height: 0; }
     html.is-phone #notesSearchInput { min-height: 0; padding: 10px 12px; }
@@ -2937,6 +2956,9 @@
     </div>
   </div>
 
+  <!-- Shared transient toast (visible on any tab / scroll position) -->
+  <div id="appToast" class="app-toast" role="status" aria-live="polite"></div>
+
   <!-- ── Bottom nav ─────────────────────────────────────────────── -->
   <div class="bottom-nav">
     <button id="sellDockBtn" class="sell-batch-btn" type="button" style="display:none;" onclick="openSellBatchSheet()">
@@ -2991,8 +3013,11 @@
     function gasCall(fn, args, onSuccess, onFail) {
       _inFlightWrites++;
       google.script.run
-        .withSuccessHandler(res => { _inFlightWrites--; onSuccess(res); drainPendingForeignReload_(); })
-        .withFailureHandler(err => { _inFlightWrites--; onFail(err); drainPendingForeignReload_(); })
+        // Clamp on decrement: a callback that fires *after* reconcileAfterForeground_
+        // zeroed the counter (e.g. a call the OS didn't actually drop) must not push
+        // it negative and desync the poll-deferral guard.
+        .withSuccessHandler(res => { _inFlightWrites = Math.max(0, _inFlightWrites - 1); onSuccess(res); drainPendingForeignReload_(); })
+        .withFailureHandler(err => { _inFlightWrites = Math.max(0, _inFlightWrites - 1); onFail(err); drainPendingForeignReload_(); })
         [fn](args);
     }
     // When the last in-flight write settles, apply any foreign inventory change that
@@ -3004,6 +3029,31 @@
         pendingForeignReload = false;
         loadInventory(true);
       }
+    }
+    // The iOS/GAS webview suspends JS mid-round-trip; a torn-down google.script.run
+    // may never fire its success/failure handler, latching the in-flight guards
+    // (_inFlightWrites, descActionInFlight, quickEditInFlight, resourcePayInFlight,
+    // the notes counters) true forever — which silently disables the description-sheet
+    // and quick-edit writes and freezes collaborative sync (a stuck _inFlightWrites
+    // makes drainPendingForeignReload_ never fire, so foreign changes pile up unseen).
+    // On return to foreground we assume any call still pending was dropped: clear every
+    // latch and reconcile to server truth with a forced reload. Only invoked when work
+    // was actually in flight at background time, so the common glance-away case stays
+    // lightweight (a single apiGetSyncState via pollSync).
+    function reconcileAfterForeground_() {
+      _inFlightWrites     = 0;
+      _inFlightNoteWrites = 0;
+      descActionInFlight  = false;
+      quickEditInFlight   = false;
+      resourcePayInFlight = {};
+      notesLoading        = false;
+      notesSaving         = false;
+      if (_notesActionInFlight && _notesActionInFlight.clear) _notesActionInFlight.clear();
+      pendingForeignReload     = false;
+      pendingForeignNoteReload = false;
+      _clearSellConfirm();
+      loadInventory(true);
+      if (notesLoaded) loadNotes(true);
     }
     function _armSellBtn(btn) {
       if (!btn) return;
@@ -3539,6 +3589,25 @@
       if (!el) return;
       el.innerHTML = html || '';
     }
+
+    // Shared transient toast — fixed above the bottom nav, so it stays visible on
+    // any tab and at any scroll position. #mainStatus scrolls off the top of the
+    // page (and is invisible on the notes tab), which silently swallowed
+    // revert-on-failure feedback across the sheet flows; route those messages here.
+    let _appToastTimer = null;
+    function showToast(message, type, ms) {
+      const el = document.getElementById('appToast');
+      if (!el) return;
+      el.innerHTML = message || '';
+      el.className = 'app-toast show' + (type ? ' ' + type : '');
+      if (_appToastTimer) clearTimeout(_appToastTimer);
+      _appToastTimer = setTimeout(() => {
+        const t = document.getElementById('appToast');
+        if (t) t.classList.remove('show');
+      }, ms || 4200);
+    }
+    function toastError(msg)   { showToast(escapeHtml(String(msg)), 'error'); }
+    function toastSuccess(msg) { showToast(escapeHtml(String(msg)), 'success'); }
 
     // Notes-tab-local status surface, always visible when the notes tab is active
     // (unlike #mainStatus, which scrolls off the top of the page).
@@ -4335,7 +4404,7 @@
       if (mode === 'edit' && noteId && _notesActionInFlight.has(noteId)) {
         // A pin/archive/edit for this note is still in flight — opening the editor now
         // would let a stale-state Save race the in-flight write. Ask the user to wait.
-        setMainStatus('<span class="error">That note is still saving — try again in a moment.</span>');
+        toastError('That note is still saving — try again in a moment.');
         return;
       }
       initNoteFormCategorySelect();
@@ -4436,7 +4505,7 @@
         _notesActionInFlight.add(editId);  // shared per-note guard with pin/archive
         google.script.run
           .withSuccessHandler(res => {
-            _inFlightNoteWrites--;
+            _inFlightNoteWrites = Math.max(0, _inFlightNoteWrites - 1);
             _notesActionInFlight.delete(editId);
             notesSaving = false;
             if (!res || !res.ok) {
@@ -4447,7 +4516,7 @@
             }
           })
           .withFailureHandler(() => {
-            _inFlightNoteWrites--;
+            _inFlightNoteWrites = Math.max(0, _inFlightNoteWrites - 1);
             _notesActionInFlight.delete(editId);
             notesSaving = false;
             const ri = notesData.findIndex(x => x.noteId === editId);
@@ -4486,7 +4555,7 @@
 
         google.script.run
           .withSuccessHandler(res => {
-            _inFlightNoteWrites--;
+            _inFlightNoteWrites = Math.max(0, _inFlightNoteWrites - 1);
             notesSaving = false;
             const tidx = notesData.findIndex(x => x.noteId === tempId);
             if (res && res.ok && res.note) {
@@ -4504,19 +4573,19 @@
                 const s = document.getElementById('noteFormStatus');
                 if (s) s.innerHTML = `<span class="error">Save failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`;
               } else {
-                setMainStatus(`<span class="error">Note save failed: ${escapeHtml((res && res.error) || 'Unknown error.')}</span>`);
+                toastError(`Note save failed: ${(res && res.error) || 'Unknown error.'}`);
               }
             }
           })
           .withFailureHandler(() => {
-            _inFlightNoteWrites--;
+            _inFlightNoteWrites = Math.max(0, _inFlightNoteWrites - 1);
             notesSaving = false;
             const restored = restoreNoteForm_();
             if (restored) {
               const s = document.getElementById('noteFormStatus');
               if (s) s.innerHTML = '<span class="error">Save failed — please try again.</span>';
             } else {
-              setMainStatus('<span class="error">Note save failed — please try again.</span>');
+              toastError('Note save failed — please try again.');
             }
           })
           .apiCreateNote({ title, category, note, relatedItemId, clientCharacter: myCharacterName || '', _syncClientId: syncClientId });
@@ -4539,17 +4608,17 @@
       google.script.run
         .withSuccessHandler(res => {
           _notesActionInFlight.delete(noteId);
-          _inFlightNoteWrites--;
+          _inFlightNoteWrites = Math.max(0, _inFlightNoteWrites - 1);
           if (!res || !res.ok) {
             revert();
-            setMainStatus(`<span class="error">${label} failed: ${escapeHtml((res && res.error) || 'Unknown error')}</span>`);
+            toastError(`${label} failed: ${(res && res.error) || 'Unknown error'}`);
           }
         })
         .withFailureHandler(() => {
           _notesActionInFlight.delete(noteId);
-          _inFlightNoteWrites--;
+          _inFlightNoteWrites = Math.max(0, _inFlightNoteWrites - 1);
           revert();
-          setMainStatus(`<span class="error">${label} failed — please try again.</span>`);
+          toastError(`${label} failed — please try again.`);
         })
         .apiArchiveNote({ noteId, archived, _syncClientId: syncClientId });
     }
@@ -4576,7 +4645,7 @@
       google.script.run
         .withSuccessHandler(res => {
           _notesActionInFlight.delete(noteId);
-          _inFlightNoteWrites--;
+          _inFlightNoteWrites = Math.max(0, _inFlightNoteWrites - 1);
           if (!res || !res.ok) {
             n.pinned = !newPinned;
             renderNotesList();
@@ -4585,7 +4654,7 @@
         })
         .withFailureHandler(() => {
           _notesActionInFlight.delete(noteId);
-          _inFlightNoteWrites--;
+          _inFlightNoteWrites = Math.max(0, _inFlightNoteWrites - 1);
           n.pinned = !newPinned;
           renderNotesList();
           setNotesStatus('<span class="error">Pin failed — please try again.</span>');
@@ -5595,7 +5664,7 @@
             inventoryRows = previousRows;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
             renderInventory();
-            setMainStatus('<span class="error">Sell failed — try again.</span>');
+            toastError('Sell failed — try again.');
             return;
           }
           if (res.goldItem) primeInventoryCacheAfterAdd(res.goldItem);
@@ -5608,7 +5677,7 @@
           inventoryRows = previousRows;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
-          setMainStatus('<span class="error">Sell failed — try again.</span>');
+          toastError('Sell failed — try again.');
         }
       );
     }
@@ -6016,7 +6085,7 @@
             if (idx !== -1) inventoryRows[idx] = { ...inventoryRows[idx], 'Holder': oldHolder };
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
             renderInventory();
-            setMainStatus(`<span class="error">Give failed — change reverted.</span>`);
+            toastError('Give failed — change reverted.');
           } else {
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           }
@@ -7073,10 +7142,11 @@
             inventoryRows = previousRows;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
             renderInventory();
-            setMainStatus(`<span class="error">Remove failed: ${escapeHtml((res && res.error) || 'Unknown error')}</span>`);
+            toastError(`Remove failed: ${(res && res.error) || 'Unknown error'}`);
           } else {
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
             renderInventory();
+            toastSuccess(`Removed ${qty}\xd7 ${itemName}`);
           }
         },
         err => {
@@ -7084,7 +7154,7 @@
           inventoryRows = previousRows;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
-          setMainStatus(`<span class="error">Remove failed: ${escapeHtml(err.message || String(err))}</span>`);
+          toastError(`Remove failed: ${err.message || String(err)}`);
         }
       );
     }
@@ -7281,7 +7351,7 @@
       renderInventory();
 
       descActionInFlight = true;
-      setMainStatus(`<span class="success">Giving ${qty}\xd7 ${escapeHtml(itemName)} to ${escapeHtml(targetLabel)}…</span>`);
+      toastSuccess(`Giving ${qty}\xd7 ${itemName} to ${targetLabel}…`);
 
       gasCall('apiGiveInventoryBatch', {
           items,
@@ -7296,12 +7366,12 @@
             inventoryRows = previousRows;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
             renderInventory();
-            setMainStatus('<span class="error">Give failed — change reverted.</span>');
+            toastError('Give failed — change reverted.');
           } else {
             inventoryRows = inventoryRows.filter(r => r['Inventory ID'] !== optGiveId);
             bustInventoryCache();
             loadInventory(true);
-            setMainStatus(`<span class="success">${escapeHtml(res.message || `Gave to ${targetLabel}.`)}</span>`);
+            toastSuccess(res.message || `Gave to ${targetLabel}.`);
           }
         },
         err => {
@@ -7309,7 +7379,7 @@
           inventoryRows = previousRows;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
-          setMainStatus(`<span class="error">Give failed: ${escapeHtml(err.message || String(err))}</span>`);
+          toastError(`Give failed: ${err.message || String(err)}`);
         }
       );
     }
@@ -7386,7 +7456,7 @@
             inventoryRows = previousRows;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
             renderInventory();
-            setMainStatus(`<span class="error">${escapeHtml((res && res.error) || 'Add failed.')}</span>`);
+            toastError((res && res.error) || 'Add failed.');
             return;
           }
           if (res.ledgerEntry) {
@@ -7395,14 +7465,14 @@
           const cachePrimed = primeInventoryCacheAfterAdd(res.item);
           if (!cachePrimed) bustInventoryCache();
           renderInventory();
-          setMainStatus(`<span class="success">${escapeHtml(res.message || `${payload.item} added.`)}</span>`);
+          toastSuccess(res.message || `${payload.item} added.`);
         },
         err => {
           descActionInFlight = false;
           inventoryRows = previousRows;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
-          setMainStatus(`<span class="error">Add failed: ${escapeHtml(err.message || err)}</span>`);
+          toastError(`Add failed: ${err.message || err}`);
         }
       );
     }
@@ -7436,6 +7506,9 @@
       }
       if (!items.length) return;
 
+      const soldQty  = items.reduce((s, i) => s + i.qtyToSell, 0);
+      const soldName = item['Item'] || 'item';
+
       closeDescActionSheet();
       closeDescriptionSheet();
       closeInventoryPanels(false);
@@ -7463,20 +7536,23 @@
             inventoryRows = previousRows;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
             renderInventory();
-            setMainStatus('<span class="error">Sell failed — try again.</span>');
+            toastError('Sell failed — try again.');
             return;
           }
           if (res.goldItem) primeInventoryCacheAfterAdd(res.goldItem);
           if (res.ledgerEntry) inventoryResourceLedger = [res.ledgerEntry, ...inventoryResourceLedger].slice(0, 60);
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
+          toastSuccess(goldAmount > 0
+            ? `Sold ${soldQty}\xd7 ${soldName} for ${goldAmount} gp`
+            : `Sold ${soldQty}\xd7 ${soldName}`);
         },
         () => {
           descActionInFlight = false;
           inventoryRows = previousRows;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
-          setMainStatus('<span class="error">Sell failed — try again.</span>');
+          toastError('Sell failed — try again.');
         }
       );
     }
@@ -7540,10 +7616,11 @@
             inventoryRows = previousRows;
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
             renderInventory();
-            setMainStatus(`<span class="error">Remove failed: ${escapeHtml((res && res.error) || 'Unknown error')}</span>`);
+            toastError(`Remove failed: ${(res && res.error) || 'Unknown error'}`);
           } else {
             cacheInventoryRows(inventoryRows, inventoryResourceLedger);
             renderInventory();
+            toastSuccess(`Removed ${qty}\xd7 ${itemName}`);
           }
         },
         err => {
@@ -7551,7 +7628,7 @@
           inventoryRows = previousRows;
           cacheInventoryRows(inventoryRows, inventoryResourceLedger);
           renderInventory();
-          setMainStatus(`<span class="error">Remove failed: ${escapeHtml(err.message || String(err))}</span>`);
+          toastError(`Remove failed: ${err.message || String(err)}`);
         }
       );
     }
@@ -8930,12 +9007,24 @@
     });
 
     /* ── Visibility: pause poll when app is backgrounded, resume on return ── */
+    let _hadInFlightOnHide = false;
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
+        // Remember whether any write/guard was live, so we only pay for the heavier
+        // forced reconcile on foreground if the OS may have dropped a callback.
+        _hadInFlightOnHide = _inFlightWrites > 0 || _inFlightNoteWrites > 0 ||
+          descActionInFlight || quickEditInFlight || notesSaving ||
+          Object.keys(resourcePayInFlight).some(k => resourcePayInFlight[k]);
         stopSyncPoll();
-      } else if (syncState.inventory.ts !== '0' || syncPollTimer) {
-        // App came to foreground — fire an immediate check then restart the interval
-        pollSync();
+      } else if (identityResolved) {
+        // Foreground. Gate on identityResolved (not the old ts!=='0' proxy) so a return
+        // within the first 20 s still re-arms the poll instead of leaving sync dead.
+        if (_hadInFlightOnHide) {
+          _hadInFlightOnHide = false;
+          reconcileAfterForeground_();   // clear latched guards + force a reload
+        } else {
+          pollSync();                    // lightweight: only reloads if data changed
+        }
         stopSyncPoll();
         startSyncPoll();
       }
