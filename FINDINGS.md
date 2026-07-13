@@ -29,11 +29,44 @@
 > recurring._
 
 ## Audit Cursor
-Next section: 1. Code.js lines 1–700 (config, helpers, validation, doGet).
+Next section: 2. Code.js lines 701–1400 (auth, character, inventory read).
 (Section numbering: 1–6 = Code.js in ~700-line slices, 7–12 = Index.html in ~1500-line slices.
 The line-range text above is authoritative if a prompt's numbering ever disagrees.)
 
 ## Sessions
+
+### 2026-07-13 (run 65) — Sections audited: 1 (Code.js 1–700: CONFIG + schema constants, spreadsheet menu/health-check, the web-app entry `doGet`/`include_`, tab/setup + clean-library-import admin utilities, the read-only equipment APIs `apiSearchEquipment`/`apiGetEquipmentIndex`/`apiGetEquipmentItem`, and the head of the shared `apiSellInventoryBatch`/`apiGiveInventoryBatch` FIFO write path — read out to the validation/error/identity helpers at 1348–1727 that this "config, helpers, validation" section is really about, and to their client consumers)
+
+> **Stories traced** (happy → failure-at-step → navigate-away → friction, execution-trace + state-machine on every write path): **App load (cross-cutting, every story)** (`doGet` 238 → `createTemplateFromFile('Index').evaluate()`, catch → static fallback; the run-53 `setXFrameOptionsMode` RISK, FINDINGS:790, re-verified FIXED at 250), **Add library item — search** (client `loadEquipmentIndex` Index:8170 → `apiGetEquipmentIndex` 625 → `equipmentRowToClientIndexItem_` 1316 → `sanitizeEquipmentIndexForClient_` 1750; the entire search box is client-side over `equipmentIndex`, and `apiSearchEquipment` 588 is confirmed **not called by any client path** — dead server endpoint, not reported per the no-dead-code rule), **View item details** (`openInventoryDescription` Index:6911 → `apiGetEquipmentItem` 648 → `getEquipmentItemById_` 1818 → `validateId_` 1671; verified the client guards `if (libraryItemId)` at 6952 so the empty-id `validateId_` throw is unreachable from this path — custom/legacy items with no Library Item ID skip the fetch cleanly), **Sell item / Remove item** (`apiSellInventoryBatch` 664, gold-credited-before-row-delete ordering + `_syncClientId` bump — already logged/verified in runs 62/63, not re-counted), and the identity/access helpers (`requireAllowedUser_` 1596 `url-authenticated-user` placeholder, `requireTreasurer_` 1536 hint fallback, `validateCharacterChoice_` 1478) that gate every story. Per protocol I re-verified prior in-range fixes landed and did NOT re-report them: the run-53 `doGet` X-Frame RISK (fixed 2026-07-02); the run-54 auth-chain clean trace (FINDINGS:730); the run-58 quick-adjust domain-error fix (`Cannot remove more than the N currently held.` present at 3748) — **but that fix exposed a new defect in this section's error mapper, below.** **One new BUG:**
+
+#### BUG · Code.js:1658 · `publicValidationError_` prefix-whitelist has drifted out of sync with the domain errors the write paths actually throw — a whole class of helpful, user-actionable validation messages is silently replaced with the generic "Request failed." (and this specifically defeats the run-58 quick-adjust fix)
+
+**Story: Quick-adjust currency/delerium/health-potions — failure-at-step (remove more than held); also Split gold, Combine, Pay-to-DM, Sell-crystals failure steps.** Every `api*` write path funnels its thrown errors through `publicApiError_` (1646) → `publicValidationError_` (1658), or calls `publicValidationError_(err)` directly. That mapper is a **security allowlist**: only messages matching a hardcoded prefix regex are passed through to the client; everything else is flattened to `'Request failed.'` (1668) so internal/stack detail never leaks. The regex is:
+
+```
+1661  /^(Access denied|Admin access denied|Treasurer access required|Invalid|Quantity|
+      Value|Selected library item|Inventory item not found|Item not found|Not a quick-edit|
+      Unsupported|Size)/  ||  /too long\.$/
+```
+
+A full-file inventory of `throw new Error(...)` messages shows the allowlist has **drifted**: it does not cover the domain-specific messages several write paths raise deliberately to guide the user. Each of the following is thrown, caught, run through `publicValidationError_`, and the client surfaces `res.error` verbatim (confirmed: nearly every failure handler renders `(res && res.error) || '…fallback…'`) — so the user sees **"Request failed."** instead of the actionable reason:
+
+| Thrown message | Code.js | Story / API | Client shows |
+|---|---|---|---|
+| `Cannot remove more than the ${oldQty} currently held.` | 3748 | **Quick-adjust remove** (`apiAdjustInventory`, via `confirmQuickEdit` Index:7777) | "Request failed." |
+| `Amount is too small to split among all members.` | 3166 | **Split gold** (`apiSplitGold`, Index:6100/6182) | "Request failed." |
+| `DM is not a party member and cannot receive gold.` | 3260 | **Pay gold → character** (`apiSendGoldToMember`, Index:6699) | "Request failed." |
+| `Only matching items can be combined.` | 3578 | **Combine duplicate** (`apiCombineInventoryItems`, Index:3680) | "Request failed." |
+| `Source and target must be different items.` | 3558 | **Combine duplicate** | "Request failed." |
+| `No delerium selected.` | 2954 / 3063 | **Sell / Receive crystals** (`apiSellDelerium`/`apiReceiveResource`, Index:5122/5234) | "Request failed." |
+| `Could not identify this browser session.` | 1435 | Identity save (`saveUserProfile_`) | "Request failed." |
+| `No characters found.` | 1483 / 1488 / 3145 / 3162 | Identity / roster reads | "Request failed." |
+
+**The run-58 fix is the clearest casualty and actually regressed the client-facing message.** Run 58 (FINDINGS:171–189) replaced the generic `validateQuantity_` throw with an explicit domain check at 3748 so a "remove more than you hold" quick-adjust would tell the user *why*. But `Cannot remove …` starts with "Cannot", which is **not** an allowlisted prefix, so it maps to "Request failed." Ironically the **pre-**run-58 message was `Quantity must be between 0 and 999999.` — and `Quantity` **is** allowlisted, so that (confusing but non-generic) message did reach the client. Net effect: run 58 made the server-side message more helpful and the client-visible message *less* helpful (from a specific-if-cryptic bound to a bare "Request failed."). The client applies no pre-guard — `confirmQuickEdit` (Index:7746) only checks `amount >= 0` and `Number.isFinite`, never `amount <= held`, so removing more currency / health potions / delerium than on hand reliably reaches 3748 and shows "Request failed." with zero indication that the amount was simply too large. Same silent-generic outcome on a too-small even split, paying the DM, combining mismatched/identical rows, and an empty delerium selection.
+
+Trace (quick-adjust): (1) party holds 5 gp; user taps the Gold card → quick-edit sheet → **Remove** → enters 20 → **Confirm**. (2) `confirmQuickEdit` passes the client checks (20 ≥ 0), fires `apiAdjustInventory({delta:-20})`. (3) server: `oldQty(5)+delta(-20) = -15 < 0` → `throw 'Cannot remove more than the 5 currently held.'` → catch → `publicValidationError_` → **"Request failed."** (4) status line (Index:7777) shows `Request failed.` The write did not commit (throw precedes `writeInventoryRow_`), the sheet is untouched, the flag clears — state is clean and retryable — but the user has no idea their amount was the problem and may assume the app/server is broken.
+
+Fix: extend the allowlist to cover the intentional domain prefixes (`Cannot`, `Amount`, `DM is`, `Only`, `Source and target`, `No delerium`, `No characters`, `Could not identify`) — or, more robustly against future drift, invert the model: have validators/domain-guards throw a tagged error (e.g. `err.userFacing = true` or an `AppValidationError` subclass) and let `publicValidationError_` pass through exactly those, so a newly-added guard is surfaced by construction instead of silently swallowed until someone notices. Whichever, add the run-58 message immediately so its fix actually reaches the user. (Note: `Missing required sheet:` and `Another import batch…` are also unmatched, but those are infrastructure/admin and "Request failed." is acceptable for them — the drift that matters is the player-facing validation set above.)
 
 ### 2026-07-12 (run 64) — Sections audited: 12 (Index.html 7501–end: swipe-delete tail, quick-edit currency/delerium panel, full inventory editor save, equipment index load/search/select, custom-item start/customize, scroll handling, the central Add write path + combine suggestion, and form reset — plus the collaborative-sync/tab-switch/iOS-foreground cross-cutting stories where they cross these write paths)
 
