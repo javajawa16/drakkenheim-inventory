@@ -68,6 +68,42 @@ Trace (quick-adjust): (1) party holds 5 gp; user taps the Gold card → quick-ed
 
 Fix: extend the allowlist to cover the intentional domain prefixes (`Cannot`, `Amount`, `DM is`, `Only`, `Source and target`, `No delerium`, `No characters`, `Could not identify`) — or, more robustly against future drift, invert the model: have validators/domain-guards throw a tagged error (e.g. `err.userFacing = true` or an `AppValidationError` subclass) and let `publicValidationError_` pass through exactly those, so a newly-added guard is surfaced by construction instead of silently swallowed until someone notices. Whichever, add the run-58 message immediately so its fix actually reaches the user. (Note: `Missing required sheet:` and `Another import batch…` are also unmatched, but those are infrastructure/admin and "Request failed." is acceptable for them — the drift that matters is the player-facing validation set above.)
 
+---
+
+#### 🔁 Reconciliation pass (2026-07-13, run 65) — full sweep of every non-✅ finding against current code
+
+Every prior `#### BUG/RISK/IDEA` finding that had not been marked `✅ FIXED` was re-verified against the **current** `src/Code.js` / `src/Index.html` (finding line numbers are stale, so each was relocated by symbol). Result: **32 findings were already fixed in earlier commits but never marked**, **2 are partially addressed**, **17 remain genuinely open**. Fixed/partial headers above have been tagged inline (`✅ FIXED (reconciled 2026-07-13)` / `⚠️ PARTIAL (reconciled 2026-07-13)`) so future runs reference — not re-report — them. `#### Note` entries are positive clean-trace observations and were left as-is.
+
+**✅ Now-marked FIXED (verified in current code, 32):** `saveNoteForm` ReferenceError (edit/create paths reference no removed fields) · auto-combine discarding Notes/Faction (`mergeIntoExistingRow_` now merges both) · Undo-Last-Pay stale ledger entry (`undoGoldPay` repaints ledger) · `apiSplitGold` atomicity (single `setValues`) · member-send no-undo (undo handle stored for all users) · delerium "Gold received" dropped (guarded, errors instead) · second-note-while-first-in-flight · member-send gold-total flicker (offsetting credit row) · dashboard-inline-Pay optimism (`payResource` optimistic row) · edited-note `updatedAt` mis-sort (now space format) · create-note-navigated-away content loss (`pendingFailedNote`/`rehydratePendingNote_`) · pin/edit disjoint guards (edit adds to `_notesActionInFlight`) · gold-sheet amount/note persistence (cleared on open) · optimistic sell/remove cache leak (re-cache only in handlers) · foreign-inventory-change-mid-reload (`drainPendingForeignReload_`) · double-tap "delete all" spurious error (btn disabled sync) · first-open picker stuck (`loadCharacters` inline error+retry) · async-desc holder wipe (`if(!includeDescription)` guard) · failed-add overwrites selection (guarded on `selectedEquipment===null`) · `_opt_` row cached-after-kill (no cache at insert) · `undoResourcePay` double-decrement (gasCall owns counter) · desc-fetch caches null (only-cache-on-ok) · `confirmPayWithReason` TDZ ×2 (`isPartyScope` declared before use) · batch-sell non-optimistic (now optimistic w/ revert) · failed-note-create cross-tab pop (stashes instead) · notes failures to `#mainStatus` (now `#notesStatus`) · dashboard scope-mismatch (gold computed from scoped rows) · `loadCharacters` brick (inline retry) · `cacheInventoryRows` order + `_pending` ledger (counter now precedes cache) · sell-batch idle spinner (button class changed) · swipe-remove-one drops ADJUST ledger (prepends `res.ledgerEntry`).
+
+**⚠️ PARTIAL (2):**
+- **IDEA Index.html — note failure-feedback channel** (was `#4382`/`#500`): the jarring `alert()` path is gone, but archive-failure still uses `setMainStatus` while pin/save-edit use `setNotesStatus` — channels not yet uniform. (Overlaps the still-**OPEN** archive/unarchive `#mainStatus` BUG below.)
+- **RISK Code.js — delerium quick-adjust size merge** (was `#3636`/`#1447`): a client-side `onQuickSizeChange` reclassify-confirm guard was added, but `apiAdjustInventory` server-side still renames the row keeping `oldQty+delta`, so two sizes can still be merged onto one row if the client guard is bypassed.
+
+**❗ Still OPEN (17)** — the actionable backlog:
+
+| Sev | Location (current) | Item |
+|---|---|---|
+| BUG | Code.js `publicValidationError_` | allowlist drift → helpful validation msgs shown as "Request failed." *(run 65, above)* |
+| BUG | Index.html `selectInventoryItem` | `editQty`/`sheetEditQty` `readOnly` latches after editing a rolled-up item — qty field dead for rest of session |
+| BUG | Index.html `receivedGold` | `!res.ok` branch drops phantom gold row but never `renderInventory()` — dashboard shows gold never received |
+| BUG | Index.html `setNoteArchived_` | Archive/Unarchive/form-delete failures report only to off-screen `#mainStatus` (should be `#notesStatus`) |
+| BUG | Index.html `loadFallbackCharacterIdentity` | failure handler wipes an applied cached identity + force-shows picker on any transient `apiGetMyCharacter` error |
+| RISK | Index.html `descActionInFlight` | never reset outside its callbacks — a dropped call latches ALL description-sheet Add/Sell/Give/Remove |
+| RISK | Index.html `loadInventory`/`drainPendingForeignReload_` | open Gold/Delerium sheet shows stale ledger+total after a foreign write (only inventory list repaints) |
+| RISK | Index.html `loadNotes` poll | foreign notes change missed when the 20 s poll fires during an in-flight read (`syncState.notes.ts` advanced, reload no-ops) |
+| RISK | Index.html `visibilitychange` | sync poll stays dead if backgrounded within first 20 s after identity resolves (ts never leaves `'0'`) |
+| RISK | Index.html `.mobile-sheet` CSS | desktop `display:none !important` + per-ID allow-list silently hides any *new* sheet |
+| RISK | Code.js `apiGetMyCharacter` | trusts client character hint without the active-character check |
+| IDEA | Index.html descAction sheet | Sell/Remove close both sheets before the round-trip, no in-sheet feedback (`#descActionStatusRow` unused) |
+| IDEA | Index.html descAction sheet | no tap-outside-to-dismiss (inconsistent with dice overlay) |
+| IDEA | Index.html `getQuickEditType` | health potions never routed to quick-edit despite full server support |
+| IDEA | Code.js `continueCleanEquipmentLibrary` | admin import shares the document lock with player writes (~4.25 min lockout) |
+| ⚠️ | Index.html note feedback | *(PARTIAL, above)* channel not yet uniform |
+| ⚠️ | Code.js delerium size merge | *(PARTIAL, above)* server still merges sizes |
+
+Method note: reconciliation fanned out across parallel read-only verification agents, one batch per finding cluster; each relocated the symbol in current code and reported FIXED/OPEN/PARTIAL with evidence. Spot-checks (`confirmPayWithReason` TDZ, `editQty` readOnly, `descActionInFlight`) were also confirmed directly.
+
 ### 2026-07-12 (run 64) — Sections audited: 12 (Index.html 7501–end: swipe-delete tail, quick-edit currency/delerium panel, full inventory editor save, equipment index load/search/select, custom-item start/customize, scroll handling, the central Add write path + combine suggestion, and form reset — plus the collaborative-sync/tab-switch/iOS-foreground cross-cutting stories where they cross these write paths)
 
 > **Stories traced** (happy → failure-at-step → navigate-away → friction, execution-trace + state-machine on every write path): **Add library item** (`searchEquipment` 8219 → `selectEquipmentResult` 8314 → `loadSelectedDescription` 8616 → `fillAddFormFromEquipment` 8334 → `addInventoryItem` 8662 → optimistic `_opt_` row 8712 → `apiAddInventory`/`apiQuickAddInventory`/`apiAddCustomInventory` 8812–8828 → `primeInventoryCacheAfterAdd` 3199 → combine suggestion `findDuplicateInventoryCandidate` 3634/`showCombineChoice` 3643), **Add custom item** (`startCustomFromSearch` 8498 / `startCustomItem` 8503 / `customizeSelectedItem` 8532 → same add path), **Combine duplicate** (`showCombineChoice` → `confirmCombineInventoryItem` 3667 via `apiCombineInventoryItems`), **Quick-adjust currency/delerium** (`openInventoryPrimaryAction` 6848 → `getQuickEditType` 7566 → `openQuickEditPanel` 7593 → `apiGetCurrencyQuickEdit` 7657 → `onQuickSizeChange` 7680 reclassify-confirm → `confirmQuickEdit` 7746 via `apiAdjustInventory`/`apiSetItemQuantity`), **Edit inventory item** (`selectInventoryItem` 6864 → `syncInventoryEditorFieldsFromRow` 7829 → `getInventoryEditorValues` 7872 → `saveInventoryEdits` 7915 → `updateInventoryRowLocally` 7951), **Delete inventory item** (`handleInventoryDeleteActionById` 7989 two-step arm → `getDeleteTargetRowByRepresentativeId` 7978 → `deleteSelectedInventory` 8024, decrement vs full-delete + multi-qty confirm gate 8039), and the cross-cutting **Collaborative sync interference** / **Tab-switch in-flight** / **iOS background-foreground** stories where they cross these writes via `gasCall`/`_inFlightWrites`/`drainPendingForeignReload_` (2991–3007) and `cacheInventoryRows` 3188. Per protocol I re-verified prior in-range fixes landed and did NOT re-report them: the run-52 **holder-wipe BUG** (FINDINGS:830) is fixed — `fillAddFormFromEquipment` now blanks `#holder` only on the initial fill (`if (!includeDescription)` 8371), so the async `loadSelectedDescription(true)` refresh no longer clobbers a mid-round-trip holder pick; the run-52 **failed-add clobber RISK** (FINDINGS:845) is fixed — both `onAddSuccess`'s `!ok` branch (8748) and `onAddFail` (8790) now guard the snapshot restore on `selectedEquipment === null`; the run-52 **`_opt_`-row-cached RISK** (FINDINGS:857) is fixed — `addInventoryItem` no longer caches at optimistic-insert time (comment + no `cacheInventoryRows` call at 8729–8731), the success/fail handlers re-cache after `gasCall` has bumped `_inFlightWrites`; the run-58 **Cancel-mid-flight double-apply BUG** (FINDINGS:150) is fixed — `closeQuickEditPanel` (7719) deliberately does not reset `quickEditInFlight` (documented 7721–7723); `cacheInventoryRows(inventoryRows)` single-arg calls (7939/8210) are safe — the omitted 2nd arg falls back to the global `inventoryResourceLedger` (3193). Confirmed **already-logged, not re-counted**: the `quickEditInFlight`/`descActionInFlight` dropped-callback latch (FINDINGS:3481 + run-63 RISK:42); health potions never routed to quick-edit (run-51 IDEA:1407 — `getQuickEditType` 7566 still returns `''` for potions); the run-51 delerium-size-merge BUG (Code.js, FINDINGS:1391). **One new BUG:**
@@ -229,7 +265,7 @@ Trace: cold load → `applyIdentity` → `startSyncPoll` sets the timer (ts stil
 > - **RISK `Code.js:3016,3024`** — FIXED commit below: item deleted before gold
 >   append; failure mode is now "lost gold" not "phantom inventory + gold".
 
-#### BUG · Index.html:4299,4334 · `saveNoteForm` crashes with ReferenceError on every note save after form simplification
+#### BUG · Index.html:4299,4334 · `saveNoteForm` crashes with ReferenceError on every note save after form simplification  ✅ FIXED (reconciled 2026-07-13)
 
 **Story: Save any note (create or edit).** The form simplification (commit `e4540de`)
 removed the `const tags = ...` and `const pinned = ...` variable declarations from
@@ -300,7 +336,7 @@ on read, though that is a larger refactor.
 > - **IDEA `Index.html:4259`** — FIXED: `notesSaving` released once the optimistic write commits, so a second note saves immediately.
 > - **IDEA `Index.html:4382`** — FIXED: archive-note failures routed through `setMainStatus` (uniform, non-blocking) instead of `alert()`.
 
-#### BUG · Code.js:1890 · Auto-combine on add silently discards the user-entered Notes and Faction Relevance
+#### BUG · Code.js:1890 · Auto-combine on add silently discards the user-entered Notes and Faction Relevance  ✅ FIXED (reconciled 2026-07-13)
 _Source: audit/findings-section-4._
 **Stories: Add library item / Add custom item (happy path, server auto-merge
 step).** When `apiAddInventory` (2387) / `apiAddCustomInventory` (2497) find an
@@ -320,7 +356,7 @@ merge Notes/Faction the same way `apiCombineInventoryItems` does, or skip the
 auto-merge when the incoming row carries a non-empty Notes/Faction that differs
 from the existing row.
 
-#### BUG · Index.html:5160 · "Undo Last Pay" on the Gold tab leaves the reversed entry visible in the ledger
+#### BUG · Index.html:5160 · "Undo Last Pay" on the Gold tab leaves the reversed entry visible in the ledger  ✅ FIXED (reconciled 2026-07-13)
 _Source: audit/findings-section-4-run56._
 Story "Undo last pay", final step. On the Gold tab the treasurer taps
 `↩ Undo Last Pay` → `undoGoldPay()` (5160) calls `undoResourcePay('gold')` then
@@ -338,7 +374,7 @@ handlers for parity). _(Branch `trusting-galileo` independently confirmed the
 data layer is correct: the ledger IS reversed on both server and client — see its
 Note at Code.js:3445 — which corroborates that this is render-only.)_
 
-#### RISK · Code.js:3104 · apiSplitGold commits many rows with no atomicity or rollback
+#### RISK · Code.js:3104 · apiSplitGold commits many rows with no atomicity or rollback  ✅ FIXED (reconciled 2026-07-13)
 _Source: claude/trusting-galileo-yp7n4x._ ⚠️ **Branches disagree on this code:**
 `audit/findings-section-4` examined the same endpoint and recorded a Note calling
 the gold receive/split/pay path "clean" (correct lock discipline + optimistic
@@ -360,7 +396,7 @@ and the delerium branch of `apiReceiveResource` (2879, N rows). Suggest building
 the full 2D values array and writing it in a single batched append so a failure is
 all-or-nothing, and surfacing `appendResourceLedger_` failures to the caller.
 
-#### RISK · Code.js:3242 · Member-send by a non-treasurer has no client Undo path (and no server treasurer gate)
+#### RISK · Code.js:3242 · Member-send by a non-treasurer has no client Undo path (and no server treasurer gate)  ✅ FIXED (reconciled 2026-07-13)
 _Source: audit/findings-section-4._
 **Stories: Pay gold (route to character) + Undo last pay.** `apiSendGoldToMember`
 (3242) gates only on `requireAllowedUser_()` — any party member can move gold from
@@ -374,7 +410,7 @@ path. The only way back is a manual sheet edit. Either gate `apiSendGoldToMember
 to treasurer (if members shouldn't move pool gold) or render/store the undo handle
 for all users, not just the treasurer.
 
-#### RISK · Index.html:4862 · "Gold received" field silently dropped when tapping "Received" on the delerium sheet
+#### RISK · Index.html:4862 · "Gold received" field silently dropped when tapping "Received" on the delerium sheet  ✅ FIXED (reconciled 2026-07-13)
 _Source: audit/findings-section-4-run56._
 Stories "Receive crystals" / "Sell crystals". For a treasurer
 `renderDeleriumSheetActions()` renders a shared `deleriumSheetGold` ("Gold
@@ -388,7 +424,7 @@ warning, and the field isn't cleared. Only `sellDelerium()` consumes the field.
 Fix: hide/disable the gold input unless the pending action is a sell, or surface a
 warning when Received is tapped with a non-empty gold field.
 
-#### IDEA · Index.html:4259 · Second note cannot be saved while the first create is still in flight
+#### IDEA · Index.html:4259 · Second note cannot be saved while the first create is still in flight  ✅ FIXED (reconciled 2026-07-13)
 _Source: audit/findings-section-4._
 **Story: Create note (friction).** `notesSaving` is a module-global set true at
 the top of `saveNoteForm` and reset to `false` **only** inside the create/edit
@@ -401,7 +437,7 @@ scope the guard to the in-flight operation (or give the create path its own
 optimistic-and-release model like pin/archive), and/or surface feedback when a
 save is suppressed.
 
-#### IDEA · Index.html:5829 · Member-send Pay flickers the live gold total down by the sent amount
+#### IDEA · Index.html:5829 · Member-send Pay flickers the live gold total down by the sent amount  ✅ FIXED (reconciled 2026-07-13)
 _Source: claude/trusting-galileo-yp7n4x._
 Pay gold story (route → character). A member-send moves gold from the pool to a
 party member, so total party gold is unchanged. But `confirmPayWithReason`
@@ -414,7 +450,7 @@ snaps back up when the server confirms, which reads as money briefly vanishing.
 Suggest also inserting an optimistic credit row for the member-send branch so the
 net optimistic delta is zero.
 
-#### IDEA · Index.html:6414 · Dashboard inline Pay has no optimistic balance update (inconsistent with Gold tab)
+#### IDEA · Index.html:6414 · Dashboard inline Pay has no optimistic balance update (inconsistent with Gold tab)  ✅ FIXED (reconciled 2026-07-13)
 _Source: audit/findings-section-4-run56._
 Story "Pay gold". The Gold-tab pay (`confirmPayWithReason`, 5829) and Got-Paid
 (`receivedGold`, 5165) both insert an optimistic inventory row + pending ledger
@@ -426,7 +462,7 @@ reads as "did my tap register?" friction and is inconsistent with the adjacent
 Gold/Delerium sheets. Suggest mirroring the optimistic pattern (insert a
 negative-qty row keyed by a temp id, remove on resolve).
 
-#### BUG · Index.html:4279 · Edited note's optimistic `updatedAt` (ISO) mis-sorts vs server (space) format
+#### BUG · Index.html:4279 · Edited note's optimistic `updatedAt` (ISO) mis-sorts vs server (space) format  ✅ FIXED (reconciled 2026-07-13)
 _Source: trusting-galileo-mik3fq (independently re-found by n73txz at 4274)._
 Edit-note story, "Save → optimistic reorder" step. The optimistic edit sets
 `updatedAt: now` where `now = new Date().toISOString()` → `2026-06-23T14:32:01.123Z`
@@ -442,7 +478,7 @@ the optimistic `updatedAt` in the same `yyyy-MM-dd HH:mm:ss` space format the
 server uses (or have `apiUpdateNote` echo the new `Updated At` and swap it in on
 success).
 
-#### BUG · Index.html:4317 · Create-note failure while navigated away from Notes tab silently drops the note content
+#### BUG · Index.html:4317 · Create-note failure while navigated away from Notes tab silently drops the note content  ✅ FIXED (reconciled 2026-07-13)
 _Source: trusting-galileo-mik3fq._ ⚠️ **This is a tradeoff introduced by the
 earlier "failed note-create pops the form over an unrelated tab" fix (run 50).**
 On a failed `apiCreateNote`, `restoreNoteForm_()` removes the optimistic temp row,
@@ -457,7 +493,7 @@ on the Notes tab). Fix: when `commandMode !== 'notes'`, stash `savedContent` in 
 module var (e.g. `pendingFailedNote`) and re-hydrate the form next time the Notes
 tab opens, or surface a "tap to recover" action in the toast.
 
-#### RISK · Index.html:4276 · Pin and Edit on the same note use disjoint in-flight guards → conflicting `apiUpdateNote` writes
+#### RISK · Index.html:4276 · Pin and Edit on the same note use disjoint in-flight guards → conflicting `apiUpdateNote` writes  ✅ FIXED (reconciled 2026-07-13)
 _Source: trusting-galileo-mik3fq._ Pin/Archive gate on the `_notesActionInFlight`
 Set (per-noteId); Create/Edit gate on the `notesSaving` boolean +
 `_inFlightNoteWrites`. With no shared per-note guard, a user can tap **Pin**
@@ -470,7 +506,7 @@ frequency (same-note pin+edit within one round-trip) but a genuine lost-update.
 Fix: add the noteId to `_notesActionInFlight` for edit saves too, or block opening
 the edit form while `_notesActionInFlight.has(noteId)`.
 
-#### RISK · Index.html:4594 · Gold sheet amount/note persist across close→reopen
+#### RISK · Index.html:4594 · Gold sheet amount/note persist across close→reopen  ✅ FIXED (reconciled 2026-07-13)
 _Source: trusting-galileo-pvfqw0._ `goldSheetAmount` (HTML 2681) and
 `goldSheetNote` are **static** inputs outside `goldSheetBody`, so
 `renderGoldSheetBody()` never rebuilds/clears them. `openGoldSheet` (4594) clears
@@ -483,7 +519,7 @@ pre-filled, and a hurried tap on **Got Paid / Pay / Split Evenly** (all read
 Receive gold, Pay gold, Split gold. Fix: clear both inputs (and reset
 `amountInput.readOnly`) in `openGoldSheet`, or in `closeGoldSheet`.
 
-#### RISK · Index.html:7214 · Optimistic sell/remove persists unconfirmed state to cache
+#### RISK · Index.html:7214 · Optimistic sell/remove persists unconfirmed state to cache  ✅ FIXED (reconciled 2026-07-13)
 _Source: trusting-galileo-pvfqw0._ `_confirmDescActionSell_` (7214) and
 `_confirmDescActionRemove_` (7283) call `cacheInventoryRows(...)` immediately after
 the optimistic mutation but **before** `gasCall` runs — so `_inFlightWrites` is
@@ -497,7 +533,7 @@ is low, but it is inconsistent with the add path. Fix: drop the pre-call cache
 writes at 7214/7283 (the onSuccess/onFail handlers already re-cache once
 `_inFlightWrites` has cycled), or move them after `gasCall`.
 
-#### IDEA · Index.html:4382 · Inconsistent failure-feedback channel across note actions
+#### IDEA · Index.html:4382 · Inconsistent failure-feedback channel across note actions  ⚠️ PARTIAL (reconciled 2026-07-13)
 _Source: trusting-galileo-mik3fq._ `archiveNote` reports failure via blocking
 `alert()`, while `saveNoteForm`/`toggleNotePin`/`deleteNoteFromForm` use the
 non-blocking `setMainStatus` toast. Same family of optimistic note writes, three
@@ -582,7 +618,7 @@ execution-trace + state-machine on every write path):
   bails on `_inFlightWrites>0`, and `pollSync` defers a foreign reload via
   `pendingForeignReload`. One real gap found — see BUG below.
 
-#### BUG · Index.html:3643 · Foreign inventory change silently dropped when a local write starts mid-reload
+#### BUG · Index.html:3643 · Foreign inventory change silently dropped when a local write starts mid-reload  ✅ FIXED (reconciled 2026-07-13)
 Collaborative-sync-interference story. `pollSync` only sets
 `pendingForeignReload` when it detects a foreign write **while** `_inFlightWrites>0`
 (line 3873). In the race where the poll fires with `_inFlightWrites===0`, it takes
@@ -604,7 +640,7 @@ pattern applies to `loadNotes`/`pendingForeignNoteReload`.
 
 ✅ RESOLUTION — `loadInventory`/`pollSync` already set `pendingForeignReload` when they defer on `_inFlightWrites>0`; added `drainPendingForeignReload_()` to `gasCall`'s success/failure handlers so the deferred foreign reload fires immediately once the last in-flight write settles instead of waiting for an unrelated future write (fixed 2026-07-02).
 
-#### RISK · Index.html:7479 · Double-tap on inline "Confirm delete all" shows a spurious "Delete failed."
+#### RISK · Index.html:7479 · Double-tap on inline "Confirm delete all" shows a spurious "Delete failed."  ✅ FIXED (reconciled 2026-07-13)
 Delete-inventory story, qty>1 path. The inline `Confirm delete all` button
 created at 7487 is never disabled and is only torn down on the next
 `renderInventory()`. A fast double-tap re-enters `deleteSelectedInventory`: the
@@ -698,7 +734,7 @@ execution-trace + state-machine on the in-range write path):
   on both `!ok` and failure handlers, `loadInventory(true)` on success. Clean
   client-side; server-side partial-failure exposure noted as RISK below.
 
-#### BUG · Index.html:2915 · First-open identity sheet stuck on "Loading characters…" when apiGetCharacters fails or returns empty
+#### BUG · Index.html:2915 · First-open identity sheet stuck on "Loading characters…" when apiGetCharacters fails or returns empty  ✅ FIXED (reconciled 2026-07-13)
 
 Story: **Identity / first open** (cross-cutting — blocks every other story for a
 new user). Boot runs `loadCharacters()` (2908) and `loadMyIdentity()` (2942) in
@@ -883,7 +919,7 @@ state-machine on every in-range write path):
   Re-confirmed: `previousRows` restored on both failure branches, `detailButton.disabled`
   re-enabled on every outcome, `_inFlightWrites` balanced. Clean.
 
-#### BUG · Index.html:8045 · Async description load silently wipes user-selected holder
+#### BUG · Index.html:8045 · Async description load silently wipes user-selected holder  ✅ FIXED (reconciled 2026-07-13)
 Story: **Add library item**, at the select-then-fill step. `selectEquipmentResult` (7768)
 fires `loadSelectedDescription(true)` for any non-quick, non-scroll library item. On first
 selection of a given item (not yet in `itemCache`), this is an async `apiGetEquipmentItem`
@@ -898,7 +934,7 @@ selection of each library item. Fix: in `fillAddFormFromEquipment`, only blank `
 the initial fill (e.g. guard with the `includeDescription` flag or skip when the field
 already holds a value), or capture/restore the current holder around the description refresh.
 
-#### RISK · Index.html:8142 · Failed add overwrites an in-progress new selection
+#### RISK · Index.html:8142 · Failed add overwrites an in-progress new selection  ✅ FIXED (reconciled 2026-07-13)
 Story: **Add library/custom item**, failure-at-step + double-action race. `addInventoryItem`
 calls `clearAddForm()` synchronously (8127), setting `selectedEquipment = null`, then fires
 the async add. Because the form is cleared and focus moves to the search box, the user can
@@ -910,7 +946,7 @@ when the form is still idle, but here it overwrites live in-progress input. Sugg
 the restore on `selectedEquipment === null` (form untouched since the add) before clobbering,
 or surfacing the failed item via the status line without forcing it back into the form.
 
-#### RISK · Index.html:8122 · Optimistic `_opt_` row can be cached and resurface after a kill
+#### RISK · Index.html:8122 · Optimistic `_opt_` row can be cached and resurface after a kill  ✅ FIXED (reconciled 2026-07-13)
 Story: **Add item**, iOS background/navigate-away. The optimistic row is written to
 localStorage (`cacheInventoryRows`, 8122–8123) while `_inFlightWrites` is still 0 (it is not
 incremented until 8133), so the synthetic `_opt_<ts>` row lands in the persistent cache. On
@@ -984,7 +1020,7 @@ execution-trace + state-machine on every in-range write path):
   `lastResourceUndo['gold']`, `undoGoldPay` → `undoResourcePay('gold')`. **BROKEN on the
   member-send branch — `_inFlightWrites` double-decrement, see BUG below.**
 
-#### BUG · Index.html:6364 · `undoResourcePay` double-decrements `_inFlightWrites` on member-send undo failure
+#### BUG · Index.html:6364 · `undoResourcePay` double-decrements `_inFlightWrites` on member-send undo failure  ✅ FIXED (reconciled 2026-07-13)
 Story: **Undo last pay**, failure-at-step (member-send / "Pay → character" path). When a
 gold pay was a member send, `lastResourceUndo['gold'].creditItem` is set (armed at
 Index.html:5731), so `undoResourcePay` takes the `creditId` branch and calls
@@ -1011,7 +1047,7 @@ decrement), confirming the member-send branch's ordering is the defect. Fix: mov
 `_inFlightWrites--` / `resourcePayInFlight = false` below the `res.ok` check, mirroring the
 purchase branch — let `rollback()` own the cleanup on the failure path.
 
-#### RISK · Index.html:6568 · Description fetch caches `null` on `{ok:false}`, blanking the description for the session
+#### RISK · Index.html:6568 · Description fetch caches `null` on `{ok:false}`, blanking the description for the session  ✅ FIXED (reconciled 2026-07-13)
 Story: **View item details**, failure-at-step. In `openInventoryDescription`:
 ```
 const item = (res && res.ok && res.item) ? res.item : null;
@@ -1092,7 +1128,7 @@ execution-trace + state-machine on every in-range write path):
   `readOnly` + target. Clean (Timestamp-fallback ambiguity for ID-less entries is the
   known DEFERRED limitation, not re-reported).
 
-#### BUG · Index.html:5695 · `confirmPayWithReason` throws TDZ ReferenceError — Pay gold flow completely broken
+#### BUG · Index.html:5695 · `confirmPayWithReason` throws TDZ ReferenceError — Pay gold flow completely broken  ✅ FIXED (reconciled 2026-07-13)
 Story: **Pay gold**, step "tap Purchase / character to confirm". `confirmPayWithReason`
 references `isPartyScope` at line 5695 (building the optimistic gold deduct row:
 `'Holder': isPartyScope ? '' : goldSheetScope`) but `isPartyScope` is declared as a
@@ -1111,7 +1147,7 @@ but the pay itself never reaches the server. Breaks both sub-routes (Purchase vi
 Fix: move `const isPartyScope = goldSheetScope === 'party';` to the top of
 `confirmPayWithReason` (before line 5690), mirroring `receivedGold` (5031).
 
-#### IDEA · Index.html:5553 · Batch sell is non-optimistic — inconsistent with single-item sell
+#### IDEA · Index.html:5553 · Batch sell is non-optimistic — inconsistent with single-item sell  ✅ FIXED (reconciled 2026-07-13)
 Story: **Sell Items batch**. `confirmSellBatch` makes no optimistic mutation; it shows
 "Selling…", waits for the server, then calls `loadInventory(true)`. Sold rows stay
 visible until the round-trip completes (plus the 1.5 s auto-close), whereas the adjacent
@@ -1182,7 +1218,7 @@ execution-trace + state-machine on every in-range write path / component):
 - **Dice calculator** — client-only, no server calls, no inventory/notes state;
   confirmed not a write path (re-confirmed from run 48).
 
-#### RISK · Index.html:4174 · Failed note create pops the form sheet over an unrelated tab
+#### RISK · Index.html:4174 · Failed note create pops the form sheet over an unrelated tab  ✅ FIXED (reconciled 2026-07-13)
 Story: **Create note**, navigate-away step. `saveNoteForm`'s create branch closes
 the form, inserts an optimistic card, then fires `apiCreateNote`. If the user
 switches to the Inventory or Add tab while the create round-trips and the call then
@@ -1199,7 +1235,7 @@ and calls `setMainStatus`.
 
 ✅ RESOLUTION — `restoreNoteForm_` now checks `commandMode`: when the notes tab isn't active it stashes the failed content in `pendingFailedNote` (no cross-tab sheet pop) and `rehydratePendingNote_` (called from `setCommandMode`) restores it the next time the notes tab opens; verified in current code (fixed 2026-07-02).
 
-#### IDEA · Index.html:4261 · Notes action failures land in #mainStatus, off-screen on the notes tab
+#### IDEA · Index.html:4261 · Notes action failures land in #mainStatus, off-screen on the notes tab  ✅ FIXED (reconciled 2026-07-13)
 Story: **Pin note / Edit note** failure feedback. Failure feedback for notes actions
 is inconsistent: `toggleNotePin` (4261/4269) and the edit branch of `saveNoteForm`
 (4151/4160) route errors to `setMainStatus`, but `#mainStatus` lives at the very top
@@ -1213,7 +1249,7 @@ three sibling actions give comparable, in-view feedback.
 
 ✅ RESOLUTION — Added a notes-tab-local `#notesStatus` line inside `#notesSection` (with `:empty{display:none}` CSS) and a `setNotesStatus` helper; `toggleNotePin` and the edit branch of `saveNoteForm` now route their failure messages there instead of the off-screen `#mainStatus` (fixed 2026-07-02).
 
-#### IDEA · Index.html:3851 · Dashboard Gold/Delerium totals are scope-filtered but the cards open party-pool sheets
+#### IDEA · Index.html:3851 · Dashboard Gold/Delerium totals are scope-filtered but the cards open party-pool sheets  ✅ FIXED (reconciled 2026-07-13)
 Story: **Quick-adjust currency/delerium**, entry step. `renderInventoryDashboard`
 (3830) computes `totals.gold`/`totals.delerium` from the already scope-filtered
 `rows` it is handed by `renderInventory`. In a character scope, gold/delerium rows
@@ -1273,7 +1309,7 @@ execution-trace + state-machine on every in-range component):
 - **Dice calculator** — fully in range (markup 2686–2733, CSS 1818–1927); client-only,
   no server calls, no inventory state — confirmed not a write path.
 
-#### RISK · Index.html:2915 · loadCharacters failure permanently bricks the first-open identity picker
+#### RISK · Index.html:2915 · loadCharacters failure permanently bricks the first-open identity picker  ✅ FIXED (reconciled 2026-07-13)
 `loadCharacters()` is called exactly once at boot (8340) and its failure handler
 (2915–2917) only does `console.error` — no retry, no user-visible error. The
 identity picker (`showIdentitySheet`, 4371) renders its character cards from
@@ -1291,7 +1327,7 @@ fix: give `loadCharacters`'s failure handler a user-visible error + retry afford
 (e.g. render a "Couldn't load characters — Tap to retry" button into
 `identitySheetBody` when the sheet is active), or auto-retry with backoff.
 
-#### RISK · Index.html:2921 · cacheInventoryRows in-flight guard is order-dependent; receiveDelerium persists an optimistic `_pending` ledger entry
+#### RISK · Index.html:2921 · cacheInventoryRows in-flight guard is order-dependent; receiveDelerium persists an optimistic `_pending` ledger entry  ✅ FIXED (reconciled 2026-07-13)
 The guard `if (_inFlightWrites > 0) return;` (2921) is designed to keep optimistic,
 unconfirmed state out of the localStorage cache so a mid-flight reload paints the
 last *confirmed* state. Its effectiveness depends entirely on call ordering, and
@@ -1349,7 +1385,7 @@ execution-trace + state-machine on every CSS-driven UI state):
 - **Sell Items batch** (treasurer) — `sellBatchConfirmBtn` initial/idle state vs
   the disabled-spinner CSS. One bug below.
 
-#### RISK · Index.html:5546 · Sell-batch confirm shows an infinite spinner while idle
+#### RISK · Index.html:5546 · Sell-batch confirm shows an infinite spinner while idle  ✅ FIXED (reconciled 2026-07-13)
 The Sell Items batch confirm button is declared `<button id="sellBatchConfirmBtn"
 class="success" … disabled>Select items to sell</button>` (5546–5547) and
 `updateSellBatchCount` (5436) only ever toggles `btn.disabled` / `btn.textContent`
@@ -1427,7 +1463,7 @@ execution-trace + state-machine on every write path):
 - **Combine duplicate** (`apiCombineInventoryItems` tail 3501–3543) — re-confirmed
   clean: audit written, `bumpSync_` fired, lock released in `finally` on all paths.
 
-#### BUG · Index.html:7541 · Swipe-remove-one of a gold/delerium card silently drops the server's ADJUST ledger entry
+#### BUG · Index.html:7541 · Swipe-remove-one of a gold/delerium card silently drops the server's ADJUST ledger entry  ✅ FIXED (reconciled 2026-07-13)
 Story: *Quick-adjust currency/delerium* + *Delete inventory item* (swipe). Since the
 run-22 fix, `apiAdjustInventory` writes a RESOURCE_LEDGER `ADJUST` row and returns a
 sanitized `ledgerEntry` whenever the adjusted row is `currency` or `delerium crystal`
@@ -1444,7 +1480,7 @@ is left unexplained in the visible history). Fix: in the 7530 success handler, m
 
 ✅ RESOLUTION — The swipe-remove success handler (`onDeleteSuccess`) now consumes `res.ledgerEntry` — prepending it to `inventoryResourceLedger` (capped at 60) and re-caching via `cacheInventoryRows` — so a gold/delerium swipe-decrement's server ADJUST entry lands in the ledger immediately; verified in current code (fixed 2026-07-02).
 
-#### RISK · Code.js:3636 · Delerium quick-adjust size change merges two crystal sizes onto one row
+#### RISK · Code.js:3636 · Delerium quick-adjust size change merges two crystal sizes onto one row  ⚠️ PARTIAL (reconciled 2026-07-13)
 Story: *Quick-adjust currency/delerium*, delerium branch. When the quick sheet's size
 dropdown differs from the row's current size, `apiAdjustInventory` (3636–3639) and
 `apiSetItemQuantity` (3746–3751) rename the row to `Delerium <NewSize>` **while keeping
@@ -1540,7 +1576,7 @@ execution-trace + state-machine on every write path):
   on every outcome, `refreshDeleriumStateFromInventory_` recomputes counters so
   a double-tap computes 0 qty and bails; 0 gp inline confirm path intact.
 
-#### BUG · Index.html:5695 · `confirmPayWithReason` references `const isPartyScope` before its declaration (TDZ) — Pay gold flow is dead
+#### BUG · Index.html:5695 · `confirmPayWithReason` references `const isPartyScope` before its declaration (TDZ) — Pay gold flow is dead  ✅ FIXED (reconciled 2026-07-13)
 
 Story: **Pay gold** (Gold tab → Pay → amount + note → route to Purchase or
 character → confirm). `confirmPayWithReason(reason)` (Index 5668) builds the
