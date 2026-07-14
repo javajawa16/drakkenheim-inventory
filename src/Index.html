@@ -4115,12 +4115,9 @@
       const isSwiped = swipedInventoryId && swipedInventoryId === row['Inventory ID'];
       const swipeOpenPx = getSwipeOpenPx();
 
-      const metaParts = [holder].filter(Boolean);
-      if (row._rollupCount > 1) {
-        const adders = (row._rollupAdders || []).map(n => shortCharacterLabel(n));
-        metaParts.push(adders.length ? `added by ${adders.join(', ')}` : `${row._rollupCount} additions`);
-      }
-      const meta = metaParts.join(' · ');
+      // List rows show only the holder; rollup/adder details belong in the
+      // description sheet, not the list.
+      const meta = holder;
       const offsetStyle = isSwiped ? ` style="transform:translateX(-${swipeOpenPx}px)"` : '';
 
       return `
