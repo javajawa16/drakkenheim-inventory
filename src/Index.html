@@ -273,7 +273,7 @@
       margin-bottom: 14px;
       padding: 3px;
       background: rgba(9,14,28,.82);
-      border: 1px solid rgba(94,118,164,.4);
+      border: 1px solid transparent;
       border-radius: 999px;
       overflow: visible;
     }
@@ -286,7 +286,7 @@
       margin-top: 8px;
       padding: 3px;
       background: rgba(9,14,28,.82);
-      border: 1px solid rgba(94,118,164,.4);
+      border: 1px solid transparent;
       border-radius: 999px;
       overflow: visible;
     }
@@ -457,11 +457,16 @@
       width: 100%;
       min-height: var(--input-height);
       padding: 14px 15px;
-      border: 1px solid var(--border-strong);
+      /* Tonal separation instead of outlines: inputs read as darker insets
+         against the card surface; a border appears only on focus. */
+      border: 1px solid transparent;
       border-radius: var(--radius-control);
       background: rgba(9,14,28,.94);
       color: var(--text);
       font-size: 18px; line-height: 1.35;
+    }
+    input:focus, select:focus, textarea:focus {
+      border-color: rgba(168,130,255,.5);
     }
     select {
       -webkit-appearance: none;
@@ -574,8 +579,8 @@
       transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
       /* transform controlled by JS; don't add a transition here so drag feels immediate */
       min-height: 0; padding: 10px 12px;
-      background: linear-gradient(180deg, rgba(14,21,36,.99), rgba(17,25,44,.99));
-      border: 1px solid rgba(70,86,119,.8);
+      background: linear-gradient(180deg, rgba(24,34,56,.96), rgba(20,29,49,.96));
+      border: 1px solid transparent;
       border-radius: 18px;
     }
 
@@ -625,7 +630,7 @@
 
     .dashboard-stat {
       padding: 14px;
-      border: 1px solid rgba(94,118,164,.48);
+      border: 1px solid transparent;
       border-radius: 18px;
       background: linear-gradient(180deg, rgba(35,49,79,.92), rgba(17,25,44,.98));
       cursor: pointer;
@@ -706,9 +711,9 @@
       align-items: baseline;
       min-height: 34px;
       padding: 7px 9px;
-      border: 1px solid rgba(70,86,119,.44);
+      border: 1px solid transparent;
       border-radius: 12px;
-      background: rgba(9,14,28,.72);
+      background: rgba(24,34,56,.6);
       color: var(--text-secondary);
       font-size: 14px;
       cursor: pointer;
@@ -811,8 +816,8 @@
       flex: 0 0 auto;
       min-width: 30px; height: 30px; padding: 0 7px;
       display: inline-flex; align-items: center; justify-content: center;
-      background: rgba(70,86,119,.30);
-      border: 1px solid rgba(94,118,164,.42);
+      background: rgba(70,86,119,.34);
+      border: 1px solid transparent;
       border-radius: 9px;
       font-size: 14px; font-weight: 700;
       color: var(--text-secondary);
@@ -908,9 +913,9 @@
     .ledger-item {
       min-height: 58px;
       padding: 12px 14px;
-      border: 1px solid rgba(70,86,119,.54);
+      border: 1px solid transparent;
       border-radius: 14px;
-      background: rgba(9,14,28,.9);
+      background: rgba(21,30,50,.92);
       text-align: left;
       justify-content: flex-start;
     }
@@ -945,7 +950,7 @@
                   background 160ms ease, box-shadow 160ms ease;
       min-height: 72px; padding: 14px;
       background: linear-gradient(180deg, rgba(19,29,50,.99), rgba(22,33,55,.99));
-      border: 1px solid rgba(70,86,119,.8);
+      border: 1px solid transparent;
       border-radius: 18px;
     }
 
@@ -981,9 +986,9 @@
     .pill {
       display: inline-flex; align-items: center;
       min-height: 30px; padding: 6px 10px;
-      border: 1px solid rgba(94,118,164,.55);
+      border: 1px solid transparent;
       border-radius: var(--radius-pill);
-      background: rgba(8,13,26,.92);
+      background: rgba(70,86,119,.26);
       color: var(--text-secondary);
       font-size: 14px; line-height: 1; white-space: nowrap;
     }
@@ -1293,7 +1298,7 @@
       overflow: hidden;
       border-radius: 16px;
       background: rgb(24, 36, 58);
-      border: 1px solid rgba(92,115,158,.32);
+      border: 1px solid transparent;
       padding: 12px 14px;
       max-width: min(100%, 720px);
     }
