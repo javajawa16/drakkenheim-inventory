@@ -579,7 +579,9 @@
       transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
       /* transform controlled by JS; don't add a transition here so drag feels immediate */
       min-height: 0; padding: 10px 12px;
-      background: linear-gradient(180deg, rgba(24,34,56,.96), rgba(20,29,49,.96));
+      /* Fully opaque: the swipe Delete button sits behind this card and
+         ghosts through any translucency. */
+      background: linear-gradient(180deg, rgb(24,34,56), rgb(20,29,49));
       border: 1px solid transparent;
       border-radius: 18px;
     }
@@ -1702,6 +1704,14 @@
       background: linear-gradient(135deg, #9333ea, #a855f7 58%, #c084fc);
       color: #fff;
       box-shadow: 0 8px 24px rgba(168,85,247,.2);
+    }
+
+    /* Restore the amber identity lost to the .bottom-nav button override
+       when the sell band moved into the nav. */
+    .bottom-nav button.sell-batch-btn {
+      background: rgba(120, 78, 8, 0.85);
+      border-color: rgba(200, 138, 28, 0.48);
+      color: #d4a64a;
     }
 
     .notes-shortcut .group-toggle {
