@@ -3596,11 +3596,9 @@
     }
 
     function setMainStatus(html) {
-      const el = document.getElementById('mainStatus');
-      if (el) el.innerHTML = html || '';
-      // Mirror every non-empty message to the snackbar: #mainStatus only
-      // exists on the inventory tab, but feedback should reach the user on
-      // whatever tab they're on.
+      // The snackbar is the single transient-feedback surface; the old inline
+      // #mainStatus line stays empty (and hidden via :empty) so messages
+      // aren't double-reported on the inventory tab.
       if (html) showSnackbar(html, /class="error"/.test(html) ? 'error' : 'success');
     }
 
