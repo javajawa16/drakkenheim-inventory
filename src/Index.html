@@ -2034,13 +2034,13 @@
     html.is-phone #inventoryList .item-title { font-size: calc(16px * var(--phone-scale, 2.5)); line-height: 1.15; }
     html.is-phone #inventoryList .item-meta { font-size: calc(12px * var(--phone-scale, 2.5)); margin-top: calc(1px * var(--phone-scale, 2.5)); line-height: 1.15; }
     html.is-phone #inventoryList .inventory-card {
-      padding: calc(4px * var(--phone-scale, 2.5)) calc(7px * var(--phone-scale, 2.5));
+      padding: calc(3px * var(--phone-scale, 2.5)) calc(7px * var(--phone-scale, 2.5));
       border-radius: calc(6px * var(--phone-scale, 2.5));
     }
     html.is-phone .item-qty-badge {
-      min-width: calc(28px * var(--phone-scale, 2.5));
-      height: calc(28px * var(--phone-scale, 2.5));
-      font-size: calc(13px * var(--phone-scale, 2.5));
+      min-width: calc(24px * var(--phone-scale, 2.5));
+      height: calc(24px * var(--phone-scale, 2.5));
+      font-size: calc(12px * var(--phone-scale, 2.5));
       border-radius: calc(5px * var(--phone-scale, 2.5));
     }
 
@@ -4112,11 +4112,10 @@
       const qty = escapeHtml(String(row['Qty'] || '0'));
       const item = escapeHtml(row['Item'] || '');
       const holder = escapeHtml(row['Holder'] || '');
-      const rarity = escapeHtml(row['Rarity'] || '');
       const isSwiped = swipedInventoryId && swipedInventoryId === row['Inventory ID'];
       const swipeOpenPx = getSwipeOpenPx();
 
-      const metaParts = [rarity, holder].filter(Boolean);
+      const metaParts = [holder].filter(Boolean);
       if (row._rollupCount > 1) {
         const adders = (row._rollupAdders || []).map(n => shortCharacterLabel(n));
         metaParts.push(adders.length ? `added by ${adders.join(', ')}` : `${row._rollupCount} additions`);
