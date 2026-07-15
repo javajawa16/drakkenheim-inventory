@@ -1658,8 +1658,13 @@ function publicApiError_(functionName, err, fallback) {
 function publicValidationError_(err) {
   const message = safeText_(err && err.message);
 
+  // Allowlist of user-facing validation/domain messages that are safe to surface
+  // verbatim. Prefixes are anchored to specific domain phrases (not bare words
+  // like "Cannot") so internal engine errors — e.g. "Cannot read properties of
+  // undefined" — still collapse to the generic "Request failed." below.
   if (
     /^(Access denied|Admin access denied|Treasurer access required|Invalid|Quantity|Value|Selected library item|Inventory item not found|Item not found|Not a quick-edit|Unsupported|Size)/.test(message) ||
+    /^(Cannot remove more than|Amount is too small|DM is not a party member|Only matching items|Source and target must be different|No delerium|No characters found|Could not identify)/.test(message) ||
     /too long\.$/.test(message)
   ) {
     return message;

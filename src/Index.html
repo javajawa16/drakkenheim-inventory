@@ -4600,14 +4600,14 @@
           _inFlightNoteWrites--;
           if (!res || !res.ok) {
             revert();
-            setMainStatus(`<span class="error">${label} failed: ${escapeHtml((res && res.error) || 'Unknown error')}</span>`);
+            setNotesStatus(`<span class="error">${label} failed: ${escapeHtml((res && res.error) || 'Unknown error')}</span>`);
           }
         })
         .withFailureHandler(() => {
           _notesActionInFlight.delete(noteId);
           _inFlightNoteWrites--;
           revert();
-          setMainStatus(`<span class="error">${label} failed — please try again.</span>`);
+          setNotesStatus(`<span class="error">${label} failed — please try again.</span>`);
         })
         .apiArchiveNote({ noteId, archived, _syncClientId: syncClientId });
     }
@@ -4738,7 +4738,11 @@
           if (!myCharacterName) showIdentitySheet();
         })
         .withFailureHandler(() => {
-          myCharacterName = null;
+          // Transient failure (network blip, GAS webview suspend): if a cached
+          // identity is already applied, keep it rather than wiping the user back
+          // to the picker. Only fall through to the picker when we have no identity
+          // — mirrors the success handler's `if (!myCharacterName) showIdentitySheet()`.
+          if (myCharacterName) return;
           myGoogleEmail = '';
           isTreasurer = false;
           isDMUser    = false;
@@ -5484,6 +5488,7 @@
             if (noteInput)   noteInput.value   = savedGoldNote;
             if (status) status.innerHTML = `<span class="error">${escapeHtml((res && res.error) || 'Failed.')}</span>`;
             renderGoldSheetBody();
+            renderInventory();
             return;
           }
           (res.items || []).forEach(item => primeInventoryCacheAfterAdd(item));
@@ -7908,6 +7913,15 @@
       document.getElementById('sheetEditFactionRelevance').value     = row['Faction Relevance'] || '';
       document.getElementById('sheetEditNotes').value                = row['Notes'] || '';
       document.getElementById('sheetEditStatusMessage').textContent  = '';
+
+      // Every editor open starts with an editable qty; selectInventoryItem re-locks
+      // it (readOnly = true) only for rolled-up items. Without this reset the lock
+      // set for a rolled-up item would latch onto the shared #editQty/#sheetEditQty
+      // inputs and silently disable the qty field for every later single-item edit.
+      ['editQty', 'sheetEditQty'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.readOnly = false;
+      });
     }
 
     function setInventoryEditorOpen(isOpen) {
